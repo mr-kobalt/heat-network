@@ -1,0 +1,4 @@
+logging:
+  level:
+    root: WARN
+    ru.lct.heating: INFO

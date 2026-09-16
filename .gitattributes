@@ -1,0 +1,16 @@
+# Normalize all text files to LF on commit.
+* text=auto eol=lf
+
+# GeoJSON datasets can be large; do not apply text normalization / diffs.
+*.geojson -text -diff
+*.pdf -text -diff
+*.docx -text -diff
+
+# Maven wrapper
+mvnw text eol=lf
+*.bat text eol=crlf
+
+# Compiled / binary artifacts
+*.jar binary
+*.png binary
+*.jpg binary

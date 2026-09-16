@@ -1,0 +1,12 @@
+target/
+.git/
+.devenv/
+.direnv/
+.idea/
+*.iml
+*.log
+docs/
+source/
+*.geojson
+*.pdf
+*.docx
