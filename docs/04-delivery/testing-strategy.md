@@ -55,7 +55,7 @@
 
 - Имена тестов: `methodUnderTest_condition_expected`.
 - Тестовые данные — маленькие рукотворные GeoJSON в `src/test/resources`.
-- Интеграционные тесты с БД — через Testcontainers (`postgis/postgis`).
+- Интеграционные тесты с БД — через Testcontainers (`docker.io/postgis/postgis`).
 - Эталонные наборы не коммитить, если они большие; использовать усечённые
   фрагменты и/или внешнее хранилище.
 - `mvn test` должен проходить без внешней БД (веб/юнит-срезы).
@@ -67,9 +67,24 @@
 `reconstruction`, `geometry` и конфигурации правил. Для API/склейки —
 функциональные сценарии.
 
-## 7. История изменений
+## 7. Реализовано в M1
+
+- Unit-тесты: `DiameterCatalogTest`, `CostModelTest`, `CrsTransformerTest`,
+  `IngestServiceTest`, `NetworkGraphBuilderTest`, `VisibilityGraphRouterTest`.
+- Сквозной `CalculationPipelineTest` на `source/data_example.geojson`:
+  конвейер отдаёт валидный GeoJSON и связную (частичную) сеть.
+- Веб-слой: `InfoControllerTest` (`@WebMvcTest`).
+- Фронтенд: `types.test.ts`, `paint.test.ts` и `style-validation.test.ts`
+  (проверка корректности paint-выражений слоёв по официальному
+  `@maplibre/maplibre-gl-style-spec`).
+- Проверено вручную через API: upload → run (async) → result на PostgreSQL.
+
+## 8. История изменений
 
 | Дата | Изменение | Автор |
 |------|-----------|-------|
 | 2026-09-16 | Первоначальная версия | команда |
 | 2026-09-16 | Добавлены проверки по протоколу встречи: +1 номенклатура Ду, нестандартные углы, наложение коэффициентов, округление, точка подключения, камеры при ветвлении, невалидная геометрия | команда |
+| 2026-09-19 | Добавлен раздел о реализованных в M1 тестах и ручной проверке API | команда |
+| 2026-09-19 | Исправлен баг отображения слоя новой сети; добавлена валидация стиля по style-spec MapLibre | команда |
+| 2026-09-16 | Уточнён FQIN образа (docker.io/postgis/postgis) | команда |

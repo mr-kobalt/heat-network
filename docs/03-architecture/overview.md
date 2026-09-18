@@ -28,7 +28,8 @@
 | Контейнер | Технология | Ответственность |
 |-----------|-----------|-----------------|
 | `app` | Spring Boot 2.6.3, Java 11 | REST API, конвейер расчёта, формирование GeoJSON |
-| `db` | PostgreSQL + PostGIS | Хранение расчётов, пространственные индексы и операции |
+| `db` | PostgreSQL + PostGIS | Хранение метаданных датасетов/расчётов |
+| `frontend` (опц.) | React + MapLibre (nginx) | Визуализация результата, профиль compose `frontend` (ADR-0013) |
 | Swagger UI | springdoc-openapi-ui 1.7.0 | Документация API |
 
 Сборка/запуск — docker-compose 1.29.2 (`docker-compose.yml`).
@@ -53,12 +54,13 @@ ingest ──▶ geometry ──▶ graph ──▶ routing ──▶ hydraulics
 | `ru.lct.heating.graph` | Граф существующей сети по `upstream_object_id` |
 | `ru.lct.heating.routing` | Кластеризация ОКС, врезки, поиск маршрутов, спецпроходы |
 | `ru.lct.heating.hydraulics` | Расходы, подбор Ду, предельные длины |
-| `ru.lct.heating.reconstruction` | Распространение расхода, реконструкция |
+| `ru.lct.heating.reconstruction` | Распространение расхода, реконструкция (M2) |
 | `ru.lct.heating.cost` | Единая модель стоимости и коэффициенты |
 | `ru.lct.heating.variants` | Формирование и ранжирование вариантов |
 | `ru.lct.heating.output` | Формирование выходного GeoJSON |
 | `ru.lct.heating.persistence` | Доступ к данным (JPA/PostGIS) |
 | `ru.lct.heating.domain` | Доменные модели |
+| `ru.lct.heating.calculation` | Оркестрация конвейера и асинхронные запуски |
 | `ru.lct.heating.config` | Конфигурация, OpenAPI, профили |
 
 ## 4. Поток данных
@@ -111,3 +113,4 @@ ingest ──▶ geometry ──▶ graph ──▶ routing ──▶ hydraulics
 |------|-----------|-------|
 | 2026-09-16 | Первоначальная версия | команда |
 | 2026-09-16 | Обновлено по протоколу встречи 16.09.2026: headless без UI, офлайн, единственный экземпляр, два этапа оценки | команда |
+| 2026-09-19 | M1: добавлены контейнер `frontend` (опционально) и пакет `calculation`; уточнена роль БД (метаданные) | команда |

@@ -14,9 +14,12 @@
 и расчёта, а не визуализация (см. [протокол встречи](source/) и
 [docs/index.md](docs/index.md)).
 
-> Текущий статус: **фундамент проекта**. Есть каркас приложения, среда
-> разработки и документация; бизнес-логика впереди (см.
-> [дорожную карту](docs/04-delivery/roadmap.md)).
+> Текущий статус: **M1 — рабочий прототип**. Реализованы потоковый ввод
+> GeoJSON, диагностика, граф существующей сети, конфигурируемые ограничения,
+> частичная маршрутизация, подбор Ду и стоимость, выгрузка GeoJSON, REST API
+> и PostgreSQL. Добавлен опциональный фронтенд-визуализатор. Дальше — M2
+> (совместные стволы, реконструкция, варианты). См.
+> [дорожную карту](docs/04-delivery/roadmap.md).
 
 ## Документация
 
@@ -34,12 +37,12 @@ springdoc-openapi-ui 1.7.0 · docker-compose · JTS.
 
 ## Быстрый старт
 
-Требуется [devenv](https://devenv.sh) и Nix.
+Требуется [devenv](https://devenv.sh), Nix и docker/podman (для БД).
 
 ```bash
-devenv up            # поднять PostgreSQL (в отдельном терминале)
-devenv shell         # оболочка с Java 11 и Maven
+devenv shell         # оболочка с Java 11, Maven, Node/pnpm
 
+db-up                # PostgreSQL + PostGIS из docker-compose
 build                # сборка
 test                 # тесты
 run                  # запуск сервиса (http://localhost:8080)
@@ -52,7 +55,7 @@ verify               # полная проверка
 devenv test
 ```
 
-Запуск через Docker:
+Запуск через Docker (без локального тулчейна):
 
 ```bash
 docker compose up --build
@@ -63,12 +66,44 @@ docker compose up --build
 - Health: http://localhost:8080/actuator/health
 - Info: http://localhost:8080/api/v1/info
 
+### Локальный запуск приложения
+
+БД поднимается только через docker-compose (ADR-0017) на TCP `localhost:5432`
+(БД/пользователь `heating`); `devenv` БД не запускает.
+
+```bash
+db-up                       # docker compose up -d db
+run                         # mvn spring-boot:run из оболочки devenv
+```
+
+## Фронтенд-визуализатор (опционально)
+
+Отдельное SPA для проверки результата: карта, параметры объектов, сравнение
+вариантов. Не входит в оцениваемую поставку (ADR-0013).
+
+```bash
+pnpm --dir frontend install
+pnpm --dir frontend dev      # http://localhost:5173 (proxy /api → :8080)
+pnpm --dir frontend build
+```
+
+Через Docker:
+
+```bash
+docker compose --profile frontend up --build   # визуализатор на :8081
+```
+
+Визуализатор умеет открыть GeoJSON результата напрямую (без backend) и
+запустить расчёт через API. Офлайн-подложка PMTiles — см.
+`frontend/public/basemap/README.md`.
+
 ## Структура репозитория
 
 ```
 src/main/java/ru/lct/heating/   # код (пакеты по фичам, см. overview.md)
-src/main/resources/             # application*.yml
+src/main/resources/             # application*.yml, schema.sql
 src/test/                       # тесты
+frontend/                       # опциональный визуализатор (React/MapLibre)
 docs/                           # проектная документация
 devenv.nix                      # среда разработки
 pom.xml                         # сборка Maven
@@ -91,3 +126,5 @@ Dockerfile / docker-compose.yml # контейнеризация
 |------|-----------|-------|
 | 2026-09-16 | Первоначальная версия | команда |
 | 2026-09-16 | Добавлен протокол встречи в исходные материалы | команда |
+| 2026-09-19 | Обновлён статус M1, добавлены разделы запуска приложения и фронтенд-визуализатора | команда |
+| 2026-09-19 | Единая БД через docker-compose; devenv без Postgres (ADR-0017) | команда |
