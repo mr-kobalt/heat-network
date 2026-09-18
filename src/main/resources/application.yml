@@ -3,9 +3,11 @@ spring:
     name: heating-routing-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${PGHOST:localhost}:${PGPORT:5432}/${PGDATABASE:heating}}
-    username: ${SPRING_DATASOURCE_USERNAME:${PGUSER:postgres}}
-    password: ${SPRING_DATASOURCE_PASSWORD:${PGPASSWORD:postgres}}
+    # Единая БД — контейнер `db` из docker-compose (ADR-0017), TCP localhost:5432.
+    # Переопределяется через SPRING_DATASOURCE_* / HEATING_DB_*.
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${HEATING_DB_HOST:localhost}:${HEATING_DB_PORT:5432}/${HEATING_DB_NAME:heating}}
+    username: ${SPRING_DATASOURCE_USERNAME:heating}
+    password: ${SPRING_DATASOURCE_PASSWORD:heating}
 
   jpa:
     hibernate:
@@ -17,9 +19,14 @@ spring:
           lob:
             non_contextual_creation: true
 
+  sql:
+    init:
+      mode: always
+
   servlet:
     multipart:
-      # Конкурсное требование: загрузка до 3 ГБ.
+      # Потоковая обработка: всегда спуливать на диск, не держать в ОЗУ (NFR-08).
+      file-size-threshold: 0
       max-file-size: 3GB
       max-request-size: 3GB
 
@@ -40,6 +47,60 @@ management:
     web:
       exposure:
         include: health,info
+
+heating:
+  app:
+    storage-root: ${HEATING_STORAGE_ROOT:./data}
+    worker-threads: ${HEATING_WORKER_THREADS:1}
+    default-diameter-mm: 400
+    bend-surcharge: 1.5
+    allowed-origins:
+      - http://localhost:5173
+      - http://localhost:8081
+  # ТП 4.1: Ду, пропускная способность, предельная длина, стоимость нового
+  # строительства и реконструкции (руб./м).
+  diameters:
+    - {dn: 50,   capacity-tph: 3.5,      max-length-m: 181,   new-cost-per-m: 74023,  reconstruction-cost-per-m: 96180}
+    - {dn: 65,   capacity-tph: 8.3,      max-length-m: 245,   new-cost-per-m: 78631,  reconstruction-cost-per-m: 109989}
+    - {dn: 80,   capacity-tph: 13.2,     max-length-m: 327,   new-cost-per-m: 83530,  reconstruction-cost-per-m: 117582}
+    - {dn: 100,  capacity-tph: 22.3,     max-length-m: 419,   new-cost-per-m: 89748,  reconstruction-cost-per-m: 133694}
+    - {dn: 125,  capacity-tph: 40.2,     max-length-m: 554,   new-cost-per-m: 97275,  reconstruction-cost-per-m: 148030}
+    - {dn: 150,  capacity-tph: 65.1,     max-length-m: 696,   new-cost-per-m: 105507, reconstruction-cost-per-m: 152295}
+    - {dn: 200,  capacity-tph: 152.3,    max-length-m: 1042,  new-cost-per-m: 120275, reconstruction-cost-per-m: 181766}
+    - {dn: 250,  capacity-tph: 274.9,    max-length-m: 1379,  new-cost-per-m: 135323, reconstruction-cost-per-m: 202030}
+    - {dn: 300,  capacity-tph: 437.4,    max-length-m: 1718,  new-cost-per-m: 150022, reconstruction-cost-per-m: 228707}
+    - {dn: 400,  capacity-tph: 943.1,    max-length-m: 2477,  new-cost-per-m: 190299, reconstruction-cost-per-m: 271317}
+    - {dn: 500,  capacity-tph: 1663.4,   max-length-m: 3245,  new-cost-per-m: 224137, reconstruction-cost-per-m: 333884}
+    - {dn: 600,  capacity-tph: 2627.7,   max-length-m: 4037,  new-cost-per-m: 264790, reconstruction-cost-per-m: 372703}
+    - {dn: 700,  capacity-tph: 3735.1,   max-length-m: 4775,  new-cost-per-m: 324298, reconstruction-cost-per-m: 439571}
+    - {dn: 800,  capacity-tph: 5296.8,   max-length-m: 5644,  new-cost-per-m: 325996, reconstruction-cost-per-m: 489918}
+    - {dn: 900,  capacity-tph: 7165.0,   max-length-m: 6518,  new-cost-per-m: 327693, reconstruction-cost-per-m: 553607}
+    - {dn: 1000, capacity-tph: 9391.8,   max-length-m: 7419,  new-cost-per-m: 418777, reconstruction-cost-per-m: 606679}
+    - {dn: 1200, capacity-tph: 15012.8,  max-length-m: 9288,  new-cost-per-m: 428074, reconstruction-cost-per-m: 825692}
+    - {dn: 1400, capacity-tph: 22501.9,  max-length-m: 11276, new-cost-per-m: 683417, reconstruction-cost-per-m: 978584}
+  # ТП 5.1 + протокол: конфигурируемые правила ограничений (ADR-0009).
+  restrictions:
+    fallback:
+      mode: PROHIBITED
+      min-distance-m: 1.0
+    rules:
+      oks:
+        mode: PROHIBITED
+        min-distance-m: 9.0
+        distance-bands:
+          - {max-dn: 499, distance-m: 5.0}
+          - {max-dn: 800, distance-m: 7.0}
+          - {max-dn: 100000, distance-m: 9.0}
+      park: {mode: PROHIBITED, min-distance-m: 1.0}
+      social_area: {mode: PROHIBITED, min-distance-m: 1.0}
+      prohibited_site: {mode: PROHIBITED, min-distance-m: 1.0}
+      water: {mode: PROHIBITED, min-distance-m: 1.0}
+      road: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.60}
+      tram_tracks: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75}
+      railway: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75}
+      gas_pipeline: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.25}
+      power_cable: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.15}
+      heat_network: {mode: SPECIAL, min-distance-m: 1.0, k-special: 1.05}
 
 logging:
   level:
