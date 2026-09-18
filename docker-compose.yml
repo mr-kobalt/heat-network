@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgis/postgis:16-3.4
+    image: docker.io/postgis/postgis:16-3.4
     environment:
       POSTGRES_DB: heating
       POSTGRES_USER: heating
@@ -26,11 +26,29 @@ services:
       SPRING_PROFILES_ACTIVE: docker
     ports:
       - "8080:8080"
+    volumes:
+      - appdata:/app/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 15s
       timeout: 5s
       retries: 10
 
+  # Опциональный визуализатор (ADR-0013). По умолчанию не поднимается:
+  # docker compose --profile frontend up
+  frontend:
+    profiles: ["frontend"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "8081:80"
+
 volumes:
   pgdata:
+  appdata:

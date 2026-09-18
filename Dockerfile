@@ -1,5 +1,5 @@
 # Многоступенчатая сборка. Java 11 зафиксирована требованиями конкурса.
-FROM maven:3.8.6-openjdk-11 AS build
+FROM docker.io/library/maven:3.8.6-openjdk-11 AS build
 WORKDIR /workspace
 
 # Сначала зависимости — лучше кэшируется.
@@ -9,7 +9,7 @@ RUN mvn -B -q dependency:go-offline
 COPY src ./src
 RUN mvn -B -q -DskipTests package
 
-FROM eclipse-temurin:11-jre
+FROM docker.io/library/eclipse-temurin:11-jre
 WORKDIR /app
 COPY --from=build /workspace/target/*.jar app.jar
 
