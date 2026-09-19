@@ -1,7 +1,17 @@
 import type { FeatureCollection } from '../types';
 import { parseFeatureCollection } from '../types';
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
+/**
+ * Базовый адрес API. Пути ниже уже содержат префикс /api, поэтому если
+ * VITE_API_BASE_URL задан с суффиксом /api (частая ошибка), его убираем,
+ * чтобы не получить /api/api/...
+ */
+function resolveBaseUrl(): string {
+  const raw = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(/\/+$/, '');
+  return raw.endsWith('/api') ? raw.slice(0, -4) : raw;
+}
+
+const baseUrl = resolveBaseUrl();
 
 export interface DatasetResponse {
   id: string;

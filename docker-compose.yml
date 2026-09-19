@@ -42,7 +42,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: /api
+        # Базовый URL API — без суффикса /api (пути клиента уже включают /api,
+        # nginx проксирует /api -> app:8080).
+        VITE_API_BASE_URL: ""
     depends_on:
       app:
         condition: service_started
