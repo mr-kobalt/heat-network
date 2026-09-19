@@ -36,6 +36,22 @@
     test.exec = "mvn -q test";
     verify.exec = "mvn -q verify";
     run.exec = "mvn -q spring-boot:run";
+    # Полный dev-режим: БД (docker-compose) + приложение + фронтенд-визуализатор.
+    # Ctrl+C останавливает приложение и фронтенд; контейнер БД остаётся (db-down).
+    dev.exec = ''
+      set -m
+      docker compose up -d db
+      until docker compose exec -T db pg_isready -U heating >/dev/null 2>&1; do
+        sleep 1
+      done
+      [ -d frontend/node_modules ] || pnpm --dir frontend install
+      mvn -q spring-boot:run &
+      APP_PID=$!
+      pnpm --dir frontend dev &
+      FE_PID=$!
+      trap 'kill $APP_PID $FE_PID 2>/dev/null' EXIT INT TERM
+      wait -n
+    '';
     fe-dev.exec = "pnpm --dir frontend dev";
     fe-build.exec = "pnpm --dir frontend build";
     db-up.exec = "docker compose up -d db";
@@ -55,7 +71,7 @@
     echo "Java:  $(java -version 2>&1 | head -n 1)"
     echo "Maven: $(mvn -v 2>/dev/null | head -n 1)"
     echo "Node:  $(node -v 2>/dev/null)  pnpm: $(pnpm -v 2>/dev/null)"
-    echo "Scripts: build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down | stop | fe-up | fe-logs"
+    echo "Scripts: dev | build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down | stop | fe-up | fe-logs"
   '';
 
   # Fast smoke check used by `devenv test` (CI / entering the shell).
