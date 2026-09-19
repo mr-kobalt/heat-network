@@ -39,10 +39,13 @@
     fe-dev.exec = "pnpm --dir frontend dev";
     fe-build.exec = "pnpm --dir frontend build";
     db-up.exec = "docker compose up -d db";
-    db-down.exec = "docker compose down";
+    db-down.exec = "docker compose stop db";
     db-logs.exec = "docker compose logs -f db";
+    # podman-compose не умеет корректно удалять зависимые контейнеры сразу:
+    # сначала останавливаем все, затем удаляем с --remove-orphans.
+    stop.exec = "docker compose --profile frontend stop";
     up.exec = "docker compose up --build -d";
-    down.exec = "docker compose down";
+    down.exec = "docker compose --profile frontend stop; docker compose --profile frontend down --remove-orphans";
     # Полный стек (app + db + визуализатор, профиль frontend).
     fe-up.exec = "docker compose --profile frontend up --build -d";
     fe-logs.exec = "docker compose logs -f frontend";
@@ -52,7 +55,7 @@
     echo "Java:  $(java -version 2>&1 | head -n 1)"
     echo "Maven: $(mvn -v 2>/dev/null | head -n 1)"
     echo "Node:  $(node -v 2>/dev/null)  pnpm: $(pnpm -v 2>/dev/null)"
-    echo "Scripts: build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down | fe-up | fe-logs"
+    echo "Scripts: build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down | stop | fe-up | fe-logs"
   '';
 
   # Fast smoke check used by `devenv test` (CI / entering the shell).

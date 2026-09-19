@@ -37,6 +37,8 @@ mvn -B verify                      # полная проверка
 devenv test                        # smoke окружения
 docker compose config              # если менялась инфраструктура
 fe-up                              # весь стек app+db+frontend в Docker
+stop                               # остановить контейнеры (без удаления)
+down                               # остановить и удалить стек (podman-safe)
 pnpm --dir frontend dev            # визуализатор (dev)
 pnpm --dir frontend build          # сборка визуализатора
 ```
@@ -74,3 +76,4 @@ pnpm --dir frontend build          # сборка визуализатора
 | 2026-09-19 | Зафиксирован статус M1; добавлены команды фронтенда; уточнено, что `frontend/` — опциональный визуализатор (ADR-0013) | команда |
 | 2026-09-19 | БД только через docker-compose (`db-up`); devenv без Postgres (ADR-0017) | команда |
 | 2026-09-19 | Добавлены скрипты `fe-up`/`fe-logs` для запуска стека с визуализатором | команда |
+| 2026-09-19 | Надёжная остановка: `stop`, `down` через stop + `down --remove-orphans` | команда |

@@ -91,6 +91,8 @@ pnpm --dir frontend build
 
 ```bash
 fe-up        # docker compose --profile frontend up --build -d
+stop         # остановить контейнеры (без удаления)
+down         # остановить и удалить стек
 ```
 
 Визуализатор: http://localhost:8081, сервис: http://localhost:8080.
@@ -131,3 +133,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-19 | Обновлён статус M1, добавлены разделы запуска приложения и фронтенд-визуализатора | команда |
 | 2026-09-19 | Единая БД через docker-compose; devenv без Postgres (ADR-0017) | команда |
 | 2026-09-19 | Добавлен скрипт `fe-up` для запуска всего стека с визуализатором | команда |
+| 2026-09-19 | Надёжная остановка: скрипт `stop`, `down` через stop + `down --remove-orphans` (podman-compose) | команда |

@@ -48,7 +48,9 @@ PostgreSQL/PostGIS поднимается единственным способ�
 - `languages.javascript` (Node 22 + pnpm) для визуализатора;
 - пакеты `git`, `jq`, `curl`, `unzip`;
 - скрипты `build`, `test`, `verify`, `run`, `fe-dev`, `fe-build`,
-  `db-up`, `db-down`, `db-logs`, `up`, `down`, `fe-up`, `fe-logs`;
+  `db-up`, `db-down`, `db-logs`, `up`, `down`, `stop`, `fe-up`, `fe-logs`;
+- `down`/`stop` учитывают особенность podman-compose: сначала `stop`,
+  затем `down --remove-orphans`;
 - `devenv test` — быстрый smoke (Java 11, Maven, Node).
 
 Команды:
@@ -59,6 +61,7 @@ db-up              # PostgreSQL + PostGIS из docker-compose
 build | test | verify | run
 fe-dev | fe-build
 fe-up              # весь стек (app + db + frontend) в Docker
+stop | down        # остановить / остановить и удалить
 ```
 
 ## 5. Профили Spring
@@ -118,3 +121,4 @@ Node.js 22 + pnpm 11 добавляются через devenv.
 | 2026-09-19 | Добавлены Proj4J и стек визуализатора (React/MapLibre/Mantine), Node 22 + pnpm | команда |
 | 2026-09-19 | Единая БД через docker-compose; devenv без Postgres; FQIN для образов (ADR-0017) | команда |
 | 2026-09-19 | Добавлены скрипты `fe-up`/`fe-logs` (весь стек с визуализатором) | команда |
+| 2026-09-19 | Скрипт `stop`; `down` через stop + `down --remove-orphans` (podman-compose) | команда |
