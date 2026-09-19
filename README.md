@@ -87,11 +87,13 @@ pnpm --dir frontend dev      # http://localhost:5173 (proxy /api → :8080)
 pnpm --dir frontend build
 ```
 
-Через Docker:
+Через Docker (весь стек app + db + визуализатор):
 
 ```bash
-docker compose --profile frontend up --build   # визуализатор на :8081
+fe-up        # docker compose --profile frontend up --build -d
 ```
+
+Визуализатор: http://localhost:8081, сервис: http://localhost:8080.
 
 Визуализатор умеет открыть GeoJSON результата напрямую (без backend) и
 запустить расчёт через API. Офлайн-подложка PMTiles — см.
@@ -128,3 +130,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-16 | Добавлен протокол встречи в исходные материалы | команда |
 | 2026-09-19 | Обновлён статус M1, добавлены разделы запуска приложения и фронтенд-визуализатора | команда |
 | 2026-09-19 | Единая БД через docker-compose; devenv без Postgres (ADR-0017) | команда |
+| 2026-09-19 | Добавлен скрипт `fe-up` для запуска всего стека с визуализатором | команда |

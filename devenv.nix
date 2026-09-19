@@ -43,13 +43,16 @@
     db-logs.exec = "docker compose logs -f db";
     up.exec = "docker compose up --build -d";
     down.exec = "docker compose down";
+    # Полный стек (app + db + визуализатор, профиль frontend).
+    fe-up.exec = "docker compose --profile frontend up --build -d";
+    fe-logs.exec = "docker compose logs -f frontend";
   };
 
   enterShell = ''
     echo "Java:  $(java -version 2>&1 | head -n 1)"
     echo "Maven: $(mvn -v 2>/dev/null | head -n 1)"
     echo "Node:  $(node -v 2>/dev/null)  pnpm: $(pnpm -v 2>/dev/null)"
-    echo "Scripts: build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down"
+    echo "Scripts: build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down | fe-up | fe-logs"
   '';
 
   # Fast smoke check used by `devenv test` (CI / entering the shell).

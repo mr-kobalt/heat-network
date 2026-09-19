@@ -48,7 +48,7 @@ PostgreSQL/PostGIS поднимается единственным способ�
 - `languages.javascript` (Node 22 + pnpm) для визуализатора;
 - пакеты `git`, `jq`, `curl`, `unzip`;
 - скрипты `build`, `test`, `verify`, `run`, `fe-dev`, `fe-build`,
-  `db-up`, `db-down`, `db-logs`, `up`, `down`;
+  `db-up`, `db-down`, `db-logs`, `up`, `down`, `fe-up`, `fe-logs`;
 - `devenv test` — быстрый smoke (Java 11, Maven, Node).
 
 Команды:
@@ -58,6 +58,7 @@ devenv shell       # оболочка с toolchain
 db-up              # PostgreSQL + PostGIS из docker-compose
 build | test | verify | run
 fe-dev | fe-build
+fe-up              # весь стек (app + db + frontend) в Docker
 ```
 
 ## 5. Профили Spring
@@ -116,3 +117,4 @@ Node.js 22 + pnpm 11 добавляются через devenv.
 | 2026-09-16 | Обновлено по протоколу встречи 16.09.2026: Spring Data, офлайн, единственный экземпляр, без UI, PostGIS подтверждён, скрипты деплоя | команда |
 | 2026-09-19 | Добавлены Proj4J и стек визуализатора (React/MapLibre/Mantine), Node 22 + pnpm | команда |
 | 2026-09-19 | Единая БД через docker-compose; devenv без Postgres; FQIN для образов (ADR-0017) | команда |
+| 2026-09-19 | Добавлены скрипты `fe-up`/`fe-logs` (весь стек с визуализатором) | команда |
