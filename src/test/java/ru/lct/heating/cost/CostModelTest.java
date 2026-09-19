@@ -23,10 +23,9 @@ class CostModelTest {
         row.setCapacityTph(152.3);
         row.setMaxLengthM(1042);
         row.setNewCostPerM(120275);
-        row.setReconstructionCostPerM(181766);
         rows.add(row);
         properties.setDiameters(rows);
-        costModel = new CostModel(new DiameterCatalog(properties));
+        costModel = new CostModel(new DiameterCatalog(properties), new CostProperties());
     }
 
     @Test

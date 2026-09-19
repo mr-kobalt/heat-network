@@ -107,8 +107,8 @@ public class FeatureParser {
                 }
                 return parsed(type, id, OksConnectionPointObject.builder()
                         .id(id)
-                        .oksId(text(properties, "oks_id"))
                         .flowTph(number(properties, "flow_tph"))
+                        .numericId(isNumeric(properties, "id"))
                         .geometry((Point) geometry)
                         .build());
             case OKS_EXISTING:
@@ -149,6 +149,11 @@ public class FeatureParser {
                         + geometry.getGeometryType())
                 .build());
         return Optional.empty();
+    }
+
+    private static boolean isNumeric(JsonNode properties, String field) {
+        JsonNode node = properties.get(field);
+        return node != null && node.isNumber();
     }
 
     private static String text(JsonNode properties, String field) {

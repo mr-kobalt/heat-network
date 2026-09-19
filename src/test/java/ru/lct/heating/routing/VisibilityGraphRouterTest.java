@@ -7,12 +7,13 @@ import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
+import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.geometry.ObstacleIndex;
 
 class VisibilityGraphRouterTest {
 
-    private final VisibilityGraphRouter router = new VisibilityGraphRouter();
+    private final VisibilityGraphRouter router = new VisibilityGraphRouter(new AppProperties());
 
     @Test
     void straightPathWhenClear() {

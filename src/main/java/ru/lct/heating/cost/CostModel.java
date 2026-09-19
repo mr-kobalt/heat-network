@@ -4,51 +4,58 @@ import org.springframework.stereotype.Component;
 import ru.lct.heating.hydraulics.DiameterCatalog;
 
 /**
- * Единая модель стоимости (ТП 8, 9).
+ * Единая модель стоимости (ТП 8, 9). Коэффициенты — в {@link CostProperties}.
  */
 @Component
 public class CostModel {
 
-    public static final long TIE_IN_COST = 5_000_000L;
-    public static final double SCORE_COST_BASE = 25_000_000.0;
-    public static final double SCORE_LENGTH_BASE = 100.0;
-    public static final double SCORE_COST_WEIGHT = 0.7;
-    public static final double SCORE_LENGTH_WEIGHT = 0.3;
-
     private final DiameterCatalog diameters;
+    private final CostProperties properties;
 
-    public CostModel(DiameterCatalog diameters) {
+    public CostModel(DiameterCatalog diameters, CostProperties properties) {
         this.diameters = diameters;
+        this.properties = properties;
     }
 
     public long segmentCost(double lengthM, int dn, double depthCoefficient, double specialCoefficient) {
-        double cost = lengthM * diameters.newCostPerM(dn) * depthCoefficient * specialCoefficient;
+        return segmentCost(lengthM, dn, depthCoefficient, specialCoefficient, 1.0);
+    }
+
+    /**
+     * Стоимость участка с учётом нестандартных углов отвода (FR-57).
+     */
+    public long segmentCost(double lengthM, int dn, double depthCoefficient,
+                            double specialCoefficient, double bendCoefficient) {
+        double cost = lengthM * diameters.newCostPerM(dn)
+                * depthCoefficient * specialCoefficient * bendCoefficient;
         return Math.round(cost);
     }
 
-    public long reconstructionCost(double lengthM, int dn) {
-        return Math.round(lengthM * diameters.reconstructionCostPerM(dn));
-    }
-
     public long chamberCost(int maxDn) {
-        if (maxDn <= 200) {
-            return 3_000_000L;
+        if (maxDn <= properties.getChamberSmallMaxDn()) {
+            return properties.getChamberCostSmall();
         }
-        if (maxDn <= 500) {
-            return 5_000_000L;
+        if (maxDn <= properties.getChamberMediumMaxDn()) {
+            return properties.getChamberCostMedium();
         }
-        if (maxDn <= 1000) {
-            return 8_000_000L;
+        if (maxDn <= properties.getChamberLargeMaxDn()) {
+            return properties.getChamberCostLarge();
         }
-        return 12_000_000L;
+        return properties.getChamberCostExtraLarge();
     }
 
     public long unconnectedPenalty(double flowTph) {
-        return 100_000_000L + Math.round(500_000.0 * flowTph);
+        return properties.getUnconnectedBaseCost()
+                + Math.round(properties.getUnconnectedCostPerTph() * flowTph);
     }
 
     public double score(long calculatedCost, double lengthM) {
-        return SCORE_COST_WEIGHT * (calculatedCost / SCORE_COST_BASE)
-                + SCORE_LENGTH_WEIGHT * (lengthM / SCORE_LENGTH_BASE);
+        return properties.getScoreCostWeight() * (calculatedCost / properties.getScoreCostBase())
+                + properties.getScoreLengthWeight() * (lengthM / properties.getScoreLengthBase());
+    }
+
+    /** Стоимость врезки в существующую камеру (за участок, FR-73). */
+    public long existingChamberTieInCost() {
+        return properties.getExistingChamberTieInCost();
     }
 }

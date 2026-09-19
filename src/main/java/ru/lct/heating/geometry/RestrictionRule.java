@@ -15,6 +15,7 @@ public class RestrictionRule {
     private double minDistanceM = 1.0;
     private Double angleMinDeg;
     private Double kSpecial;
+    private Double specialZoneBufferM;
     private List<DistanceBand> distanceBands = new ArrayList<>();
 
     /**
@@ -30,5 +31,12 @@ public class RestrictionRule {
 
     public boolean isSpecial() {
         return mode == RestrictionMode.SPECIAL;
+    }
+
+    /**
+     * Радиус буфера спецзоны: явное значение или минимальное расстояние правила.
+     */
+    public double zoneBufferM() {
+        return specialZoneBufferM != null ? specialZoneBufferM : minDistanceM;
     }
 }

@@ -4,13 +4,14 @@ import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.List;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.Point;
 import org.springframework.stereotype.Component;
 
 /**
- * Потоковая запись результата в GeoJSON (ТП 10, ADR-0008).
+ * Потоковая запись результата в GeoJSON (ТП v2 §7, ADR-0008).
  */
 @Component
 public class GeoJsonResultWriter {
@@ -21,28 +22,31 @@ public class GeoJsonResultWriter {
         this.objectMapper = objectMapper;
     }
 
-    public void write(VariantResult variant, OutputStream outputStream) throws IOException {
+    public void write(List<VariantResult> variants, OutputStream outputStream) throws IOException {
         try (JsonGenerator generator = objectMapper.getFactory().createGenerator(outputStream)) {
             generator.writeStartObject();
             generator.writeStringField("type", "FeatureCollection");
             generator.writeArrayFieldStart("features");
-            for (OutputSegment segment : variant.getSegments()) {
-                writeSegment(generator, variant.getVariantId(), segment);
+            for (VariantResult variant : variants) {
+                writeFeatures(generator, variant);
             }
-            for (OutputTieIn tieIn : variant.getTieIns()) {
-                writeTieIn(generator, variant.getVariantId(), tieIn);
-            }
-            for (OutputChamber chamber : variant.getChambers()) {
-                writeChamber(generator, variant.getVariantId(), chamber);
-            }
-            for (OutputTechnicalNode node : variant.getTechnicalNodes()) {
-                writeTechnicalNode(generator, variant.getVariantId(), node);
-            }
-            writeSummary(generator, variant.getSummary());
             generator.writeEndArray();
             generator.writeEndObject();
             generator.flush();
         }
+    }
+
+    private void writeFeatures(JsonGenerator generator, VariantResult variant) throws IOException {
+        for (OutputSegment segment : variant.getSegments()) {
+            writeSegment(generator, variant.getVariantId(), segment);
+        }
+        for (OutputChamber chamber : variant.getChambers()) {
+            writeChamber(generator, variant.getVariantId(), chamber);
+        }
+        for (OutputTechnicalNode node : variant.getTechnicalNodes()) {
+            writeTechnicalNode(generator, variant.getVariantId(), node);
+        }
+        writeSummary(generator, variant.getSummary());
     }
 
     private void writeSegment(JsonGenerator generator, String variantId, OutputSegment segment)
@@ -64,25 +68,6 @@ public class GeoJsonResultWriter {
         writeNullableNumber(generator, "depth_start", segment.getDepthStart());
         writeNullableNumber(generator, "depth_end", segment.getDepthEnd());
         generator.writeNumberField("cost", segment.getCost());
-        generator.writeEndObject();
-        generator.writeEndObject();
-    }
-
-    private void writeTieIn(JsonGenerator generator, String variantId, OutputTieIn tieIn)
-            throws IOException {
-        generator.writeStartObject();
-        generator.writeStringField("type", "Feature");
-        generator.writeFieldName("geometry");
-        writePoint(generator, tieIn.getGeometryWgs84());
-        generator.writeObjectFieldStart("properties");
-        generator.writeStringField("id", tieIn.getId());
-        generator.writeStringField("object_type", "tie_in");
-        generator.writeStringField("variant_id", variantId);
-        generator.writeStringField("existing_object_id", tieIn.getExistingObjectId());
-        generator.writeStringField("existing_object_type", tieIn.getExistingObjectType());
-        writeNullableNumber(generator, "existing_diameter", tieIn.getExistingDiameterMm());
-        generator.writeNumberField("required_diameter", tieIn.getRequiredDiameterMm());
-        generator.writeNumberField("cost", tieIn.getCost());
         generator.writeEndObject();
         generator.writeEndObject();
     }
@@ -128,18 +113,21 @@ public class GeoJsonResultWriter {
         generator.writeNumberField("rank", summary.getRank());
         generator.writeNumberField("construction_cost", summary.getConstructionCost());
         generator.writeNumberField("chamber_construction_cost", summary.getChamberConstructionCost());
-        generator.writeNumberField("tie_in_cost", summary.getTieInCost());
-        generator.writeNumberField("reconstruction_cost", summary.getReconstructionCost());
-        generator.writeNumberField("chamber_reconstruction_cost", summary.getChamberReconstructionCost());
+        generator.writeNumberField("existing_chamber_tie_in_count",
+                summary.getExistingChamberTieInCount());
+        generator.writeNumberField("existing_chamber_tie_in_cost",
+                summary.getExistingChamberTieInCost());
         generator.writeNumberField("unconnected_penalty", summary.getUnconnectedPenalty());
         generator.writeNumberField("calculated_cost", summary.getCalculatedCost());
         generator.writeNumberField("new_network_length", summary.getNewNetworkLengthM());
-        generator.writeNumberField("reconstruction_length", summary.getReconstructionLengthM());
-        generator.writeNumberField("length", summary.getLengthM());
         generator.writeNumberField("score", summary.getScore());
         generator.writeArrayFieldStart("unconnected_oks_ids");
         for (String id : summary.getUnconnectedOksIds()) {
-            generator.writeString(id);
+            if (summary.getNumericOksIds() != null && summary.getNumericOksIds().contains(id)) {
+                generator.writeNumber(id);
+            } else {
+                generator.writeString(id);
+            }
         }
         generator.writeEndArray();
         generator.writeEndObject();

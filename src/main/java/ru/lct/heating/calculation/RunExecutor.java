@@ -47,10 +47,13 @@ public class RunExecutor {
             Path summaryFile = storageService.runSummaryFile(runId);
             CalculationOutcome outcome = calculationService.calculate(
                     storageService.datasetFile(run.getDatasetId()), resultFile, summaryFile);
-            run.setStatus(RunStatus.DONE.name());
+            boolean partial = outcome.getSummary() == null
+                    || !outcome.getSummary().getUnconnectedOksIds().isEmpty();
+            run.setStatus(partial ? RunStatus.PARTIAL.name() : RunStatus.DONE.name());
             run.setFinishedAt(Instant.now());
             run.setResultPath(resultFile.toString());
-            run.setSummary(objectMapper.writeValueAsString(outcome.getSummary()));
+            run.setSummary(outcome.getSummary() == null
+                    ? null : objectMapper.writeValueAsString(outcome.getSummary()));
             runRepository.save(run);
         } catch (Exception exception) {
             log.error("Расчёт {} завершился ошибкой", runId, exception);

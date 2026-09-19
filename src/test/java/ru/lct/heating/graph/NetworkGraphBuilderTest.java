@@ -18,18 +18,18 @@ class NetworkGraphBuilderTest {
     private final NetworkGraphBuilder builder = new NetworkGraphBuilder();
 
     @Test
-    void buildsChainToSourceAndDistance() {
-        SourceObject source = SourceObject.builder()
-                .id("S").geometry(point(0, 0)).build();
+    void countsChamberAttachmentsByGeometry() {
+        // Проходная линия через камеру: два участка заканчиваются в камере.
         HeatChamberObject chamber = HeatChamberObject.builder()
-                .id("C").upstreamObjectId("S").geometry(point(100, 0)).build();
-        NetworkSegment segment = NetworkSegment.builder()
-                .id("N").diameterMm(300).upstreamObjectId("C")
-                .geometry(line(100, 0, 200, 0)).build();
+                .id("C").geometry(point(100, 0)).build();
+        NetworkSegment left = NetworkSegment.builder()
+                .id("L").diameterMm(300).geometry(line(0, 0, 100, 0)).build();
+        NetworkSegment right = NetworkSegment.builder()
+                .id("R").diameterMm(300).geometry(line(100, 0, 200, 0)).build();
         NetworkDataset dataset = NetworkDataset.builder()
-                .sources(List.of(source))
+                .sources(List.of(SourceObject.builder().id("S").geometry(point(0, 0)).build()))
                 .heatChambers(List.of(chamber))
-                .networkSegments(List.of(segment))
+                .networkSegments(List.of(left, right))
                 .restrictions(List.of())
                 .connectionPoints(List.of())
                 .oksFutures(List.of())
@@ -38,20 +38,17 @@ class NetworkGraphBuilderTest {
 
         ExistingNetworkGraph graph = builder.build(dataset);
 
-        assertThat(graph.distanceToSource("N")).hasValue(100.0);
-        assertThat(graph.chainToSourceIds("N")).containsExactly("N", "C");
+        assertThat(graph.segment("L")).isPresent();
+        assertThat(graph.chamberAttachments("C")).isEqualTo(2);
         assertThat(graph.getWarnings()).isEmpty();
     }
 
     @Test
-    void reportsUnknownUpstreamReference() {
-        NetworkSegment segment = NetworkSegment.builder()
-                .id("N").diameterMm(300).upstreamObjectId("missing")
-                .geometry(line(0, 0, 10, 0)).build();
+    void warnsWhenNoSource() {
         NetworkDataset dataset = NetworkDataset.builder()
                 .sources(List.of())
                 .heatChambers(List.of())
-                .networkSegments(List.of(segment))
+                .networkSegments(List.of())
                 .restrictions(List.of())
                 .connectionPoints(List.of())
                 .oksFutures(List.of())
@@ -60,8 +57,7 @@ class NetworkGraphBuilderTest {
 
         ExistingNetworkGraph graph = builder.build(dataset);
 
-        assertThat(graph.getWarnings())
-                .anyMatch(warning -> warning.startsWith("UPSTREAM_NOT_FOUND"));
+        assertThat(graph.getWarnings()).contains("NO_SOURCE");
     }
 
     private Point point(double x, double y) {

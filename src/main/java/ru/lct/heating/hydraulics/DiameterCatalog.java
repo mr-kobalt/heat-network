@@ -54,14 +54,35 @@ public class DiameterCatalog {
         return requireByDn(dn).getNewCostPerM();
     }
 
-    public long reconstructionCostPerM(int dn) {
-        return requireByDn(dn).getReconstructionCostPerM();
-    }
-
     /**
      * Следующая номенклатура (для правила +1 при превышении предельной длины, протокол).
      */
     public Optional<DiameterRow> next(int dn) {
         return rows.stream().filter(row -> row.getDn() > dn).findFirst();
+    }
+
+    /**
+     * Минимальный Ду, одновременно удовлетворяющий расходу и предельной длине
+     * (ТП v2 §2.3, FR-43).
+     */
+    public DiameterRow selectFor(double flowTph, double runLengthM) {
+        return rows.stream()
+                .filter(row -> row.getCapacityTph() >= flowTph)
+                .filter(row -> row.getMaxLengthM() >= runLengthM - 1e-9)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Нет Ду, удовлетворяющего расходу " + flowTph
+                                + " т/ч и длине " + runLengthM + " м"));
+    }
+
+    /** Наименьший Ду не меньше заданного, удовлетворяющий расходу и длине. */
+    public DiameterRow selectForAtLeast(int dn, double flowTph, double runLengthM) {
+        return rows.stream()
+                .filter(row -> row.getDn() >= dn)
+                .filter(row -> row.getCapacityTph() >= flowTph)
+                .filter(row -> row.getMaxLengthM() >= runLengthM - 1e-9)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Нет Ду ≥ " + dn + " для расхода " + flowTph + " и длины " + runLengthM));
     }
 }

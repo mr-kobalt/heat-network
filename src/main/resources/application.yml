@@ -53,32 +53,78 @@ heating:
     storage-root: ${HEATING_STORAGE_ROOT:./data}
     worker-threads: ${HEATING_WORKER_THREADS:1}
     default-diameter-mm: 400
-    bend-surcharge: 1.5
+    # FR-58: округление расстояний вверх при отклонении не более допуска.
+    rounding-tolerance-m: 0.01
+    # ADR-0019: кластеризация ОКС и число рассматриваемых кандидатов врезки.
+    cluster-radius-m: 500.0
+    tie-in-candidates: 12
+    # FR-22/FR-71: в пределах радиуса врезаемся в существующую камеру.
+    chamber-tie-in-radius-m: 10.0
+    # FR-28/FR-57: штраф за поворот при маршрутизации (минимизация поворотов), м.
+    turn-penalty-m: 30.0
     allowed-origins:
       - http://localhost:5173
       - http://localhost:8081
-  # ТП 4.1: Ду, пропускная способность, предельная длина, стоимость нового
-  # строительства и реконструкции (руб./м).
+  # ТП 8, 9: коэффициенты стоимости и ранжирования (FR-70…FR-76).
+  cost:
+    # FR-73: врезка в существующую камеру — 5 000 000 руб. за участок.
+    existing-chamber-tie-in-cost: 5000000
+    chamber-small-max-dn: 200
+    chamber-medium-max-dn: 500
+    chamber-large-max-dn: 1000
+    chamber-cost-small: 3000000
+    chamber-cost-medium: 5000000
+    chamber-cost-large: 8000000
+    chamber-cost-extra-large: 12000000
+    unconnected-base-cost: 100000000
+    unconnected-cost-per-tph: 500000
+    score-cost-base: 25000000
+    score-length-base: 100
+    score-cost-weight: 0.7
+    score-length-weight: 0.3
+  # ТП v2, таблица 1: Ду, пропускная способность, предельная длина,
+  # стоимость нового строительства (руб./м).
   diameters:
-    - {dn: 50,   capacity-tph: 3.5,      max-length-m: 181,   new-cost-per-m: 74023,  reconstruction-cost-per-m: 96180}
-    - {dn: 65,   capacity-tph: 8.3,      max-length-m: 245,   new-cost-per-m: 78631,  reconstruction-cost-per-m: 109989}
-    - {dn: 80,   capacity-tph: 13.2,     max-length-m: 327,   new-cost-per-m: 83530,  reconstruction-cost-per-m: 117582}
-    - {dn: 100,  capacity-tph: 22.3,     max-length-m: 419,   new-cost-per-m: 89748,  reconstruction-cost-per-m: 133694}
-    - {dn: 125,  capacity-tph: 40.2,     max-length-m: 554,   new-cost-per-m: 97275,  reconstruction-cost-per-m: 148030}
-    - {dn: 150,  capacity-tph: 65.1,     max-length-m: 696,   new-cost-per-m: 105507, reconstruction-cost-per-m: 152295}
-    - {dn: 200,  capacity-tph: 152.3,    max-length-m: 1042,  new-cost-per-m: 120275, reconstruction-cost-per-m: 181766}
-    - {dn: 250,  capacity-tph: 274.9,    max-length-m: 1379,  new-cost-per-m: 135323, reconstruction-cost-per-m: 202030}
-    - {dn: 300,  capacity-tph: 437.4,    max-length-m: 1718,  new-cost-per-m: 150022, reconstruction-cost-per-m: 228707}
-    - {dn: 400,  capacity-tph: 943.1,    max-length-m: 2477,  new-cost-per-m: 190299, reconstruction-cost-per-m: 271317}
-    - {dn: 500,  capacity-tph: 1663.4,   max-length-m: 3245,  new-cost-per-m: 224137, reconstruction-cost-per-m: 333884}
-    - {dn: 600,  capacity-tph: 2627.7,   max-length-m: 4037,  new-cost-per-m: 264790, reconstruction-cost-per-m: 372703}
-    - {dn: 700,  capacity-tph: 3735.1,   max-length-m: 4775,  new-cost-per-m: 324298, reconstruction-cost-per-m: 439571}
-    - {dn: 800,  capacity-tph: 5296.8,   max-length-m: 5644,  new-cost-per-m: 325996, reconstruction-cost-per-m: 489918}
-    - {dn: 900,  capacity-tph: 7165.0,   max-length-m: 6518,  new-cost-per-m: 327693, reconstruction-cost-per-m: 553607}
-    - {dn: 1000, capacity-tph: 9391.8,   max-length-m: 7419,  new-cost-per-m: 418777, reconstruction-cost-per-m: 606679}
-    - {dn: 1200, capacity-tph: 15012.8,  max-length-m: 9288,  new-cost-per-m: 428074, reconstruction-cost-per-m: 825692}
-    - {dn: 1400, capacity-tph: 22501.9,  max-length-m: 11276, new-cost-per-m: 683417, reconstruction-cost-per-m: 978584}
-  # ТП 5.1 + протокол: конфигурируемые правила ограничений (ADR-0009).
+    - {dn: 50,   capacity-tph: 3.5,      max-length-m: 181,   new-cost-per-m: 74023}
+    - {dn: 65,   capacity-tph: 8.3,      max-length-m: 245,   new-cost-per-m: 78631}
+    - {dn: 80,   capacity-tph: 13.2,     max-length-m: 327,   new-cost-per-m: 83530}
+    - {dn: 100,  capacity-tph: 22.3,     max-length-m: 419,   new-cost-per-m: 89748}
+    - {dn: 125,  capacity-tph: 40.2,     max-length-m: 554,   new-cost-per-m: 97275}
+    - {dn: 150,  capacity-tph: 65.1,     max-length-m: 696,   new-cost-per-m: 105507}
+    - {dn: 200,  capacity-tph: 152.3,    max-length-m: 1042,  new-cost-per-m: 120275}
+    - {dn: 250,  capacity-tph: 274.9,    max-length-m: 1379,  new-cost-per-m: 135323}
+    - {dn: 300,  capacity-tph: 437.4,    max-length-m: 1718,  new-cost-per-m: 150022}
+    - {dn: 400,  capacity-tph: 943.1,    max-length-m: 2477,  new-cost-per-m: 190299}
+    - {dn: 500,  capacity-tph: 1663.4,   max-length-m: 3245,  new-cost-per-m: 224137}
+    - {dn: 600,  capacity-tph: 2627.7,   max-length-m: 4037,  new-cost-per-m: 264790}
+    - {dn: 700,  capacity-tph: 3735.1,   max-length-m: 4775,  new-cost-per-m: 324298}
+    - {dn: 800,  capacity-tph: 5296.8,   max-length-m: 5644,  new-cost-per-m: 325996}
+    - {dn: 900,  capacity-tph: 7165.0,   max-length-m: 6518,  new-cost-per-m: 327693}
+    - {dn: 1000, capacity-tph: 9391.8,   max-length-m: 7419,  new-cost-per-m: 418777}
+    - {dn: 1200, capacity-tph: 15012.8,  max-length-m: 9288,  new-cost-per-m: 428074}
+    - {dn: 1400, capacity-tph: 22501.9,  max-length-m: 11276, new-cost-per-m: 683417}
+  # ТП v2, таблица 1: расчётные габариты пары труб (наружный диаметр оболочки,
+  # просвет, ширина пары, высота). Используются при проверке расстояний (FR-59).
+  envelopes:
+    - {dn: 50,   outer-diameter-m: 0.125, clearance-m: 0.150, pair-width-m: 0.400, height-m: 0.125}
+    - {dn: 65,   outer-diameter-m: 0.140, clearance-m: 0.150, pair-width-m: 0.430, height-m: 0.140}
+    - {dn: 80,   outer-diameter-m: 0.160, clearance-m: 0.150, pair-width-m: 0.470, height-m: 0.160}
+    - {dn: 100,  outer-diameter-m: 0.180, clearance-m: 0.150, pair-width-m: 0.510, height-m: 0.180}
+    - {dn: 125,  outer-diameter-m: 0.225, clearance-m: 0.150, pair-width-m: 0.600, height-m: 0.225}
+    - {dn: 150,  outer-diameter-m: 0.250, clearance-m: 0.150, pair-width-m: 0.650, height-m: 0.250}
+    - {dn: 200,  outer-diameter-m: 0.315, clearance-m: 0.250, pair-width-m: 0.880, height-m: 0.315}
+    - {dn: 250,  outer-diameter-m: 0.400, clearance-m: 0.250, pair-width-m: 1.050, height-m: 0.400}
+    - {dn: 300,  outer-diameter-m: 0.450, clearance-m: 0.250, pair-width-m: 1.150, height-m: 0.450}
+    - {dn: 400,  outer-diameter-m: 0.560, clearance-m: 0.250, pair-width-m: 1.370, height-m: 0.560}
+    - {dn: 500,  outer-diameter-m: 0.710, clearance-m: 0.250, pair-width-m: 1.670, height-m: 0.710}
+    - {dn: 600,  outer-diameter-m: 0.800, clearance-m: 0.250, pair-width-m: 1.850, height-m: 0.800}
+    - {dn: 700,  outer-diameter-m: 0.900, clearance-m: 0.250, pair-width-m: 2.050, height-m: 0.900}
+    - {dn: 800,  outer-diameter-m: 1.000, clearance-m: 0.250, pair-width-m: 2.250, height-m: 1.000}
+    - {dn: 900,  outer-diameter-m: 1.100, clearance-m: 0.250, pair-width-m: 2.450, height-m: 1.100}
+    - {dn: 1000, outer-diameter-m: 1.200, clearance-m: 0.250, pair-width-m: 2.650, height-m: 1.200}
+    - {dn: 1200, outer-diameter-m: 1.425, clearance-m: 0.250, pair-width-m: 3.100, height-m: 1.425}
+    - {dn: 1400, outer-diameter-m: 1.600, clearance-m: 0.250, pair-width-m: 3.450, height-m: 1.600}
+  # ТП v2, таблица 2: конфигурируемые правила ограничений (ADR-0009).
   restrictions:
     fallback:
       mode: PROHIBITED
@@ -95,9 +141,10 @@ heating:
       social_area: {mode: PROHIBITED, min-distance-m: 1.0}
       prohibited_site: {mode: PROHIBITED, min-distance-m: 1.0}
       water: {mode: PROHIBITED, min-distance-m: 1.0}
-      road: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.60}
-      tram_tracks: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75}
-      railway: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75}
+      # FR-57 (ТП v2, таблица 2): railway — пересечение запрещено, 1,0 м.
+      railway: {mode: PROHIBITED, min-distance-m: 1.0}
+      road: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.60, special-zone-buffer-m: 3.0}
+      tram_tracks: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75, special-zone-buffer-m: 3.0}
       gas_pipeline: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.25}
       power_cable: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.15}
       heat_network: {mode: SPECIAL, min-distance-m: 1.0, k-special: 1.05}

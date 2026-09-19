@@ -8,5 +8,4 @@ public class DiameterRow {
     private double capacityTph;
     private double maxLengthM;
     private long newCostPerM;
-    private long reconstructionCostPerM;
 }

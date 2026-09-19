@@ -44,6 +44,7 @@ class IngestServiceTest {
         assertThat(dataset.getSources()).hasSize(1);
         assertThat(dataset.getNetworkSegments()).hasSize(1);
         assertThat(dataset.getConnectionPoints()).hasSize(1);
+        assertThat(dataset.getConnectionPoints().get(0).isNumericId()).isTrue();
         // координаты переведены в UTM (метры)
         assertThat(dataset.getSources().get(0).getGeometry().getCoordinate().x).isGreaterThan(400_000);
     }

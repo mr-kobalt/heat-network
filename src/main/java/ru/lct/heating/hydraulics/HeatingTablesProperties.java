@@ -14,4 +14,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class HeatingTablesProperties {
 
     private List<DiameterRow> diameters = new ArrayList<>();
+    private List<EnvelopeRow> envelopes = new ArrayList<>();
 }

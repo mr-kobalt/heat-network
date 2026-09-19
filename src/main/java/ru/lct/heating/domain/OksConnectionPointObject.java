@@ -5,14 +5,15 @@ import lombok.Value;
 import org.locationtech.jts.geom.Point;
 
 /**
- * Точка подключения перспективного ОКС. По протоколу встречи именно она является
- * целью маршрута; {@code flowTph} может задаваться здесь.
+ * Точка подключения перспективного ОКС (ТП v2 §1.1): цель маршрута со своим
+ * {@code flow_tph}. {@code numericId} фиксирует исходный тип ID (число/строка)
+ * для сохранения типа в выводе (FR-84).
  */
 @Value
 @Builder
 public class OksConnectionPointObject {
     String id;
-    String oksId;
     Double flowTph;
+    boolean numericId;
     Point geometry;
 }

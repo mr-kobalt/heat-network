@@ -14,18 +14,19 @@ import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.geometry.ObstacleIndex;
 import ru.lct.heating.geometry.ObstacleIndexBuilder;
+import ru.lct.heating.geometry.SpecialZoneIndex;
+import ru.lct.heating.geometry.SpecialZoneIndexBuilder;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.graph.NetworkGraphBuilder;
 import ru.lct.heating.ingest.IngestResult;
 import ru.lct.heating.ingest.IngestService;
 import ru.lct.heating.output.GeoJsonResultWriter;
-import ru.lct.heating.output.ResultBuilder;
 import ru.lct.heating.output.VariantResult;
-import ru.lct.heating.routing.RoutePlanner;
-import ru.lct.heating.routing.RoutePlanningResult;
+import ru.lct.heating.output.VariantSummary;
+import ru.lct.heating.variants.VariantGenerator;
 
 /**
- * Конвейер расчёта M1: разбор → граф → ограничения → маршрутизация → вывод.
+ * Конвейер расчёта: разбор → граф → ограничения → лес маршрутизации → вывод.
  */
 @Service
 public class CalculationService {
@@ -33,21 +34,22 @@ public class CalculationService {
     private final IngestService ingestService;
     private final NetworkGraphBuilder graphBuilder;
     private final ObstacleIndexBuilder obstacleIndexBuilder;
-    private final RoutePlanner routePlanner;
-    private final ResultBuilder resultBuilder;
+    private final SpecialZoneIndexBuilder specialZoneIndexBuilder;
+    private final VariantGenerator variantGenerator;
     private final GeoJsonResultWriter resultWriter;
     private final ObjectMapper objectMapper;
     private final AppProperties appProperties;
 
     public CalculationService(IngestService ingestService, NetworkGraphBuilder graphBuilder,
-                              ObstacleIndexBuilder obstacleIndexBuilder, RoutePlanner routePlanner,
-                              ResultBuilder resultBuilder, GeoJsonResultWriter resultWriter,
+                              ObstacleIndexBuilder obstacleIndexBuilder,
+                              SpecialZoneIndexBuilder specialZoneIndexBuilder,
+                              VariantGenerator variantGenerator, GeoJsonResultWriter resultWriter,
                               ObjectMapper objectMapper, AppProperties appProperties) {
         this.ingestService = ingestService;
         this.graphBuilder = graphBuilder;
         this.obstacleIndexBuilder = obstacleIndexBuilder;
-        this.routePlanner = routePlanner;
-        this.resultBuilder = resultBuilder;
+        this.specialZoneIndexBuilder = specialZoneIndexBuilder;
+        this.variantGenerator = variantGenerator;
         this.resultWriter = resultWriter;
         this.objectMapper = objectMapper;
         this.appProperties = appProperties;
@@ -70,16 +72,22 @@ public class CalculationService {
 
         ObstacleIndex obstacleIndex = obstacleIndexBuilder.build(
                 dataset, appProperties.getDefaultDiameterMm(), warnings);
+        SpecialZoneIndex specialZones = specialZoneIndexBuilder.build(
+                dataset, appProperties.getDefaultDiameterMm(), warnings);
 
-        RoutePlanningResult planning = routePlanner.plan(dataset, obstacleIndex, warnings);
-        VariantResult variant = resultBuilder.build(planning, dataset);
+        List<VariantResult> variants = variantGenerator.generate(
+                dataset, obstacleIndex, graph, specialZones, warnings);
 
         try (OutputStream outputStream = Files.newOutputStream(resultFile)) {
-            resultWriter.write(variant, outputStream);
+            resultWriter.write(variants, outputStream);
         }
-        objectMapper.writeValue(summaryFile.toFile(), variant.getSummary());
+        List<VariantSummary> summaries = variants.stream()
+                .map(VariantResult::getSummary)
+                .collect(Collectors.toList());
+        objectMapper.writeValue(summaryFile.toFile(), summaries);
+        VariantSummary best = summaries.isEmpty() ? null : summaries.get(0);
         return CalculationOutcome.builder()
-                .summary(variant.getSummary())
+                .summary(best)
                 .warnings(warnings)
                 .build();
     }

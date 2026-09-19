@@ -10,6 +10,7 @@ import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
 import org.locationtech.jts.index.strtree.STRtree;
 
 /**
@@ -83,5 +84,19 @@ public class ObstacleIndex {
 
     public int size() {
         return prohibited.size();
+    }
+
+    /**
+     * Новый индекс с дополнительными геометриями-препятствиями (например,
+     * уже проложенными участками при разрешении пересечений, FR-29).
+     */
+    public ObstacleIndex withAdditional(List<Geometry> extras) {
+        List<PreparedGeometry> all = new ArrayList<>(prohibited);
+        for (Geometry extra : extras) {
+            if (extra != null && !extra.isEmpty()) {
+                all.add(PreparedGeometryFactory.prepare(extra));
+            }
+        }
+        return new ObstacleIndex(all);
     }
 }

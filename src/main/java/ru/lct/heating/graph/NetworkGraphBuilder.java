@@ -1,12 +1,12 @@
 package ru.lct.heating.graph;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.locationtech.jts.geom.Coordinate;
 import org.springframework.stereotype.Component;
 import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkDataset;
@@ -14,121 +14,73 @@ import ru.lct.heating.domain.NetworkSegment;
 import ru.lct.heating.domain.SourceObject;
 
 /**
- * Построение графа существующей сети и проверка цепочек к источнику (FR-10, FR-11, FR-08).
+ * Топология существующей сети по геометрии (ТП v2, FR-10, FR-12):
+ * участки индексируются, для камер считается число существующих примыканий.
+ * Проходная линия, разделённая камерой, даёт два примыкания (разъяснение 12).
  */
 @Component
 public class NetworkGraphBuilder {
 
+    private static final double ATTACH_TOLERANCE_M = 0.5;
+
     public ExistingNetworkGraph build(NetworkDataset dataset) {
         Map<String, NetworkSegment> segments = new LinkedHashMap<>();
         Map<String, HeatChamberObject> chambers = new LinkedHashMap<>();
-        Map<String, String> upstream = new HashMap<>();
-        Set<String> sourceIds = new HashSet<>();
-        for (SourceObject source : dataset.getSources()) {
-            sourceIds.add(source.getId());
-        }
+        List<String> warnings = new ArrayList<>();
+
         for (NetworkSegment segment : dataset.getNetworkSegments()) {
-            segments.put(segment.getId(), segment);
-            if (segment.getUpstreamObjectId() != null) {
-                upstream.put(segment.getId(), segment.getUpstreamObjectId());
+            if (segments.put(segment.getId(), segment) != null) {
+                warnings.add("DUPLICATE_ID: участок " + segment.getId() + " встречается повторно");
             }
         }
         for (HeatChamberObject chamber : dataset.getHeatChambers()) {
-            chambers.put(chamber.getId(), chamber);
-            if (chamber.getUpstreamObjectId() != null) {
-                upstream.put(chamber.getId(), chamber.getUpstreamObjectId());
+            if (chambers.put(chamber.getId(), chamber) != null) {
+                warnings.add("DUPLICATE_ID: камера " + chamber.getId() + " встречается повторно");
             }
         }
 
-        List<String> warnings = new ArrayList<>();
-        validateReferences(segments, chambers, upstream, sourceIds, warnings);
-
-        Map<String, Double> distance = new LinkedHashMap<>();
-        Map<String, List<String>> chains = new LinkedHashMap<>();
-        for (String id : allIds(segments, chambers)) {
-            computeChain(id, upstream, segments, chambers, sourceIds, new HashSet<>(), warnings);
+        Map<String, Integer> attachments = new LinkedHashMap<>();
+        for (String chamberId : chambers.keySet()) {
+            attachments.put(chamberId, 0);
         }
-        for (String id : allIds(segments, chambers)) {
-            distance.put(id, cumulativeLength(id, upstream, segments));
-            chains.put(id, chainIds(id, upstream, sourceIds));
+        for (NetworkSegment segment : segments.values()) {
+            if (segment.getGeometry() == null) {
+                continue;
+            }
+            Coordinate[] coordinates = segment.getGeometry().getCoordinates();
+            attach(coordinates[0], chambers, attachments);
+            attach(coordinates[coordinates.length - 1], chambers, attachments);
+        }
+
+        List<SourceObject> sources = dataset.getSources() == null
+                ? List.of() : dataset.getSources();
+        if (sources.isEmpty()) {
+            warnings.add("NO_SOURCE");
         }
 
         return ExistingNetworkGraph.builder()
                 .segments(segments)
                 .chambers(chambers)
-                .sources(dataset.getSources())
-                .distanceToSourceM(distance)
-                .chainToSourceIds(chains)
+                .sources(sources)
+                .chamberAttachments(attachments)
                 .warnings(warnings)
                 .build();
     }
 
-    private void validateReferences(Map<String, NetworkSegment> segments,
-                                    Map<String, HeatChamberObject> chambers,
-                                    Map<String, String> upstream,
-                                    Set<String> sourceIds,
-                                    List<String> warnings) {
-        for (Map.Entry<String, String> entry : upstream.entrySet()) {
-            String target = entry.getValue();
-            if (!segments.containsKey(target) && !chambers.containsKey(target) && !sourceIds.contains(target)) {
-                warnings.add("UPSTREAM_NOT_FOUND: объект " + entry.getKey()
-                        + " ссылается на неизвестный upstream_object_id=" + target);
+    private void attach(Coordinate endpoint, Map<String, HeatChamberObject> chambers,
+                        Map<String, Integer> attachments) {
+        Set<String> matched = new HashSet<>();
+        for (Map.Entry<String, HeatChamberObject> entry : chambers.entrySet()) {
+            HeatChamberObject chamber = entry.getValue();
+            if (chamber.getGeometry() == null) {
+                continue;
+            }
+            if (endpoint.distance(chamber.getGeometry().getCoordinate()) <= ATTACH_TOLERANCE_M) {
+                matched.add(entry.getKey());
             }
         }
-    }
-
-    private void computeChain(String id, Map<String, String> upstream,
-                              Map<String, NetworkSegment> segments,
-                              Map<String, HeatChamberObject> chambers,
-                              Set<String> sourceIds, Set<String> visited, List<String> warnings) {
-        String current = id;
-        while (current != null) {
-            if (sourceIds.contains(current)) {
-                return;
-            }
-            if (!visited.add(current)) {
-                warnings.add("UPSTREAM_CYCLE: обнаружен цикл в цепочке к источнику у " + id);
-                return;
-            }
-            if (!segments.containsKey(current) && !chambers.containsKey(current)) {
-                warnings.add("UPSTREAM_CHAIN_BROKEN: цепочка от " + id + " обрывается");
-                return;
-            }
-            current = upstream.get(current);
+        for (String chamberId : matched) {
+            attachments.merge(chamberId, 1, Integer::sum);
         }
-    }
-
-    private double cumulativeLength(String id, Map<String, String> upstream,
-                                    Map<String, NetworkSegment> segments) {
-        double total = 0.0;
-        String current = id;
-        Set<String> visited = new HashSet<>();
-        while (current != null && visited.add(current)) {
-            NetworkSegment segment = segments.get(current);
-            if (segment != null && segment.getGeometry() != null) {
-                total += segment.getGeometry().getLength();
-            }
-            current = upstream.get(current);
-        }
-        return total;
-    }
-
-    private List<String> chainIds(String id, Map<String, String> upstream, Set<String> sourceIds) {
-        List<String> chain = new ArrayList<>();
-        String current = id;
-        Set<String> visited = new HashSet<>();
-        while (current != null && visited.add(current) && !sourceIds.contains(current)) {
-            chain.add(current);
-            current = upstream.get(current);
-        }
-        return chain;
-    }
-
-    private Set<String> allIds(Map<String, NetworkSegment> segments,
-                               Map<String, HeatChamberObject> chambers) {
-        Set<String> ids = new HashSet<>();
-        ids.addAll(segments.keySet());
-        ids.addAll(chambers.keySet());
-        return ids;
     }
 }

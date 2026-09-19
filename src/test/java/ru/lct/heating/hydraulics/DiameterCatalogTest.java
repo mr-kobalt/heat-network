@@ -36,30 +36,40 @@ class DiameterCatalogTest {
     @Test
     void exposesCostsAndLengths() {
         assertThat(catalog.newCostPerM(200)).isEqualTo(120275L);
-        assertThat(catalog.reconstructionCostPerM(150)).isEqualTo(152295L);
         assertThat(catalog.maxLengthM(300)).isEqualTo(1718.0);
+    }
+
+    @Test
+    void selectFor_considersFlowAndLength() {
+        // 200 мм проходит по расходу, но не по длине 2000 м -> 400 мм.
+        assertThat(catalog.selectFor(100.0, 2000.0).getDn()).isEqualTo(400);
+        assertThat(catalog.selectFor(100.0, 500.0).getDn()).isEqualTo(200);
+    }
+
+    @Test
+    void selectForAtLeast_doesNotLowerDiameter() {
+        assertThat(catalog.selectForAtLeast(250, 100.0, 10.0).getDn()).isEqualTo(250);
     }
 
     private List<DiameterRow> rows() {
         List<DiameterRow> rows = new ArrayList<>();
-        rows.add(row(50, 3.5, 181, 74023, 96180));
-        rows.add(row(65, 8.3, 245, 78631, 109989));
-        rows.add(row(200, 152.3, 1042, 120275, 181766));
-        rows.add(row(250, 274.9, 1379, 135323, 202030));
-        rows.add(row(300, 437.4, 1718, 150022, 228707));
-        rows.add(row(400, 943.1, 2477, 190299, 271317));
-        rows.add(row(150, 65.1, 696, 105507, 152295));
-        rows.add(row(1400, 22501.9, 11276, 683417, 978584));
+        rows.add(row(50, 3.5, 181, 74023));
+        rows.add(row(65, 8.3, 245, 78631));
+        rows.add(row(200, 152.3, 1042, 120275));
+        rows.add(row(250, 274.9, 1379, 135323));
+        rows.add(row(300, 437.4, 1718, 150022));
+        rows.add(row(400, 943.1, 2477, 190299));
+        rows.add(row(150, 65.1, 696, 105507));
+        rows.add(row(1400, 22501.9, 11276, 683417));
         return rows;
     }
 
-    private DiameterRow row(int dn, double capacity, double length, long cost, long recon) {
+    private DiameterRow row(int dn, double capacity, double length, long cost) {
         DiameterRow row = new DiameterRow();
         row.setDn(dn);
         row.setCapacityTph(capacity);
         row.setMaxLengthM(length);
         row.setNewCostPerM(cost);
-        row.setReconstructionCostPerM(recon);
         return row;
     }
 }
