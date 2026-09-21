@@ -20,7 +20,7 @@ import ru.lct.heating.hydraulics.HeatingTablesProperties;
 class ObstacleIndexBuilderTest {
 
     @Test
-    void build_oksPolygonContainingPoint_carvesFinalCorridor() {
+    void build_oksPolygon_fullyProhibited() {
         Polygon oks = GeometrySupport.GEOMETRY_FACTORY.createPolygon(new Coordinate[]{
                 new Coordinate(0, 0), new Coordinate(100, 0), new Coordinate(100, 100),
                 new Coordinate(0, 100), new Coordinate(0, 0)});
@@ -44,9 +44,12 @@ class ObstacleIndexBuilderTest {
                 new RestrictionRuleResolver(rules()), new EnvelopeCatalog(new HeatingTablesProperties()))
                 .build(dataset, 100, new ArrayList<>());
 
-        assertThat(index.isBlocked(line(10, 50, 0, 50))).isFalse();
+        // Исключение для вывода к точке добавляется в геометрии участка, а не
+        // вырезается из запретного индекса: сам полигон непроходим целиком.
+        assertThat(index.isBlocked(line(10, 50, 0, 50))).isTrue();
         assertThat(index.isBlocked(line(10, 50, 10, 90))).isTrue();
         assertThat(index.isBlocked(line(60, 50, 60, 90))).isTrue();
+        assertThat(index.isBlocked(line(-20, 50, -10, 50))).isFalse();
     }
 
     private RestrictionRulesProperties rules() {

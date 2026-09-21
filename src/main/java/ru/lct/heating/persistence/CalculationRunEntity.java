@@ -22,6 +22,8 @@ public class CalculationRunEntity {
 
     private String status;
 
+    private String algorithm;
+
     private Instant createdAt;
 
     private Instant startedAt;

@@ -47,6 +47,10 @@ public class StorageService {
         return directory(root.resolve("runs"), runId).resolve("summary.json");
     }
 
+    public Path runWarningsFile(UUID runId) {
+        return directory(root.resolve("runs"), runId).resolve("warnings.json");
+    }
+
     private Path directory(Path parent, UUID id) {
         Path directory = parent.resolve(id.toString());
         try {

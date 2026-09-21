@@ -28,7 +28,15 @@ public class MaxLengthEnforcer {
     }
 
     public List<ForestEdge> enforce(List<ForestEdge> edges) {
-        if (edges.isEmpty()) {
+        return enforce(edges, connectionNode(edges));
+    }
+
+    /**
+     * @param rootNodeId узел присоединения дерева (начало путей); для прежнего
+     *                   конвейера определяется по id ребра {@code *_connection}
+     */
+    public List<ForestEdge> enforce(List<ForestEdge> edges, String rootNodeId) {
+        if (edges.isEmpty() || rootNodeId == null) {
             return edges;
         }
         Map<String, ForestEdge> current = new LinkedHashMap<>();
@@ -36,8 +44,8 @@ public class MaxLengthEnforcer {
             current.put(edge.getId(), edge);
         }
         for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-            boolean changed = lengthPass(current);
-            changed |= nonDecreasingPass(current);
+            boolean changed = lengthPass(current, rootNodeId);
+            changed |= nonDecreasingPass(current, rootNodeId);
             if (!changed) {
                 break;
             }
@@ -49,9 +57,8 @@ public class MaxLengthEnforcer {
      * Проход по каждому пути от присоединения к листьям: непрерывные участки
      * одного Ду проверяются по длине, при превышении Ду повышается.
      */
-    private boolean lengthPass(Map<String, ForestEdge> current) {
+    private boolean lengthPass(Map<String, ForestEdge> current, String root) {
         List<ForestEdge> edges = new ArrayList<>(current.values());
-        String root = connectionNode(edges);
         if (root == null) {
             return false;
         }
@@ -111,9 +118,8 @@ public class MaxLengthEnforcer {
     /**
      * Ду не убывает от точки подключения к присоединению (FR-48).
      */
-    private boolean nonDecreasingPass(Map<String, ForestEdge> current) {
+    private boolean nonDecreasingPass(Map<String, ForestEdge> current, String root) {
         List<ForestEdge> edges = new ArrayList<>(current.values());
-        String root = connectionNode(edges);
         if (root == null) {
             return false;
         }

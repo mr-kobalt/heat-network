@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.LineString;
@@ -20,9 +21,9 @@ class RouteCrossingResolverTest {
     @Test
     void resolve_crossingEdges_rebuildsOneToAvoidCrossing() {
         ForestEdge horizontal = edge("e1", "A", "B", 0, 0, 100, 0);
-        ForestEdge vertical = edge("e2", "C", "D", 50, -50, 50, 50);
+        ForestEdge vertical = edge("e2", "C", "D", 50, -10, 50, 10);
         List<ForestEdge> result = resolver.resolve(List.of(horizontal, vertical),
-                new ObstacleIndex(List.of()), new ArrayList<>());
+                new ObstacleIndex(List.of()), Map.of(), new ArrayList<>());
         assertThat(intersection(result.get(0), result.get(1)).isEmpty()).isTrue();
     }
 
@@ -31,7 +32,7 @@ class RouteCrossingResolverTest {
         ForestEdge first = edge("e1", "A", "B", 0, 0, 100, 0);
         ForestEdge second = edge("e2", "B", "C", 100, 0, 100, 50);
         List<ForestEdge> result = resolver.resolve(List.of(first, second),
-                new ObstacleIndex(List.of()), new ArrayList<>());
+                new ObstacleIndex(List.of()), Map.of(), new ArrayList<>());
         assertThat(result.get(0).getCoordinates()).isEqualTo(first.getCoordinates());
         assertThat(result.get(1).getCoordinates()).isEqualTo(second.getCoordinates());
     }
@@ -41,7 +42,7 @@ class RouteCrossingResolverTest {
         ForestEdge first = edge("e1", "A", "B", 0, 0, 100, 0);
         ForestEdge second = edge("e2", "C", "D", 0, 50, 100, 50);
         List<ForestEdge> result = resolver.resolve(List.of(first, second),
-                new ObstacleIndex(List.of()), new ArrayList<>());
+                new ObstacleIndex(List.of()), Map.of(), new ArrayList<>());
         assertThat(result.get(0).getCoordinates()).isEqualTo(first.getCoordinates());
         assertThat(result.get(1).getCoordinates()).isEqualTo(second.getCoordinates());
     }

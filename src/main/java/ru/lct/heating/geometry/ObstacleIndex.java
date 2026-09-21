@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
@@ -23,15 +24,28 @@ import org.locationtech.jts.index.strtree.STRtree;
  */
 public class ObstacleIndex {
 
+    /** Эрозия для проверки захода внутрь запрета (касание границы разрешено). */
+    private static final double EROSION_M = 1e-3;
+
     private final List<PreparedGeometry> prohibited;
     private final STRtree tree = new STRtree();
+    private final STRtree erodedTree = new STRtree();
+    private final Map<PreparedGeometry, PreparedGeometry> erodedToOriginal = new IdentityHashMap<>();
 
     public ObstacleIndex(List<PreparedGeometry> prohibited) {
         this.prohibited = prohibited;
         for (PreparedGeometry prepared : prohibited) {
             tree.insert(prepared.getGeometry().getEnvelopeInternal(), prepared);
+            Geometry erodedGeometry = prepared.getGeometry().buffer(-EROSION_M);
+            if (erodedGeometry.isEmpty()) {
+                continue;
+            }
+            PreparedGeometry eroded = PreparedGeometryFactory.prepare(erodedGeometry);
+            erodedToOriginal.put(eroded, prepared);
+            erodedTree.insert(erodedGeometry.getEnvelopeInternal(), eroded);
         }
         tree.build();
+        erodedTree.build();
     }
 
     public boolean isBlocked(LineString segment) {
@@ -44,6 +58,32 @@ public class ObstacleIndex {
         List<PreparedGeometry> candidates = tree.query(envelope);
         for (PreparedGeometry candidate : candidates) {
             if (ignored.contains(candidate)) {
+                continue;
+            }
+            if (candidate.intersects(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Проверка захода отрезка во внутреннюю часть запретной зоны: касание
+     * границы (ровно минимальное расстояние) допустимо (ADR-0025/0033). Реализуется
+     * через пересечение с эрозией препятствия — быстрый prepared-intersects без
+     * DE-9IM {@code relate}.
+     */
+    public boolean isInteriorBlocked(LineString segment) {
+        return isInteriorBlocked(segment, Collections.emptySet());
+    }
+
+    public boolean isInteriorBlocked(LineString segment, Set<PreparedGeometry> ignored) {
+        Envelope envelope = segment.getEnvelopeInternal();
+        @SuppressWarnings("unchecked")
+        List<PreparedGeometry> candidates = erodedTree.query(envelope);
+        for (PreparedGeometry candidate : candidates) {
+            PreparedGeometry original = erodedToOriginal.get(candidate);
+            if (original != null && ignored.contains(original)) {
                 continue;
             }
             if (candidate.intersects(segment)) {

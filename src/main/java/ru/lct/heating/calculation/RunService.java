@@ -13,9 +13,11 @@ import ru.lct.heating.ingest.DatasetService;
 import ru.lct.heating.persistence.CalculationRunEntity;
 import ru.lct.heating.persistence.CalculationRunRepository;
 import ru.lct.heating.persistence.StorageService;
+import ru.lct.heating.routing.algorithm.TracingAlgorithm;
+import ru.lct.heating.routing.algorithm.TracingAlgorithmRegistry;
 
 /**
- * Создание и сопровождение запусков расчёта (ADR-0016).
+ * Создание и сопровождение запусков расчёта (ADR-0016, ADR-0027).
  */
 @Service
 public class RunService {
@@ -24,22 +26,35 @@ public class RunService {
     private final DatasetService datasetService;
     private final RunExecutor runExecutor;
     private final StorageService storageService;
+    private final TracingAlgorithmRegistry algorithmRegistry;
 
     public RunService(CalculationRunRepository runRepository, DatasetService datasetService,
-                      RunExecutor runExecutor, StorageService storageService) {
+                      RunExecutor runExecutor, StorageService storageService,
+                      TracingAlgorithmRegistry algorithmRegistry) {
         this.runRepository = runRepository;
         this.datasetService = datasetService;
         this.runExecutor = runExecutor;
         this.storageService = storageService;
+        this.algorithmRegistry = algorithmRegistry;
     }
 
     @Transactional
     public CalculationRunEntity create(UUID datasetId) {
+        return create(datasetId, null);
+    }
+
+    /**
+     * @param algorithmId id алгоритма трассировки; пусто — по умолчанию (ADR-0027)
+     */
+    @Transactional
+    public CalculationRunEntity create(UUID datasetId, String algorithmId) {
         datasetService.require(datasetId);
+        TracingAlgorithm algorithm = algorithmRegistry.require(algorithmId);
         CalculationRunEntity run = new CalculationRunEntity();
         run.setId(UUID.randomUUID());
         run.setDatasetId(datasetId);
         run.setStatus(RunStatus.PENDING.name());
+        run.setAlgorithm(algorithm.id());
         run.setCreatedAt(Instant.now());
         runRepository.save(run);
         runExecutor.execute(run.getId());

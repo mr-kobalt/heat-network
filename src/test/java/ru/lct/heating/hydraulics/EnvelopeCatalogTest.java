@@ -30,6 +30,17 @@ class EnvelopeCatalogTest {
         assertThat(new EnvelopeCatalog(new HeatingTablesProperties()).halfPairWidthM(100)).isZero();
     }
 
+    @Test
+    void minPairWidthM_returnsSmallestWidth() {
+        EnvelopeCatalog catalog = catalog(row(50, 0.400), row(100, 0.510), row(200, 0.880));
+        assertThat(catalog.minPairWidthM()).isEqualTo(0.400);
+    }
+
+    @Test
+    void minPairWidthM_emptyCatalog_zero() {
+        assertThat(new EnvelopeCatalog(new HeatingTablesProperties()).minPairWidthM()).isZero();
+    }
+
     private EnvelopeCatalog catalog(EnvelopeRow... rows) {
         HeatingTablesProperties properties = new HeatingTablesProperties();
         properties.setEnvelopes(List.of(rows));

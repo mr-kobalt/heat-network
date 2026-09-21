@@ -57,11 +57,28 @@ heating:
     rounding-tolerance-m: 0.01
     # ADR-0019: кластеризация ОКС и число рассматриваемых кандидатов врезки.
     cluster-radius-m: 500.0
-    tie-in-candidates: 12
+    tie-in-candidates: 6
     # FR-22/FR-71: в пределах радиуса врезаемся в существующую камеру.
     chamber-tie-in-radius-m: 10.0
     # FR-28/FR-57: штраф за поворот при маршрутизации (минимизация поворотов), м.
     turn-penalty-m: 30.0
+    # ADR-0024: вывод к точке ОКС — ближайший допустимый перпендикуляр к внешней
+    # грани + запас точки стыковки за границей буфера отступа.
+    oks-approach-policy: PERPENDICULAR_NEAREST
+    oks-exit-clearance-m: 1.0
+    # ADR-0027: алгоритм трассировки по умолчанию (см. GET /api/v1/algorithms).
+    routing-algorithm: ${HEATING_ROUTING_ALGORITHM:grid-forest}
+    # ADR-0034: поиск пути по сетке (ячейка и бюджет клеток).
+    forest-grid-cell-m: ${HEATING_FOREST_GRID_CELL_M:2.0}
+    forest-grid-max-cells: ${HEATING_FOREST_GRID_MAX_CELLS:16000000}
+    forest-cost-iterations: ${HEATING_FOREST_COST_ITERATIONS:2}
+    # ADR-0033 (фаза B): хранилище состояния сетки (спилл в PostGIS TEMP).
+    forest-grid-storage: ${HEATING_FOREST_GRID_STORAGE:auto}
+    forest-grid-page-cells: ${HEATING_FOREST_GRID_PAGE_CELLS:256}
+    forest-grid-cache-mb: ${HEATING_FOREST_GRID_CACHE_MB:512}
+    # FR-34/ТП 2.1: ограничение угла поворота трассы (0° — прямая, ≤ 90°).
+    forest-max-turn-deg: ${HEATING_FOREST_MAX_TURN_DEG:90}
+    forest-turn-enforcement: ${HEATING_FOREST_TURN_ENFORCEMENT:hard}
     allowed-origins:
       - http://localhost:5173
       - http://localhost:8081

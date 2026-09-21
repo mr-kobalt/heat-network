@@ -12,4 +12,6 @@ import lombok.Value;
 public class ForestPlanningResult {
     List<ForestTree> trees;
     List<String> unconnectedConnectionPointIds;
+    /** Диагностика поиска по сетке (ADR-0033/0034); в GeoJSON не попадает. */
+    GridReport gridReport;
 }

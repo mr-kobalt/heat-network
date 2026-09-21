@@ -32,6 +32,15 @@ public class EnvelopeCatalog {
         return rowForDn(dn).getPairWidthM();
     }
 
+    /** Наименьшая ширина пары труб по номенклатуре (основа ячейки маски, ADR-0033). */
+    public double minPairWidthM() {
+        return rows.stream()
+                .mapToDouble(EnvelopeRow::getPairWidthM)
+                .filter(width -> width > 0.0)
+                .min()
+                .orElse(0.0);
+    }
+
     public double heightM(int dn) {
         return rowForDn(dn).getHeightM();
     }

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -32,8 +33,10 @@ public class RunController {
     }
 
     @PostMapping(path = "/datasets/{datasetId}/runs")
-    public ResponseEntity<RunResponse> create(@PathVariable UUID datasetId) {
-        CalculationRunEntity run = runService.create(datasetId);
+    public ResponseEntity<RunResponse> create(@PathVariable UUID datasetId,
+                                              @RequestParam(name = "algorithm", required = false)
+                                              String algorithm) {
+        CalculationRunEntity run = runService.create(datasetId, algorithm);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(apiMapper.toRunResponse(run));
     }
 

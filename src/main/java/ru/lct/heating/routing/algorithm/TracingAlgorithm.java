@@ -1,0 +1,34 @@
+package ru.lct.heating.routing.algorithm;
+
+import java.util.List;
+import java.util.Map;
+import ru.lct.heating.domain.NetworkDataset;
+import ru.lct.heating.geometry.ObstacleIndex;
+import ru.lct.heating.graph.ExistingNetworkGraph;
+import ru.lct.heating.routing.ConnectionExit;
+import ru.lct.heating.routing.ForestPlanningResult;
+
+/**
+ * Подключаемый алгоритм трассировки (ADR-0027). Алгоритм строит план(ы)
+ * новой сети (до трёх вариантов); расчёт стоимости, спецпроходов, ранжирование
+ * и формирование GeoJSON — общая часть конвейера.
+ */
+public interface TracingAlgorithm {
+
+    /** Стабильный идентификатор для API и конфигурации. */
+    String id();
+
+    /** Краткое описание для пользователя. */
+    String description();
+
+    /**
+     * План(ы) трассировки. Возвращается до трёх содержательно отличающихся
+     * вариантов; порядок не важен — ранжирование выполняется позже по S.
+     *
+     * @param exits канонические точки выхода из `oks`-полигонов, посчитанные
+     *              общим резолвером (ADR-0032); ключ — ID точки подключения
+     */
+    List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                    ObstacleIndex obstacleIndex, List<String> warnings,
+                                    Map<String, ConnectionExit> exits);
+}

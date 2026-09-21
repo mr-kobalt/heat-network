@@ -43,17 +43,17 @@ class VisibilityGraphRouterTest {
     }
 
     @Test
-    void escapesObstacleContainingStartPoint() {
-        // Точка подключения может стоять на границе здания (внутри буфера).
-        // Маршрут обязан иметь возможность выйти из такого препятствия.
+    void startInsideObstacle_isUnreachable() {
+        // Точка подключения не должна маршрутизироваться изнутри запретной зоны:
+        // вывод к ней формирует OksApproachResolver, а не «дыра» в препятствии.
         Polygon ring = GeometrySupport.GEOMETRY_FACTORY.createPolygon(new Coordinate[]{
                 new Coordinate(-1, -1), new Coordinate(1, -1),
                 new Coordinate(1, 1), new Coordinate(-1, 1), new Coordinate(-1, -1)});
         ObstacleIndex index = new ObstacleIndex(
                 List.of(PreparedGeometryFactory.prepare(ring)));
         List<Coordinate> path = router.findPath(new Coordinate(0, 0), new Coordinate(10, 0), index);
-        assertThat(path).isNotNull();
-        assertThat(path.get(0)).isEqualTo(new Coordinate(0, 0));
-        assertThat(path.get(path.size() - 1)).isEqualTo(new Coordinate(10, 0));
+        assertThat(path).isNull();
     }
+
+
 }

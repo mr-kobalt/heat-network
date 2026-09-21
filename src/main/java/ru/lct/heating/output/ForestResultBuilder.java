@@ -176,6 +176,7 @@ public class ForestResultBuilder {
                 .chambers(chambers)
                 .technicalNodes(technicalNodes)
                 .summary(summary)
+                .gridReport(planning.getGridReport())
                 .build();
     }
 

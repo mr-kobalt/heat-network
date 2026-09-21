@@ -3,7 +3,9 @@ package ru.lct.heating.variants;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.LineString;
@@ -17,6 +19,7 @@ import ru.lct.heating.domain.OksConnectionPointObject;
 import ru.lct.heating.domain.SourceObject;
 import ru.lct.heating.geometry.LineStringSimplifier;
 import ru.lct.heating.geometry.ObstacleIndex;
+import ru.lct.heating.geometry.ObstacleMaskBuilder;
 import ru.lct.heating.geometry.SpecialSpanSplitter;
 import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.hydraulics.DiameterCatalog;
@@ -25,40 +28,44 @@ import ru.lct.heating.hydraulics.HeatingTablesProperties;
 import ru.lct.heating.hydraulics.MaxLengthEnforcer;
 import ru.lct.heating.output.ForestResultBuilder;
 import ru.lct.heating.output.VariantResult;
-import ru.lct.heating.routing.ForestPlanner;
-import ru.lct.heating.routing.RouteCrossingResolver;
+import ru.lct.heating.routing.ConnectionExit;
+import ru.lct.heating.routing.CellStoreFactory;
+import ru.lct.heating.routing.GridForestPlanner;
 import ru.lct.heating.routing.TieInCandidateProvider;
-import ru.lct.heating.routing.VisibilityGraphRouter;
+import ru.lct.heating.routing.algorithm.GridForestTracingAlgorithm;
+import ru.lct.heating.routing.algorithm.TracingAlgorithm;
 
 class VariantGeneratorTest {
 
     @Test
     void generate_multipleClusters_producesRankedVariants() {
         AppProperties appProperties = new AppProperties();
-        appProperties.setClusterRadiusM(500.0);
         DiameterCatalog catalog = catalog();
         CostModel costModel = new CostModel(catalog, new CostProperties());
-
-        VisibilityGraphRouter router = new VisibilityGraphRouter(appProperties);
         LineStringSimplifier simplifier = new LineStringSimplifier();
-        ru.lct.heating.routing.OksApproachResolver approachResolver =
-                new ru.lct.heating.routing.OksApproachResolver(
-                        new ru.lct.heating.geometry.RestrictionRuleResolver(
-                                new ru.lct.heating.geometry.RestrictionRulesProperties()),
-                        new ru.lct.heating.hydraulics.EnvelopeCatalog(new HeatingTablesProperties()));
-        ForestPlanner planner = new ForestPlanner(new TieInCandidateProvider(),
-                router, catalog, costModel, new MaxLengthEnforcer(catalog),
-                new RouteCrossingResolver(router, simplifier), approachResolver,
-                simplifier, appProperties);
+        GridForestPlanner planner = new GridForestPlanner(new TieInCandidateProvider(), catalog,
+                costModel, new MaxLengthEnforcer(catalog), simplifier, new ObstacleMaskBuilder(),
+                new CellStoreFactory(appProperties, null), appProperties);
         ForestResultBuilder resultBuilder = new ForestResultBuilder(
                 new ru.lct.heating.ingest.CrsTransformer(), costModel, new SpecialSpanSplitter(),
                 appProperties);
-        VariantGenerator generator = new VariantGenerator(planner, resultBuilder, appProperties);
+        VariantGenerator generator = new VariantGenerator(resultBuilder);
+        TracingAlgorithm algorithm = new GridForestTracingAlgorithm(planner);
 
         NetworkDataset dataset = dataset();
+        Map<String, ConnectionExit> exits = new LinkedHashMap<>();
+        for (var point : dataset.getConnectionPoints()) {
+            exits.put(point.getId(), ConnectionExit.builder()
+                    .connectionPointId(point.getId())
+                    .target(point.getGeometry().getCoordinate())
+                    .tail(List.of())
+                    .blocked(false)
+                    .designDiameterMm(100)
+                    .build());
+        }
         List<VariantResult> variants = generator.generate(dataset, new ObstacleIndex(List.of()),
                 new ru.lct.heating.graph.NetworkGraphBuilder().build(dataset),
-                new SpecialZoneIndex(List.of()), new ArrayList<>());
+                new SpecialZoneIndex(List.of()), new ArrayList<>(), exits, algorithm);
 
         assertThat(variants).isNotEmpty();
         assertThat(variants.size()).isLessThanOrEqualTo(VariantGenerator.MAX_VARIANTS);

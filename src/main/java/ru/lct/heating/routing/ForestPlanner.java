@@ -12,9 +12,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.LineString;
 import org.springframework.stereotype.Component;
 import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.cost.CostModel;
+import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.domain.OksConnectionPointObject;
@@ -32,9 +35,12 @@ import ru.lct.heating.hydraulics.MaxLengthEnforcer;
 public class ForestPlanner {
 
     private static final double EPS = 1e-6;
+    private static final double EDGE_CLEARANCE_M = 0.2;
+    private static final double NODE_CLEARANCE_M = 2.0;
     private static final int MAX_CHAMBER_CHILDREN = 3;
     private static final int MAX_CHAMBER_ATTACHMENTS = 4;
-    private static final int RECONNECT_TRIES = 6;
+    private static final int RECONNECT_TRIES = 4;
+    private static final int NETWORK_PROBE_CANDIDATES = 3;
 
     private final TieInCandidateProvider candidateProvider;
     private final VisibilityGraphRouter router;
@@ -75,41 +81,135 @@ public class ForestPlanner {
                                      double clusterRadiusM) {
         List<TieInCandidate> candidates = candidateProvider.candidates(dataset);
         Map<String, Double> flows = flowsByConnectionPoint(dataset);
+        Map<String, List<OksApproachResolver.Approach>> candidateLists =
+                approachResolver.resolveCandidates(dataset, appProperties.getDefaultDiameterMm());
 
         List<OksConnectionPointObject> points = new ArrayList<>();
         List<String> unconnected = new ArrayList<>();
+        Map<String, OksApproachResolver.Approach> approaches = new HashMap<>();
         for (OksConnectionPointObject connectionPoint : dataset.getConnectionPoints()) {
             Double flow = flows.get(connectionPoint.getId());
             if (flow == null || flow <= 0.0) {
                 warnings.add("NO_FLOW: для точки подключения " + connectionPoint.getId()
                         + " не найден расчётный расход");
                 unconnected.add(connectionPoint.getId());
-            } else {
-                points.add(connectionPoint);
+                continue;
             }
+            OksApproachResolver.Approach approach = chooseApproach(connectionPoint.getId(),
+                    candidateLists.get(connectionPoint.getId()), candidates, obstacleIndex);
+            if (approach == null || approach.isBlocked()) {
+                warnings.add("OKS_APPROACH_BLOCKED: для точки подключения "
+                        + connectionPoint.getId() + " не найден допустимый вывод из ОКС");
+                unconnected.add(connectionPoint.getId());
+                continue;
+            }
+            approaches.put(connectionPoint.getId(), approach);
+            points.add(connectionPoint);
         }
         points.sort(Comparator.comparing(OksConnectionPointObject::getId));
 
         Map<String, Integer> chamberUsage = new HashMap<>();
-        Map<String, OksApproachResolver.Approach> approaches = approachResolver.resolve(
-                dataset, appProperties.getDefaultDiameterMm());
         List<ForestTree> trees = new ArrayList<>();
         int index = 0;
         for (List<OksConnectionPointObject> cluster : cluster(points, clusterRadiusM)) {
-            ForestTree tree = buildTree(cluster, flows, candidates, graph, chamberUsage,
+            ForestTree tree = buildTree(cluster, flows, candidates, dataset, graph, chamberUsage,
                     obstacleIndex, approaches, warnings, unconnected, index++);
             if (tree != null) {
                 trees.add(tree);
             }
         }
+        attachUnconnectedAsSingleTrees(points, flows, candidates, dataset, graph, chamberUsage,
+                obstacleIndex, approaches, warnings, unconnected, trees, index);
         return ForestPlanningResult.builder()
                 .trees(trees)
                 .unconnectedConnectionPointIds(unconnected)
                 .build();
     }
 
+    /** Область вокруг точек стыковки: исключается из препятствий-участков. */
+    private Geometry nodeClearance(List<OksConnectionPointObject> cluster,
+                                   Map<String, OksApproachResolver.Approach> approaches,
+                                   Coordinate connectionCoordinate) {
+        List<Geometry> disks = new ArrayList<>();
+        for (OksConnectionPointObject connectionPoint : cluster) {
+            Coordinate coordinate = target(approaches, connectionPoint.getId());
+            if (coordinate != null) {
+                disks.add(GeometrySupport.GEOMETRY_FACTORY.createPoint(coordinate)
+                        .buffer(NODE_CLEARANCE_M));
+            }
+        }
+        if (connectionCoordinate != null) {
+            disks.add(GeometrySupport.GEOMETRY_FACTORY.createPoint(connectionCoordinate)
+                    .buffer(NODE_CLEARANCE_M));
+        }
+        if (disks.isEmpty()) {
+            return GeometrySupport.GEOMETRY_FACTORY.createGeometryCollection();
+        }
+        return GeometrySupport.GEOMETRY_FACTORY
+                .createGeometryCollection(disks.toArray(new Geometry[0]))
+                .union();
+    }
+
+    /** Препятствие из уже проложенного участка (FR-29). */
+    private Geometry routeBuffer(List<Coordinate> path, Geometry nodeClear) {
+        if (path == null || path.size() < 2) {
+            return null;
+        }
+        LineString line = GeometrySupport.GEOMETRY_FACTORY
+                .createLineString(path.toArray(new Coordinate[0]));
+        return line.buffer(EDGE_CLEARANCE_M).difference(nodeClear);
+    }
+
+    private ObstacleIndex addRoute(ObstacleIndex index, List<Coordinate> path, Geometry nodeClear) {
+        Geometry buffer = routeBuffer(path, nodeClear);
+        return buffer == null ? index : index.withAdditional(List.of(buffer));
+    }
+
+    /**
+     * Кратчайший кандидат вывода; если его точка стыковки недостижима для сети —
+     * следующий по длине достижимый (вынужденный откат из замкнутого кармана).
+     */
+    /**
+     * Точки, не подключившиеся к общему дереву, подключаются отдельными
+     * деревьями к сети — связность важнее экономии на общем стволе (FR-77).
+     */
+    private void attachUnconnectedAsSingleTrees(List<OksConnectionPointObject> points,
+                                                Map<String, Double> flows,
+                                                List<TieInCandidate> candidates,
+                                                NetworkDataset dataset,
+                                                ExistingNetworkGraph graph,
+                                                Map<String, Integer> chamberUsage,
+                                                ObstacleIndex obstacleIndex,
+                                                Map<String, OksApproachResolver.Approach> approaches,
+                                                List<String> warnings, List<String> unconnected,
+                                                List<ForestTree> trees, int startIndex) {
+        if (unconnected.isEmpty()) {
+            return;
+        }
+        Map<String, OksConnectionPointObject> byId = new HashMap<>();
+        for (OksConnectionPointObject point : points) {
+            byId.put(point.getId(), point);
+        }
+        List<String> pending = new ArrayList<>(unconnected);
+        unconnected.clear();
+        int index = startIndex + trees.size();
+        for (String id : pending) {
+            OksConnectionPointObject point = byId.get(id);
+            if (point == null || !approaches.containsKey(id)) {
+                unconnected.add(id);
+                continue;
+            }
+            ForestTree tree = buildTree(List.of(point), flows, candidates, dataset, graph, chamberUsage,
+                    obstacleIndex, approaches, warnings, unconnected, index++);
+            if (tree != null) {
+                trees.add(tree);
+            }
+        }
+    }
+
     private ForestTree buildTree(List<OksConnectionPointObject> cluster, Map<String, Double> flows,
-                                 List<TieInCandidate> candidates, ExistingNetworkGraph graph,
+                                 List<TieInCandidate> candidates, NetworkDataset dataset,
+                                 ExistingNetworkGraph graph,
                                  Map<String, Integer> chamberUsage, ObstacleIndex obstacleIndex,
                                  Map<String, OksApproachResolver.Approach> approaches,
                                  List<String> warnings, List<String> unconnected, int index) {
@@ -122,7 +222,8 @@ public class ForestPlanner {
 
         int rootIndex = chooseRoot(cluster, candidates);
         Coordinate rootTarget = target(approaches, cluster.get(rootIndex).getId());
-        ConnectionChoice connection = chooseConnection(rootTarget, trunkDn, candidates,
+        ConnectionChoice connection = chooseConnection(rootTarget,
+                tailPoint(approaches, cluster.get(rootIndex).getId()), trunkDn, candidates, dataset,
                 graph, chamberUsage, obstacleIndex, index);
         if (connection == null) {
             for (OksConnectionPointObject connectionPoint : cluster) {
@@ -140,13 +241,16 @@ public class ForestPlanner {
 
         for (int position = 1; position < order.length; position++) {
             int child = order[position];
-            int from = parent[child];
-            if (!reachable[from]) {
+            if (reachable[child]) {
                 continue;
             }
-            List<Coordinate> path = router.findPath(
-                    target(approaches, cluster.get(from).getId()),
-                    target(approaches, cluster.get(child).getId()), obstacleIndex);
+            int from = parent[child];
+            List<Coordinate> path = reachable[from]
+                    ? router.findPath(target(approaches, cluster.get(from).getId()),
+                            target(approaches, cluster.get(child).getId()), obstacleIndex,
+                            tailPoint(approaches, cluster.get(from).getId()),
+                            tailPoint(approaches, cluster.get(child).getId()))
+                    : null;
             if (path == null) {
                 // Fallback: переподключение к другому достижимому узлу (FR-24/FR-77).
                 Reconnect reconnect = reconnectParent(cluster, approaches, obstacleIndex,
@@ -224,8 +328,8 @@ public class ForestPlanner {
                     .build());
         }
 
-        finalEdges = crossingResolver.resolve(finalEdges, obstacleIndex, warnings);
-        finalEdges = enforceDegree(finalEdges, nodes, index);
+        finalEdges = crossingResolver.resolve(finalEdges, obstacleIndex, approaches, warnings);
+        finalEdges = enforceDegree(finalEdges, nodes, index, approaches, obstacleIndex, warnings);
         finalEdges = maxLengthEnforcer.enforce(finalEdges);
         return ForestTree.builder()
                 .tieInNodeId(connectionNode.getId())
@@ -238,17 +342,21 @@ public class ForestPlanner {
      * Выбор места присоединения: существующая камера (если ≤10 м и есть
      * свободные примыкания) либо новая камера в точке сети (ТП 2.4, FR-22).
      */
-    private ConnectionChoice chooseConnection(Coordinate root, int trunkDn,
+    private ConnectionChoice chooseConnection(Coordinate root, Coordinate rootPrevious, int trunkDn,
                                               List<TieInCandidate> candidates,
+                                              NetworkDataset dataset,
                                               ExistingNetworkGraph graph,
                                               Map<String, Integer> chamberUsage,
                                               ObstacleIndex obstacleIndex, int index) {
-        List<TieInCandidate> sorted = new ArrayList<>(candidates);
-        sorted.sort(Comparator.comparingDouble(candidate -> root.distance(candidate.getCoordinate())));
+        // Сэмплы + точные проекции корня на участки сети (непрерывная точка врезки).
+        List<TieInCandidate> all = new ArrayList<>(candidates);
+        all.addAll(candidateProvider.projections(dataset, root));
+        all = candidateProvider.distinct(all);
+        all.sort(Comparator.comparingDouble(candidate -> root.distance(candidate.getCoordinate())));
         double bestScore = Double.POSITIVE_INFINITY;
         ConnectionChoice best = null;
         int considered = 0;
-        for (TieInCandidate candidate : sorted) {
+        for (TieInCandidate candidate : all) {
             if (considered++ >= appProperties.getTieInCandidates()) {
                 break;
             }
@@ -256,7 +364,8 @@ public class ForestPlanner {
             if (chamber == null) {
                 continue;
             }
-            List<Coordinate> path = router.findPath(root, chamber.getCoordinate(), obstacleIndex);
+            List<Coordinate> path = router.findPath(root, chamber.getCoordinate(), obstacleIndex,
+                    rootPrevious, null);
             if (path == null) {
                 continue;
             }
@@ -331,7 +440,9 @@ public class ForestPlanner {
      * переносятся на дополнительную камеру-разветвитель (эвристика).
      */
     private List<ForestEdge> enforceDegree(List<ForestEdge> edges, Map<String, ForestNode> nodes,
-                                           int treeIndex) {
+                                           int treeIndex,
+                                           Map<String, OksApproachResolver.Approach> approaches,
+                                           ObstacleIndex obstacleIndex, List<String> warnings) {
         List<ForestEdge> current = new ArrayList<>(edges);
         boolean changed = true;
         int counter = 0;
@@ -356,23 +467,85 @@ public class ForestPlanner {
                         .id(chamberId).type(NodeType.CHAMBER).coordinate(centroid).build());
                 double flow = excess.stream().mapToDouble(ForestEdge::getFlowTph).sum();
                 current.removeAll(excess);
-                current.add(ForestEdge.builder()
-                        .id("e_" + treeIndex + "_" + chamberId)
-                        .fromNodeId(node.getId())
-                        .toNodeId(chamberId)
-                        .coordinates(List.of(node.getCoordinate(), centroid))
-                        .flowTph(flow)
-                        .diameterMm(diameters.select(flow).getDn())
-                        .build());
+                current.add(branchEdge(node, chamberId, centroid, flow, treeIndex,
+                        approaches, obstacleIndex, warnings));
                 for (ForestEdge edge : excess) {
-                    current.add(copy(edge, chamberId, edge.getToNodeId(),
-                            edge.getFlowTph(), edge.getDiameterMm()));
+                    current.add(reparent(edge, chamberId, centroid, nodes, approaches,
+                            obstacleIndex, warnings));
                 }
                 changed = true;
                 break;
             }
         }
         return current;
+    }
+
+    private ForestEdge branchEdge(ForestNode node, String chamberId, Coordinate centroid,
+                                  double flow, int treeIndex,
+                                  Map<String, OksApproachResolver.Approach> approaches,
+                                  ObstacleIndex obstacleIndex, List<String> warnings) {
+        Coordinate start = node.getCoordinate();
+        Coordinate startPrevious = null;
+        List<Coordinate> coordinates = new ArrayList<>();
+        OksApproachResolver.Approach approach = approaches.get(node.getId());
+        if (approach != null && !approach.isBlocked() && approach.getTail().size() == 2) {
+            startPrevious = start;
+            coordinates.add(start);
+            start = approach.getTarget();
+        }
+        List<Coordinate> path = router.findPath(start, centroid, obstacleIndex, startPrevious, null);
+        if (path == null) {
+            warnings.add("BRANCH_ROUTE_UNRESOLVED: узел " + node.getId()
+                    + " — луч к камере " + chamberId + " проложен по прямой");
+            path = List.of(start, centroid);
+        }
+        coordinates.addAll(path);
+        return ForestEdge.builder()
+                .id("e_" + treeIndex + "_" + chamberId)
+                .fromNodeId(node.getId())
+                .toNodeId(chamberId)
+                .coordinates(simplifier.simplify(coordinates))
+                .flowTph(flow)
+                .diameterMm(diameters.select(flow).getDn())
+                .build();
+    }
+
+    private ForestEdge reparent(ForestEdge edge, String chamberId,
+                                Coordinate centroid, Map<String, ForestNode> nodes,
+                                Map<String, OksApproachResolver.Approach> approaches,
+                                ObstacleIndex obstacleIndex, List<String> warnings) {
+        String childId = edge.getToNodeId();
+        List<Coordinate> coordinates = new ArrayList<>();
+        Coordinate end;
+        Coordinate endNext = null;
+        List<Coordinate> tail = List.of();
+        OksApproachResolver.Approach approach = approaches.get(childId);
+        if (approach != null && !approach.isBlocked() && approach.getTail().size() == 2) {
+            end = approach.getTarget();
+            endNext = approach.getTail().get(1);
+            tail = approach.getTail();
+        } else {
+            ForestNode child = nodes.get(childId);
+            end = child != null ? child.getCoordinate()
+                    : edge.getCoordinates().get(edge.getCoordinates().size() - 1);
+        }
+        List<Coordinate> path = router.findPath(centroid, end, obstacleIndex, null, endNext);
+        if (path == null) {
+            warnings.add("BRANCH_ROUTE_UNRESOLVED: участок " + edge.getId()
+                    + " к " + childId + " проложен по прямой");
+            coordinates.addAll(edge.getCoordinates());
+            return copy(edge, chamberId, childId, edge.getFlowTph(), edge.getDiameterMm());
+        }
+        coordinates.addAll(path);
+        coordinates.addAll(tail);
+        return ForestEdge.builder()
+                .id(edge.getId())
+                .fromNodeId(chamberId)
+                .toNodeId(childId)
+                .coordinates(simplifier.simplify(coordinates))
+                .flowTph(edge.getFlowTph())
+                .diameterMm(edge.getDiameterMm())
+                .build();
     }
 
     private Map<String, List<ForestEdge>> childrenEdges(List<ForestEdge> edges) {
@@ -583,12 +756,81 @@ public class ForestPlanner {
             }
             List<Coordinate> path = router.findPath(
                     target(approaches, cluster.get(candidate).getId()),
-                    target(approaches, cluster.get(child).getId()), obstacleIndex);
+                    target(approaches, cluster.get(child).getId()), obstacleIndex,
+                    tailPoint(approaches, cluster.get(candidate).getId()),
+                    tailPoint(approaches, cluster.get(child).getId()));
             if (path != null) {
                 return new Reconnect(candidate, path);
             }
         }
         return null;
+    }
+
+    private OksApproachResolver.Approach chooseApproach(String pointId,
+                                                        List<OksApproachResolver.Approach> list,
+                                                        List<TieInCandidate> candidates,
+                                                        ObstacleIndex index) {
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        OksApproachResolver.Approach first = null;
+        for (OksApproachResolver.Approach approach : list) {
+            if (approach.isBlocked()) {
+                continue;
+            }
+            if (first == null) {
+                first = approach;
+            }
+            boolean reach = approach.getTail().isEmpty()
+                    || reachesNetwork(approach.getTarget(), approachPoint(approach),
+                            candidates, index);
+            if (reach) {
+                return approach;
+            }
+        }
+        return first != null ? first : list.get(0);
+    }
+
+    private Coordinate approachPoint(OksApproachResolver.Approach approach) {
+        return approach.getTail().size() == 2 ? approach.getTail().get(1) : null;
+    }
+
+    private Coordinate tailPoint(Map<String, OksApproachResolver.Approach> approaches, String id) {
+        OksApproachResolver.Approach approach = approaches.get(id);
+        return approach == null ? null : approachPoint(approach);
+    }
+
+    private boolean reachesNetwork(Coordinate target, Coordinate startPrevious,
+                                   List<TieInCandidate> candidates, ObstacleIndex index) {
+        for (Coordinate coordinate : nearestCandidates(target, candidates, NETWORK_PROBE_CANDIDATES)) {
+            if (coordinate != null
+                    && router.findPath(target, coordinate, index, startPrevious, null) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Coordinate[] nearestCandidates(Coordinate target, List<TieInCandidate> candidates,
+                                           int count) {
+        Coordinate[] result = new Coordinate[count];
+        double[] distances = new double[count];
+        java.util.Arrays.fill(distances, Double.POSITIVE_INFINITY);
+        for (TieInCandidate candidate : candidates) {
+            double distance = target.distance(candidate.getCoordinate());
+            for (int i = 0; i < count; i++) {
+                if (distance < distances[i] - EPS) {
+                    for (int j = count - 1; j > i; j--) {
+                        distances[j] = distances[j - 1];
+                        result[j] = result[j - 1];
+                    }
+                    distances[i] = distance;
+                    result[i] = candidate.getCoordinate();
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
     private Coordinate target(Map<String, OksApproachResolver.Approach> approaches, String pointId) {
