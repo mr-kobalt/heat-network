@@ -9,12 +9,17 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "basemap:prepare": "bash scripts/fetch-basemap.sh",
+    "basemap:style": "node scripts/build-style.mjs"
   },
   "dependencies": {
     "@mantine/core": "^7.15.0",
     "@mantine/hooks": "^7.15.0",
     "@tanstack/react-query": "^5.59.0",
+    "@turf/buffer": "^7.4.0",
+    "@turf/difference": "^7.4.0",
+    "@turf/helpers": "^7.4.0",
     "maplibre-gl": "^4.7.1",
     "pmtiles": "^3.2.1",
     "react": "^18.3.1",
@@ -23,6 +28,7 @@
   },
   "devDependencies": {
     "@maplibre/maplibre-gl-style-spec": "^20.3.1",
+    "@protomaps/basemaps": "^5.7.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
     "@types/react": "^18.3.12",

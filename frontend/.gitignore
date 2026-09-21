@@ -5,4 +5,7 @@ dist/
 *.local
 .vite/
 *.tsbuildinfo
+# Полный экстракт подложки не коммитим; placeholder — исключение.
 public/basemap/*.pmtiles
+!public/basemap/placeholder.pmtiles
+.cache/

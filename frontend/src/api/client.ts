@@ -26,8 +26,15 @@ export interface RunResponse {
   id: string;
   datasetId: string;
   status: 'PENDING' | 'RUNNING' | 'DONE' | 'PARTIAL' | 'FAILED';
+  algorithm?: string;
   summary?: Record<string, unknown>;
   error?: string;
+}
+
+export interface AlgorithmResponse {
+  id: string;
+  description: string;
+  defaultAlgorithm: boolean;
 }
 
 async function ensureOk(response: Response): Promise<Response> {
@@ -38,6 +45,11 @@ async function ensureOk(response: Response): Promise<Response> {
   return response;
 }
 
+export async function fetchAlgorithms(): Promise<AlgorithmResponse[]> {
+  const response = await ensureOk(await fetch(`${baseUrl}/api/v1/algorithms`));
+  return response.json();
+}
+
 export async function uploadDataset(file: File): Promise<DatasetResponse> {
   const form = new FormData();
   form.append('file', file);
@@ -46,8 +58,11 @@ export async function uploadDataset(file: File): Promise<DatasetResponse> {
   return response.json();
 }
 
-export async function createRun(datasetId: string): Promise<RunResponse> {
-  const response = await fetch(`${baseUrl}/api/v1/datasets/${datasetId}/runs`, { method: 'POST' });
+export async function createRun(datasetId: string, algorithm?: string | null): Promise<RunResponse> {
+  const query = algorithm ? `?algorithm=${encodeURIComponent(algorithm)}` : '';
+  const response = await fetch(`${baseUrl}/api/v1/datasets/${datasetId}/runs${query}`, {
+    method: 'POST',
+  });
   await ensureOk(response);
   return response.json();
 }
@@ -64,12 +79,13 @@ export async function fetchResult(runId: string): Promise<FeatureCollection> {
 
 export async function runAndFetch(
   file: File,
+  algorithm: string | null | undefined,
   onStatus: (status: string) => void,
 ): Promise<FeatureCollection> {
   onStatus('Загрузка набора…');
   const dataset = await uploadDataset(file);
   onStatus('Запуск расчёта…');
-  const created = await createRun(dataset.id);
+  const created = await createRun(dataset.id, algorithm);
   let run = created;
   while (run.status === 'PENDING' || run.status === 'RUNNING') {
     await new Promise((resolve) => setTimeout(resolve, 1000));

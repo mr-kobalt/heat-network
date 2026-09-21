@@ -4,9 +4,9 @@ export type Geometry = {
 };
 
 export type FeatureProperties = {
-  id?: string;
+  id?: string | number;
   object_type?: string;
-  variant_id?: string;
+  variant_id?: string | number;
   diameter?: number;
   flow_tph?: number;
   length?: number;
@@ -14,26 +14,20 @@ export type FeatureProperties = {
   laying_method?: string;
   restriction_type?: string;
   address?: string;
-  start_node_id?: string;
-  end_node_id?: string;
-  existing_object_id?: string;
-  existing_object_type?: string;
-  existing_diameter?: number;
-  required_diameter?: number;
+  start_node_id?: string | number;
+  end_node_id?: string | number;
   depth_start?: number | null;
   depth_end?: number | null;
   rank?: number;
-  calculated_cost?: number;
   construction_cost?: number;
-  reconstruction_cost?: number;
   chamber_construction_cost?: number;
-  chamber_reconstruction_cost?: number;
-  tie_in_cost?: number;
+  existing_chamber_tie_in_count?: number;
+  existing_chamber_tie_in_cost?: number;
   unconnected_penalty?: number;
+  calculated_cost?: number;
   new_network_length?: number;
-  reconstruction_length?: number;
   score?: number;
-  unconnected_oks_ids?: string[];
+  unconnected_oks_ids?: Array<string | number>;
   [key: string]: unknown;
 };
 
@@ -59,13 +53,12 @@ export function parseFeatureCollection(raw: unknown): FeatureCollection {
   return candidate as FeatureCollection;
 }
 
+/** Типы объектов выходного GeoJSON (ТП v2 §7). */
 export function isResultFeature(objectType: string | undefined): boolean {
   return (
     objectType === 'heat_network' ||
-    objectType === 'tie_in' ||
     objectType === 'heat_chamber' ||
     objectType === 'technical_node' ||
-    objectType === 'heat_network_reconstruction' ||
-    objectType === 'heat_chamber_reconstruction'
+    objectType === 'variant_summary'
   );
 }

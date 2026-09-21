@@ -1,15 +1,34 @@
-import { useState } from 'react';
-import { Alert, Button, Divider, FileButton, Stack, Text } from '@mantine/core';
+import { useEffect, useState } from 'react';
+import { Alert, Button, Divider, FileButton, Select, Stack, Text } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
 import { parseFeatureCollection } from '../types';
 import { useStore } from '../store';
-import { runAndFetch } from '../api/client';
+import { fetchAlgorithms, runAndFetch } from '../api/client';
 
 export function DataSourcePanel() {
   const setInput = useStore((state) => state.setInput);
   const setResult = useStore((state) => state.setResult);
+  const algorithms = useStore((state) => state.algorithms);
+  const selectedAlgorithm = useStore((state) => state.selectedAlgorithm);
+  const setAlgorithms = useStore((state) => state.setAlgorithms);
+  const setSelectedAlgorithm = useStore((state) => state.setSelectedAlgorithm);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const { data: fetchedAlgorithms, error: algorithmsError } = useQuery({
+    queryKey: ['algorithms'],
+    queryFn: fetchAlgorithms,
+    // Бэкенд может подниматься позже фронтенда (devenv dev) — повторяем.
+    retry: 6,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
+  });
+
+  useEffect(() => {
+    if (fetchedAlgorithms) {
+      setAlgorithms(fetchedAlgorithms);
+    }
+  }, [fetchedAlgorithms, setAlgorithms]);
 
   const loadFile = async (file: File | null, setter: (value: ReturnType<typeof parseFeatureCollection>) => void) => {
     if (!file) {
@@ -32,7 +51,10 @@ export function DataSourcePanel() {
     setBusy(true);
     setError(null);
     try {
-      const result = await runAndFetch(file, setStatus);
+      // Показываем входные данные (ОКС, существующая сеть) вместе с результатом.
+      const parsedInput = parseFeatureCollection(JSON.parse(await file.text()));
+      setInput(parsedInput);
+      const result = await runAndFetch(file, selectedAlgorithm, setStatus);
       setResult(result);
       setStatus('Готово');
     } catch (exception) {
@@ -63,6 +85,24 @@ export function DataSourcePanel() {
       </FileButton>
 
       <Divider label="через сервис" labelPosition="center" my={4} />
+      <Select
+        label="Алгоритм трассировки"
+        size="xs"
+        placeholder={algorithms.length === 0 ? 'Загрузка…' : 'Выберите алгоритм'}
+        data={algorithms.map((algorithm) => ({
+          value: algorithm.id,
+          label: `${algorithm.id} — ${algorithm.description}`,
+        }))}
+        value={selectedAlgorithm}
+        onChange={setSelectedAlgorithm}
+        allowDeselect={false}
+        disabled={algorithms.length === 0}
+      />
+      {algorithmsError && (
+        <Text size="xs" c="red">
+          Не удалось получить список алгоритмов: {String(algorithmsError)}
+        </Text>
+      )}
       <FileButton accept=".geojson,.json,application/geo+json" onChange={runViaApi}>
         {(props) => (
           <Button {...props} size="xs" loading={busy} disabled={busy}>

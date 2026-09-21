@@ -7,13 +7,10 @@ const ROWS: Array<{ key: keyof FeatureProperties; label: string; money?: boolean
   { key: 'calculated_cost', label: 'Итоговая стоимость, руб.', money: true },
   { key: 'construction_cost', label: 'Новые участки, руб.', money: true },
   { key: 'chamber_construction_cost', label: 'Новые камеры, руб.', money: true },
-  { key: 'tie_in_cost', label: 'Врезки, руб.', money: true },
-  { key: 'reconstruction_cost', label: 'Реконструкция участков, руб.', money: true },
-  { key: 'chamber_reconstruction_cost', label: 'Реконструкция камер, руб.', money: true },
+  { key: 'existing_chamber_tie_in_count', label: 'Врезок в существующие камеры' },
+  { key: 'existing_chamber_tie_in_cost', label: 'Стоимость врезок, руб.', money: true },
   { key: 'unconnected_penalty', label: 'Штраф за неподключённые, руб.', money: true },
   { key: 'new_network_length', label: 'Длина новой сети, м' },
-  { key: 'reconstruction_length', label: 'Длина реконструкции, м' },
-  { key: 'length', label: 'Общая длина работ, м' },
   { key: 'score', label: 'Показатель S' },
 ];
 
@@ -94,7 +91,7 @@ export function VariantSummaryPanel() {
             <Table.Tr>
               <Table.Td fw={600}>Длина, м</Table.Td>
               {summaries.map(({ variant, properties }) => (
-                <Table.Td key={variant}>{formatNumber(properties?.length, false)}</Table.Td>
+                <Table.Td key={variant}>{formatNumber(properties?.new_network_length, false)}</Table.Td>
               ))}
             </Table.Tr>
             <Table.Tr>
