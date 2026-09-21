@@ -47,6 +47,23 @@
       [ -d frontend/node_modules ] || pnpm --dir frontend install
       mvn -q spring-boot:run &
       APP_PID=$!
+      # Ждём готовности API, иначе Vite-прокси сразу получит ECONNREFUSED.
+      echo "Ожидание готовности API (http://localhost:8080/actuator/health)…"
+      for _ in $(seq 1 600); do
+        if curl -fsS http://localhost:8080/actuator/health >/dev/null 2>&1; then
+          break
+        fi
+        if ! kill -0 $APP_PID 2>/dev/null; then
+          echo "Приложение не запустилось (mvn spring-boot:run)." >&2
+          exit 1
+        fi
+        sleep 1
+      done
+      curl -fsS http://localhost:8080/actuator/health >/dev/null 2>&1 || {
+        echo "API не поднялся за 600 с." >&2
+        exit 1
+      }
+      echo "API готов."
       pnpm --dir frontend dev &
       FE_PID=$!
       trap 'kill $APP_PID $FE_PID 2>/dev/null' EXIT INT TERM
@@ -54,24 +71,27 @@
     '';
     fe-dev.exec = "pnpm --dir frontend dev";
     fe-build.exec = "pnpm --dir frontend build";
+    # Прод-раздача без Docker (sirv + production-сборка) для проверки подложки/тайлов.
+    fe-preview.exec = "pnpm --dir frontend build && pnpm --dir frontend preview";
     db-up.exec = "docker compose up -d db";
     db-down.exec = "docker compose stop db";
     db-logs.exec = "docker compose logs -f db";
-    # podman-compose не умеет корректно удалять зависимые контейнеры сразу:
-    # сначала останавливаем все, затем удаляем с --remove-orphans.
-    stop.exec = "docker compose --profile frontend stop";
+    # podman-compose неполно поддерживает `--profile`: включаем профиль через
+    # COMPOSE_PROFILES, иначе сервис frontend не создаётся.
+    stop.exec = "COMPOSE_PROFILES=frontend docker compose stop";
     up.exec = "docker compose up --build -d";
-    down.exec = "docker compose --profile frontend stop; docker compose --profile frontend down --remove-orphans";
+    down.exec = "COMPOSE_PROFILES=frontend docker compose stop; COMPOSE_PROFILES=frontend docker compose down --remove-orphans";
     # Полный стек (app + db + визуализатор, профиль frontend).
-    fe-up.exec = "docker compose --profile frontend up --build -d";
-    fe-logs.exec = "docker compose logs -f frontend";
+    fe-up.exec = "COMPOSE_PROFILES=frontend docker compose up --build -d";
+    fe-logs.exec = "COMPOSE_PROFILES=frontend docker compose logs -f frontend";
+    ps.exec = "COMPOSE_PROFILES=frontend docker compose ps";
   };
 
   enterShell = ''
     echo "Java:  $(java -version 2>&1 | head -n 1)"
     echo "Maven: $(mvn -v 2>/dev/null | head -n 1)"
     echo "Node:  $(node -v 2>/dev/null)  pnpm: $(pnpm -v 2>/dev/null)"
-    echo "Scripts: dev | build | test | verify | run | fe-dev | fe-build | db-up | db-down | db-logs | up | down | stop | fe-up | fe-logs"
+    echo "Scripts: dev | build | test | verify | run | fe-dev | fe-build | fe-preview | db-up | db-down | db-logs | up | down | stop | fe-up | fe-logs | ps"
   '';
 
   # Fast smoke check used by `devenv test` (CI / entering the shell).

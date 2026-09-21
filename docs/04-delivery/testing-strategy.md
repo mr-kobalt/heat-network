@@ -112,7 +112,42 @@
   `start_node_id`/`end_node_id` концам `LineString` (FR-83).
 - Итого `mvn test` — 56 тестов без внешней БД.
 
-## 10. История изменений
+## 10. Быстрые тесты и slow-набор (ADR-0027)
+
+- `mvn test` по умолчанию **быстрый** (секунды): сквозной
+  `CalculationPipelineTest` выполняется на маленьком фикстуре
+  `src/test/resources/datasets/pipeline-small.geojson` с алгоритмом по
+  умолчанию `grid-forest`.
+- Полный прогон на `source/Датасет скорректированный.geojson` вынесен в
+  `CalculationPipelineSlowTest` с тегом `slow`; surefire исключает его по
+  умолчанию (`surefire.excludedGroups=slow`).
+- Запуск полного: `mvn test -Dsurefire.excludedGroups= -Dgroups=slow`.
+- Плагинный слой проверяется без датасета: `TracingAlgorithmRegistryTest`
+  (дефолт/`require`/дубликат), `AlgorithmControllerTest` (`@WebMvcTest`).
+- **Свип мета-параметров** `AlgorithmParameterSweepTest` (тег slow): полный
+  Spring-контекст + PostGIS (Testcontainers, без Docker — пропуск), реальный
+  набор; полный перебор `forest-grid-cell-m` × `forest-cost-iterations` ×
+  `forest-max-turn-deg` × `forest-grid-storage`. Отчёт:
+  `target/algorithm-sweep/report.{md,csv,json}` + таблица в консоль.
+  Запуск: `mvn test -Dtest=AlgorithmParameterSweepTest
+  -Dsurefire.excludedGroups= -Dgroups=slow`.
+- `PostgisCellStoreTest` (slow, БД) проверяет спилл и **свежесть** TEMP-таблицы
+  при переиспользовании соединения из пула (второй стор не видит страницы
+  первого).
+- **Дефолты трассировки** фиксируются `AppPropertiesDefaultsTest` (fast):
+  `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`.
+  Регресс на реальном наборе — `CalculationPipelineSlowTest
+  .producesRun28BaselineWithDefaultParameters` (baseline run-28: `score` ≈ 13.76,
+  длина ≈ 1906 м, `calculatedCost` = 287280116, `unconnected` = 0).
+- Вывод алгоритма `grid-forest` (единый лес, ADR-0034) дополнительно проверяется на
+  фикстуре: ссылки узлов = концы геометрии, точки подключения — листья,
+  ветвления только в камерах, нет камер с id точки подключения, участки не
+  входят в `oks`-полигоны вне финального вывода, `unconnected` согласованы.
+  Юнит-тесты `GridForestTracingAlgorithmTest`: точка в ОКС сохраняет вершину
+  выхода (`target`), близкие точки вдали от сети делят одно дерево
+  (T-присоединение), угол поворота не превышает 90°.
+
+## 11. История изменений
 
 | Дата | Изменение | Автор |
 |------|-----------|-------|
@@ -121,3 +156,8 @@
 | 2026-09-19 | Раздел о тестах M1 и ручной проверке API | команда |
 | 2026-09-19 | Ревизия по ТП v2: обновлён список обязательных проверок, удалены тесты реконструкции и удорожания углов, добавлены тесты v2; 56 тестов | команда |
 | 2026-09-19 | Добавлен раздел о тестах M2 (фазы A–F), 59 тестов без внешней БД | команда |
+| 2026-09-19 | ADR-0027: быстрый сквозной тест на фикстуре по умолчанию, полный набор — тег slow; тесты реестра алгоритмов | команда |
+| 2026-09-21 | ADR-0034: проверки вывода единого леса (`grid-forest`) на фикстуре | команда |
+| 2026-09-21 | Добавлен свип мета-параметров `AlgorithmParameterSweepTest` (Spring + PostGIS/Testcontainers, отчёт в `target/algorithm-sweep/`) | команда |
+| 2026-09-21 | `PostgisCellStoreTest`: проверка свежести TEMP-страниц при переиспользовании соединения из пула | команда |
+| 2026-09-21 | Дефолты по run-28: `AppPropertiesDefaultsTest` (fast) и baseline-регресс `CalculationPipelineSlowTest` | команда |
