@@ -135,10 +135,13 @@
   при переиспользовании соединения из пула (второй стор не видит страницы
   первого).
 - **Дефолты трассировки** фиксируются `AppPropertiesDefaultsTest` (fast):
-  `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`.
+  `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`,
+  `terminal-cell-search=nearest`, переприсоединение терминалов, граница ОКС.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline run-28: `score` ≈ 13.76,
-  длина ≈ 1906 м, `calculatedCost` = 287280116, `unconnected` = 0).
+  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0035:
+  `score` ≈ 13.0691, длина ≈ 1810.55 м, `calculatedCost` = 272767596,
+  `unconnected` = 0, `TURN_ANGLE_EXCEEDS_90` ≤ 2, не более 12 вершин на участок,
+  ребро к точке 6 < 60 м — геометрический регресс присоединения).
 - Вывод алгоритма `grid-forest` (единый лес, ADR-0034) дополнительно проверяется на
   фикстуре: ссылки узлов = концы геометрии, точки подключения — листья,
   ветвления только в камерах, нет камер с id точки подключения, участки не
@@ -161,3 +164,6 @@
 | 2026-09-21 | Добавлен свип мета-параметров `AlgorithmParameterSweepTest` (Spring + PostGIS/Testcontainers, отчёт в `target/algorithm-sweep/`) | команда |
 | 2026-09-21 | `PostgisCellStoreTest`: проверка свежести TEMP-страниц при переиспользовании соединения из пула | команда |
 | 2026-09-21 | Дефолты по run-28: `AppPropertiesDefaultsTest` (fast) и baseline-регресс `CalculationPipelineSlowTest` | команда |
+| 2026-09-22 | Baseline переснят после локального ремонта поворотов; добавлен регресс зигзагов (≤12 вершин на участок) | команда |
+| 2026-09-22 | ADR-0035: переснят baseline (выбор клетки входа `nearest`); регресс присоединения точки 6 к `br_0_11` | команда |
+| 2026-09-22 | ADR-0035 (доп.): baseline с переприсоединением (`S` 13.0691); геометрический регресс ребра к точке 6 (< 60 м) | команда |
