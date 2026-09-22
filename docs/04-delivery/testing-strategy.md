@@ -131,15 +131,22 @@
   `target/algorithm-sweep/report.{md,csv,json}` + таблица в консоль.
   Запуск: `mvn test -Dtest=AlgorithmParameterSweepTest
   -Dsurefire.excludedGroups= -Dgroups=slow`.
+- **Свип v2** `AlgorithmParameterSweepV2Test` (тег slow, ADR-0035): угол
+  фиксирован 90°, двухстадийный — поведенческие флаги присоединения
+  (`multi-entry`, `cell-search`, `reattach`, `refine-passes`, `exit-dogleg`,
+  `boundary`, 96) + подсвип `entry-cells`, затем сетка (`cell × iterations ×
+  storage`). Метрики включают `edgePoint6` и `warn90`. Отчёты:
+  `target/algorithm-sweep-2/{stage1,entrycells,stage2}/report.{md,csv,json}`.
+  Итог: `multi-entry=true` + `reattach=true` → `S` 12.810, точка 6 ≈33.6 м.
 - `PostgisCellStoreTest` (slow, БД) проверяет спилл и **свежесть** TEMP-таблицы
   при переиспользовании соединения из пула (второй стор не видит страницы
   первого).
 - **Дефолты трассировки** фиксируются `AppPropertiesDefaultsTest` (fast):
   `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`,
-  `terminal-cell-search=nearest`, переприсоединение терминалов, граница ОКС.
+  `terminal-cell-search=nearest`, мультивход, переприсоединение, граница ОКС.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
   .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0035:
-  `score` ≈ 13.0691, длина ≈ 1810.55 м, `calculatedCost` = 272767596,
+  `score` ≈ 12.8104, длина ≈ 1816.79 м, `calculatedCost` = 262858784,
   `unconnected` = 0, `TURN_ANGLE_EXCEEDS_90` ≤ 2, не более 12 вершин на участок,
   ребро к точке 6 < 60 м — геометрический регресс присоединения).
 - Вывод алгоритма `grid-forest` (единый лес, ADR-0034) дополнительно проверяется на
@@ -167,3 +174,4 @@
 | 2026-09-22 | Baseline переснят после локального ремонта поворотов; добавлен регресс зигзагов (≤12 вершин на участок) | команда |
 | 2026-09-22 | ADR-0035: переснят baseline (выбор клетки входа `nearest`); регресс присоединения точки 6 к `br_0_11` | команда |
 | 2026-09-22 | ADR-0035 (доп.): baseline с переприсоединением (`S` 13.0691); геометрический регресс ребра к точке 6 (< 60 м) | команда |
+| 2026-09-22 | Свип v2 (угол 90°) `AlgorithmParameterSweepV2Test`; `multiEntry=true` дефолтом, baseline `S` 12.8104 | команда |
