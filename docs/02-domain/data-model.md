@@ -145,7 +145,7 @@
   содержит `passes` (номера проходов) и `bestPass`.
 - `<этап>.geojson` — `FeatureCollection` в WGS84: `network`, `restrictions`
   (запретные буферы `obstacle` + спецзоны `special_zone`), `exits`,
-  `trees-<проход>`, `refine`, `relink`. Каждый объект имеет
+  `trees-<проход>`, `relink`, `refine`. Каждый объект имеет
   `object_type` (`network_segment`, `heat_chamber`, `source`, `obstacle`,
   `special_zone`, `exit_target`, `exit_tail`, `tree_cell`, `forest_edge`,
   `forest_node`) и вспомогательные атрибуты (`id`, `diameter_mm`, `flow_tph`,
@@ -175,3 +175,4 @@
 | 2026-09-19 | Ревизия по ТП v2: базовый вход без `oks_future`/`oks_existing`, ОКС как `restriction`; ID string/number; вывод только 4 типов; новая сводка `existing_chamber_tie_in_*`; без `tie_in` и реконструкции; доп. свойства допустимы | команда |
 | 2026-09-22 | ADR-0036: добавлен формат промежуточных этапов (manifest, stage GeoJSON, растровая маска сетки) | команда |
 | 2026-09-22 | ADR-0037: этапы `obstacles`/`special` объединены в `restrictions`; варианты по проходам, id узлов с префиксом варианта | команда |
+| 2026-09-22 | ADR-0038: порядок этапов `trees` → `relink` → `refine` | команда |

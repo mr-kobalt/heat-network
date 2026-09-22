@@ -145,10 +145,11 @@
   `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`,
   `terminal-cell-search=nearest`, мультивход, переприсоединение, граница ОКС.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0035:
-  `score` ≈ 12.8104, длина ≈ 1816.79 м, `calculatedCost` = 262858784,
-  `unconnected` = 0, `TURN_ANGLE_EXCEEDS_90` ≤ 2, не более 12 вершин на участок,
-  ребро к точке 6 < 60 м — геометрический регресс присоединения).
+  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0037/0038:
+  `score` ≈ 13.5299, длина ≈ 1918.43 м, `calculatedCost` = 277665607,
+  `chamberConstructionCost` = 58000000, `unconnected` = 0,
+  `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок, ребро к точке 6
+  < 60 м — геометрический регресс присоединения).
 - Вывод алгоритма `grid-forest` (единый лес, ADR-0034) дополнительно проверяется на
   фикстуре: ссылки узлов = концы геометрии, точки подключения — листья,
   ветвления только в камерах, нет камер с id точки подключения, участки не
@@ -175,3 +176,4 @@
 | 2026-09-22 | ADR-0035: переснят baseline (выбор клетки входа `nearest`); регресс присоединения точки 6 к `br_0_11` | команда |
 | 2026-09-22 | ADR-0035 (доп.): baseline с переприсоединением (`S` 13.0691); геометрический регресс ребра к точке 6 (< 60 м) | команда |
 | 2026-09-22 | Свип v2 (угол 90°) `AlgorithmParameterSweepV2Test`; `multiEntry=true` дефолтом, baseline `S` 12.8104 | команда |
+| 2026-09-22 | ADR-0038: baseline после refine-после-relink (`S` 13.5299, длина 1918.43 м); обновлён порядок этапов | команда |

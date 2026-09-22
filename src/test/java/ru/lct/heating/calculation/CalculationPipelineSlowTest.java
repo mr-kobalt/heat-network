@@ -61,11 +61,13 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         // ADR-0037: буферы по мин. Ду, выход — ближайшая точка на внешнем контуре
         // буфера всего ОКС (с учётом узких промежутков и достижимости), кандидаты 1 м.
-        // baseline пересчитан (S 12.810 → 13.596, длина 1816.8 → 1928.6 м).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.596223780264122, within(1e-6));
+        // ADR-0038: уточнение геометрии (refine) выполняется после переприсоединения
+        // (relink) — baseline пересчитан (S 13.596 → 13.530, длина 1928.6 → 1918.4 м,
+        // стоимость 278.9 → 277.7 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.529938514114438, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1928.6432080880413, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(278939077L);
+                .isCloseTo(1918.4338393714797, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(277665607L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(58000000L);
         // Допустимые >90° остаются на стыках вывода; вариантов теперь до 3.
         assertThat(outcome.getWarnings().stream()

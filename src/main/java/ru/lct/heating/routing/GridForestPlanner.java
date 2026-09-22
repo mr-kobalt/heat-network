@@ -217,8 +217,8 @@ public class GridForestPlanner {
             }
         }
         if (trace.isEnabled() && bestBuild != null) {
-            trace.addStage(StageTrace.REFINE, treeFeatures(bestBuild.refinedTrees));
             trace.addStage(StageTrace.RELINK, treeFeatures(bestBuild.relinkedTrees));
+            trace.addStage(StageTrace.REFINE, treeFeatures(bestBuild.refinedTrees));
             trace.setPasses(passStats.size());
             trace.setBestPass(bestPassIndex + 1);
         }
@@ -678,14 +678,12 @@ public class GridForestPlanner {
                 Map<Integer, String> ids = assignIds(topology, root, tie, connectedTerminalCells,
                         treeIndex);
                 ForestTree tree = buildTree(treeIndex, root, tie, topology, ids, pass, children,
-                        childCount, parentMap, terminalsByCell, flow, obstacleIndex, warnings,
-                        dnEstimate);
+                        childCount, parentMap, terminalsByCell, flow, dnEstimate);
                 if (tree != null) {
                     trees.add(tree);
                 }
                 treeIndex++;
             }
-            List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
 
             if (appProperties.isForestReattachPass() && !trees.isEmpty()) {
                 Map<String, ConnectionExit> exits = new HashMap<>();
@@ -706,6 +704,10 @@ public class GridForestPlanner {
                 trees = new TerminalRelinker(costModel, diameters, appProperties)
                         .relink(trees, exits, terminalFlow, obstacleIndex, own);
             }
+            List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
+            trees = refineTrees(trees, pass, obstacleIndex, terminalCells, warnings);
+            List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
+
             Set<String> connected = new HashSet<>();
             List<String> unconnected = new ArrayList<>();
             for (Terminal term : new LinkedHashSet<>(terminalCells.values())) {
@@ -716,7 +718,6 @@ public class GridForestPlanner {
                 }
             }
             double score = estimateScore(trees, unconnected, terminalFlow);
-            List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             return new GridBuild(trees, score, connected, rawFeatures, refinedTrees, relinkedTrees);
         } finally {
             store.close();
@@ -897,8 +898,7 @@ public class GridForestPlanner {
                                  Map<Integer, List<Integer>> children,
                                  Map<Integer, Integer> childCount, Map<Integer, Integer> parent,
                                  Map<Integer, List<Terminal>> terminalsByCell,
-                                 Map<Integer, Double> flow, ObstacleIndex obstacleIndex,
-                                 List<String> warnings, int[] dnEstimate) {
+                                 Map<Integer, Double> flow, int[] dnEstimate) {
         Map<String, ForestNode> nodes = new HashMap<>();
         for (int cell : topology) {
             String id = ids.get(cell);
@@ -933,29 +933,11 @@ public class GridForestPlanner {
                     trunk.add(center(pass, intermediate));
                 }
                 trunk.add(center(pass, chain.end));
-                Coordinate startPrevious = null;
-                Integer parentCell = parent.get(cell);
-                if (parentCell != null && parentCell != -1) {
-                    startPrevious = center(pass, parentCell);
-                }
-                Coordinate endNext = null;
                 if (chain.terminal != null) {
-                    if (!chain.terminal.tail.isEmpty()) {
-                        endNext = chain.terminal.point;
-                    }
                     trunk.add(chain.terminal.target);
-                }
-                List<Coordinate> coordinates = new ArrayList<>(refine(trunk, obstacleIndex,
-                        startPrevious, endNext, chain.terminal != null));
-                if (chain.terminal != null && !chain.terminal.tail.isEmpty()) {
-                    coordinates.add(chain.terminal.point);
-                }
-                if (chain.terminal != null && exitGridDogleg()) {
-                    coordinates = rebuildExitJoint(coordinates, pass, obstacleIndex);
-                }
-                if (!turnsWithinLimit(coordinates, coordinates.size() - 2 - (chain.terminal != null
-                        ? 2 : 0))) {
-                    warnings.add("FOREST_TURN_UNRESOLVED: участок e_" + treeIndex + "_" + index);
+                    if (!chain.terminal.tail.isEmpty()) {
+                        trunk.add(chain.terminal.point);
+                    }
                 }
                 double edgeFlow = flow.getOrDefault(chain.end, 0.0);
                 int dn = selectDiameter(edgeFlow);
@@ -964,7 +946,7 @@ public class GridForestPlanner {
                         .id("e_" + treeIndex + "_" + index++)
                         .fromNodeId(fromId)
                         .toNodeId(ids.get(chain.end))
-                        .coordinates(coordinates)
+                        .coordinates(trunk)
                         .flowTph(edgeFlow)
                         .diameterMm(dn)
                         .build());
@@ -973,12 +955,107 @@ public class GridForestPlanner {
         if (edges.isEmpty()) {
             return null;
         }
-        try {
-            edges = maxLengthEnforcer.enforce(edges, ids.get(root));
-        } catch (IllegalArgumentException noDiameter) {
-            warnings.add("FOREST_MAX_LENGTH_UNRESOLVED: " + noDiameter.getMessage());
-        }
         return ForestTree.builder().tieInNodeId(ids.get(root)).nodes(nodes).edges(edges).build();
+    }
+
+    /**
+     * Финальное уточнение геометрии леса (ADR-0038): string pulling, ремонт
+     * поворотов и grid-заход на выход выполняются после {@code relink}, по
+     * финальной топологии — включая ветки, созданные переприсоединением.
+     * Предельная длина проверяется здесь же, по уже уточнённым путям.
+     */
+    private List<ForestTree> refineTrees(List<ForestTree> trees, ObstacleMask pass,
+                                         ObstacleIndex obstacleIndex,
+                                         Map<Integer, Terminal> terminalCells,
+                                         List<String> warnings) {
+        Map<String, Terminal> terminalsById = new HashMap<>();
+        for (Terminal terminal : new LinkedHashSet<>(terminalCells.values())) {
+            terminalsById.put(terminal.pointId, terminal);
+        }
+        List<ForestTree> result = new ArrayList<>();
+        for (ForestTree tree : trees) {
+            Map<String, ForestNode> nodes = tree.getNodes();
+            Map<String, String> parent = parentByRoot(tree);
+            List<ForestEdge> edges = new ArrayList<>();
+            for (ForestEdge edge : tree.getEdges()) {
+                ForestNode from = nodes.get(edge.getFromNodeId());
+                if (from == null || !nodes.containsKey(edge.getToNodeId())) {
+                    edges.add(edge);
+                    continue;
+                }
+                List<Coordinate> coordinates = new ArrayList<>(edge.getCoordinates());
+                Terminal terminal = terminalsById.get(edge.getToNodeId());
+                boolean isTerminal = terminal != null;
+                Coordinate endNext = isTerminal && !terminal.tail.isEmpty()
+                        ? terminal.point : null;
+                String parentId = parent.get(edge.getFromNodeId());
+                Coordinate startPrevious = parentId != null && nodes.containsKey(parentId)
+                        ? nodes.get(parentId).getCoordinate() : null;
+                List<Coordinate> refined;
+                if (isTerminal && !terminal.tail.isEmpty() && coordinates.size() >= 2) {
+                    Coordinate point = coordinates.get(coordinates.size() - 1);
+                    List<Coordinate> trunk = new ArrayList<>(
+                            coordinates.subList(0, coordinates.size() - 1));
+                    refined = new ArrayList<>(refine(trunk, obstacleIndex, startPrevious,
+                            endNext, true));
+                    refined.add(point);
+                } else {
+                    refined = new ArrayList<>(refine(coordinates, obstacleIndex, startPrevious,
+                            endNext, isTerminal));
+                }
+                if (isTerminal && exitGridDogleg()) {
+                    refined = rebuildExitJoint(refined, pass, obstacleIndex);
+                }
+                if (!turnsWithinLimit(refined, refined.size() - 2 - (isTerminal ? 2 : 0))) {
+                    warnings.add("FOREST_TURN_UNRESOLVED: участок " + edge.getId());
+                }
+                edges.add(ForestEdge.builder()
+                        .id(edge.getId())
+                        .fromNodeId(edge.getFromNodeId())
+                        .toNodeId(edge.getToNodeId())
+                        .coordinates(refined)
+                        .flowTph(edge.getFlowTph())
+                        .diameterMm(edge.getDiameterMm())
+                        .build());
+            }
+            try {
+                edges = maxLengthEnforcer.enforce(edges, tree.getTieInNodeId());
+            } catch (IllegalArgumentException noDiameter) {
+                warnings.add("FOREST_MAX_LENGTH_UNRESOLVED: " + noDiameter.getMessage());
+            }
+            result.add(ForestTree.builder().tieInNodeId(tree.getTieInNodeId())
+                    .nodes(nodes).edges(edges).build());
+        }
+        return result;
+    }
+
+    /** Ориентация рёбер дерева от корня: узел → родительский узел. */
+    private Map<String, String> parentByRoot(ForestTree tree) {
+        Map<String, List<String>> adjacency = new HashMap<>();
+        for (ForestEdge edge : tree.getEdges()) {
+            adjacency.computeIfAbsent(edge.getFromNodeId(), key -> new ArrayList<>())
+                    .add(edge.getToNodeId());
+            adjacency.computeIfAbsent(edge.getToNodeId(), key -> new ArrayList<>())
+                    .add(edge.getFromNodeId());
+        }
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>();
+        if (!tree.getNodes().containsKey(tree.getTieInNodeId())) {
+            return parent;
+        }
+        visited.add(tree.getTieInNodeId());
+        queue.add(tree.getTieInNodeId());
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (String next : adjacency.getOrDefault(current, List.of())) {
+                if (visited.add(next)) {
+                    parent.put(next, current);
+                    queue.add(next);
+                }
+            }
+        }
+        return parent;
     }
 
     private Chain walkChain(int child, Map<Integer, Integer> parent,

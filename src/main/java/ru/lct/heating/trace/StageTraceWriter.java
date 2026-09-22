@@ -269,10 +269,10 @@ public class StageTraceWriter {
         trees.put("passes", trace.treePasses());
         trees.put("bestPass", trace.bestPass());
         stages.add(trees);
-        stages.add(descriptor(StageTrace.REFINE, "Refine", "refine", "geojson",
-                trace.hasStage(StageTrace.REFINE)));
         stages.add(descriptor(StageTrace.RELINK, "Relink", "relink", "geojson",
                 trace.hasStage(StageTrace.RELINK)));
+        stages.add(descriptor(StageTrace.REFINE, "Refine", "refine", "geojson",
+                trace.hasStage(StageTrace.REFINE)));
         manifest.put("stages", stages);
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), manifest);
     }
