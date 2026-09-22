@@ -67,6 +67,36 @@ describe('store', () => {
     useStore.getState().toggleLayer('restrictionBuffers');
   });
 
+  it('activates stages from a manifest and resets on a new result', () => {
+    useStore.getState().setStages('run-1', {
+      runId: 'run-1',
+      algorithm: 'grid-forest',
+      passes: 2,
+      bestPass: 2,
+      stages: [
+        { id: 'input', title: 'Вход', kind: 'input', format: 'input', available: true },
+        { id: 'trees', title: 'Деревья', kind: 'trees', format: 'geojson', available: true, passes: [1, 2], bestPass: 2 },
+      ],
+    });
+    expect(useStore.getState().traced).toBe(true);
+    expect(useStore.getState().runId).toBe('run-1');
+    expect(useStore.getState().activeStage).toBe('result');
+    expect(useStore.getState().treePass).toBe(2);
+
+    useStore.getState().setActiveStage('trees');
+    useStore.getState().setTreePass(1);
+    expect(useStore.getState().activeStage).toBe('trees');
+    expect(useStore.getState().treePass).toBe(1);
+
+    useStore.getState().setStageData('trees-1', { type: 'FeatureCollection', features: [] });
+    expect(useStore.getState().stageData['trees-1']).toBeDefined();
+
+    useStore.getState().setResult({ type: 'FeatureCollection', features: [] });
+    expect(useStore.getState().traced).toBe(false);
+    expect(useStore.getState().activeStage).toBe('result');
+    expect(useStore.getState().stages).toEqual([]);
+  });
+
   it('collects variants from the result', () => {
     useStore.getState().setResult({
       type: 'FeatureCollection',

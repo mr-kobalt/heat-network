@@ -24,6 +24,9 @@ public class CalculationRunEntity {
 
     private String algorithm;
 
+    /** ADR-0036: запрошена поэтапная трассировка для визуализации. */
+    private boolean trace;
+
     private Instant createdAt;
 
     private Instant startedAt;

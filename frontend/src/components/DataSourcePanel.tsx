@@ -3,7 +3,7 @@ import { Alert, Button, Divider, FileButton, Select, Stack, Text } from '@mantin
 import { useQuery } from '@tanstack/react-query';
 import { parseFeatureCollection } from '../types';
 import { useStore } from '../store';
-import { fetchAlgorithms, runAndFetch } from '../api/client';
+import { fetchAlgorithms, fetchStages, runAndFetch } from '../api/client';
 
 export function DataSourcePanel() {
   const setInput = useStore((state) => state.setInput);
@@ -12,6 +12,7 @@ export function DataSourcePanel() {
   const selectedAlgorithm = useStore((state) => state.selectedAlgorithm);
   const setAlgorithms = useStore((state) => state.setAlgorithms);
   const setSelectedAlgorithm = useStore((state) => state.setSelectedAlgorithm);
+  const setStages = useStore((state) => state.setStages);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,8 +55,16 @@ export function DataSourcePanel() {
       // Показываем входные данные (ОКС, существующая сеть) вместе с результатом.
       const parsedInput = parseFeatureCollection(JSON.parse(await file.text()));
       setInput(parsedInput);
-      const result = await runAndFetch(file, selectedAlgorithm, setStatus);
-      setResult(result);
+      const run = await runAndFetch(file, selectedAlgorithm, setStatus);
+      setResult(run.result);
+      if (run.traced && run.runId) {
+        try {
+          const manifest = await fetchStages(run.runId);
+          setStages(run.runId, manifest);
+        } catch (stageError) {
+          console.warn('Не удалось загрузить этапы расчёта', stageError);
+        }
+      }
       setStatus('Готово');
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : String(exception));

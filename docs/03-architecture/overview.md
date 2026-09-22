@@ -59,6 +59,7 @@ ingest ──▶ geometry ──▶ graph ──▶ routing ──▶ hydraulics
 | `ru.lct.heating.persistence` | Доступ к данным (JPA/PostGIS) |
 | `ru.lct.heating.domain` | Доменные модели |
 | `ru.lct.heating.calculation` | Оркестрация конвейера и асинхронные запуски |
+| `ru.lct.heating.trace` | Opt-in поэтапная трассировка для визуализации (ADR-0036) |
 | `ru.lct.heating.config` | Конфигурация, OpenAPI, профили |
 
 > Пакет `reconstruction` удалён: ТП v2 исключает реконструкцию (разъяснение 14).
@@ -83,6 +84,9 @@ ingest ──▶ geometry ──▶ graph ──▶ routing ──▶ hydraulics
    существующие камеры, штрафов.
 8. **Варианты.** `variants` формирует до трёх вариантов и рассчитывает `S`.
 9. **Вывод.** `output` пишет единый GeoJSON.
+10. **Этапы (опционально).** При `?trace=true` `trace` сохраняет промежуточные
+    данные этапов в `runs/<id>/stages/` (`GET /api/v1/runs/{id}/stages`,
+    ADR-0036); без флага конвейер работает как раньше.
 
 ## 5. Ключевые архитектурные решения
 
@@ -122,3 +126,4 @@ ingest ──▶ geometry ──▶ graph ──▶ routing ──▶ hydraulics
 | 2026-09-19 | M1: добавлены контейнер `frontend` (опционально) и пакет `calculation`; уточнена роль БД (метаданные) | команда |
 | 2026-09-19 | M2: реализованы пакеты `reconstruction` и `variants`; спецпроходы в `geometry` (ADR-0018…0020) | команда |
 | 2026-09-19 | Ревизия по ТП v2: пакет `reconstruction` удалён, топология по геометрии, присоединение через камеру, Ду/длина по путям | команда |
+| 2026-09-22 | ADR-0036: добавлен пакет `trace` (opt-in этапы) и API `/runs/{id}/stages` | команда |

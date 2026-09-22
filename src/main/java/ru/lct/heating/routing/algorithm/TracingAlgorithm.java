@@ -7,6 +7,7 @@ import ru.lct.heating.geometry.ObstacleIndex;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.routing.ConnectionExit;
 import ru.lct.heating.routing.ForestPlanningResult;
+import ru.lct.heating.trace.StageTrace;
 
 /**
  * Подключаемый алгоритм трассировки (ADR-0027). Алгоритм строит план(ы)
@@ -31,4 +32,15 @@ public interface TracingAlgorithm {
     List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
                                     ObstacleIndex obstacleIndex, List<String> warnings,
                                     Map<String, ConnectionExit> exits);
+
+    /**
+     * План(ы) трассировки с записью промежуточных этапов (ADR-0036). По умолчанию
+     * трассировка не поддерживается — вызов без неё; алгоритмы, поддерживающие
+     * визуализацию этапов, переопределяют этот метод.
+     */
+    default List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                            ObstacleIndex obstacleIndex, List<String> warnings,
+                                            Map<String, ConnectionExit> exits, StageTrace trace) {
+        return plan(dataset, graph, obstacleIndex, warnings, exits);
+    }
 }

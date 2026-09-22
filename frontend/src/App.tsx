@@ -5,6 +5,8 @@ import { MapView } from './map/MapView';
 import { DataSourcePanel } from './components/DataSourcePanel';
 import { VariantSummaryPanel } from './components/VariantSummaryPanel';
 import { LayersPanel } from './components/LayersPanel';
+import { StageTabs } from './components/StageTabs';
+import { StageDataLoader } from './components/StageDataLoader';
 
 const MIN_NAV_WIDTH = 240;
 const MAX_NAV_WIDTH = 640;
@@ -62,14 +64,15 @@ export function App() {
       padding={0}
     >
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+        <Group h="100%" px="md" gap="md" wrap="nowrap" align="center">
           <Group gap="xs" wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
             <Title order={4}>Трассы теплосети</Title>
             <Badge variant="light">ТП v2</Badge>
           </Group>
-          <Text size="xs" c="dimmed" visibleFrom="md">
-            визуализатор (ADR-0013), вне оцениваемой поставки
+          <StageTabs />
+          <Text size="xs" c="dimmed" visibleFrom="lg" style={{ whiteSpace: 'nowrap' }}>
+            визуализатор (ADR-0013)
           </Text>
         </Group>
       </AppShell.Header>
@@ -101,6 +104,7 @@ export function App() {
           }}
         />
         <MapView />
+        <StageDataLoader />
       </AppShell.Main>
     </AppShell>
   );

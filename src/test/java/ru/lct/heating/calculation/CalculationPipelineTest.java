@@ -36,6 +36,33 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
     }
 
     @Test
+    void writesStageFilesWhenTraceEnabled() throws Exception {
+        assumeTrue(Files.exists(SAMPLE), "Фикстур pipeline-small.geojson недоступен");
+
+        Path resultFile = tempDir.resolve("traced-result.geojson");
+        Path summaryFile = tempDir.resolve("traced-summary.json");
+        Path stagesDir = tempDir.resolve("stages");
+
+        CalculationOutcome outcome = service().calculate(SAMPLE, resultFile, summaryFile, null,
+                null, stagesDir);
+
+        assertThat(outcome.getSummary()).isNotNull();
+        assertThat(Files.exists(stagesDir.resolve("manifest.json"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("grid.json"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("network.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("obstacles.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("special.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("exits.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("trees-1.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("refine.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("relink.geojson"))).isTrue();
+
+        JsonNode manifest = new ObjectMapper().readTree(stagesDir.resolve("manifest.json").toFile());
+        assertThat(manifest.path("algorithm").asText()).isEqualTo("grid-forest");
+        assertThat(manifest.path("bestPass").asInt()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
     void producesResultWithExplicitGridForestOnSmallFixture() throws Exception {
         assumeTrue(Files.exists(SAMPLE), "Фикстур pipeline-small.geojson недоступен");
 

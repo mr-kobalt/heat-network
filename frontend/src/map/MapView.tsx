@@ -9,9 +9,8 @@ import {
   CHAMBER_EXISTING_COLOR,
   CHAMBER_NEW_COLOR,
   SELECTABLE_LAYER_IDS,
-  fitToData,
-  updateOverlays,
 } from './layers';
+import { applyOverlays, fitStageToData } from './stageLayers';
 import { addOverlayIcons, overlayIconById } from './icons';
 import { EMPTY_COLLECTION, buildRestrictionBuffers } from './buffers';
 import { FitZoomControl } from './controls';
@@ -59,15 +58,44 @@ export function MapView() {
   const selected = useStore((state) => state.selected);
   const selectedAnchor = useStore((state) => state.selectedAnchor);
   const select = useStore((state) => state.select);
+  const activeStage = useStore((state) => state.activeStage);
+  const treePass = useStore((state) => state.treePass);
+  const stageData = useStore((state) => state.stageData);
+  const gridMask = useStore((state) => state.gridMask);
 
   const buffers = useMemo(
     () => (visibility.restrictionBuffers ? buildRestrictionBuffers(input) : EMPTY_COLLECTION),
     [visibility.restrictionBuffers, input],
   );
 
+  const stageFeatures = useMemo(() => {
+    const key = activeStage === 'trees' ? `trees-${treePass}` : activeStage;
+    return stageData[key] ?? null;
+  }, [activeStage, treePass, stageData]);
+
   const overlayData = useMemo(
-    () => ({ input, result, activeVariant, visibility, buffers, realPipeScale }),
-    [input, result, activeVariant, visibility, buffers, realPipeScale],
+    () => ({
+      input,
+      result,
+      activeVariant,
+      visibility,
+      buffers,
+      realPipeScale,
+      activeStage,
+      stageFeatures,
+      gridMask,
+    }),
+    [
+      input,
+      result,
+      activeVariant,
+      visibility,
+      buffers,
+      realPipeScale,
+      activeStage,
+      stageFeatures,
+      gridMask,
+    ],
   );
   const overlayRef = useRef(overlayData);
   useEffect(() => {
@@ -110,7 +138,7 @@ export function MapView() {
           onFit: () => {
             const current = mapRef.current;
             if (current) {
-              fitToData(current, overlayRef.current);
+              fitStageToData(current, overlayRef.current);
             }
           },
         }),
@@ -127,7 +155,7 @@ export function MapView() {
       // подложки через setStyle, когда слои стиля пересоздаются).
       map.on('style.load', () => {
         addOverlayIcons(map, CHAMBER_EXISTING_COLOR, CHAMBER_NEW_COLOR);
-        updateOverlays(map, overlayRef.current);
+        applyOverlays(map, overlayRef.current);
       });
       map.on('load', () => setReady(true));
       map.on('styleimagemissing', (event) => {
@@ -208,7 +236,7 @@ export function MapView() {
     if (!ready || !map) {
       return;
     }
-    updateOverlays(map, overlayData);
+    applyOverlays(map, overlayData);
   }, [ready, overlayData]);
 
   // Смена подложки: setStyle пересоздаёт слои; оверлеи вернёт style.load.
@@ -259,10 +287,10 @@ export function MapView() {
     if (!ready || !map) {
       return;
     }
-    fitToData(map, overlayData);
-    // Переподгонка вида — только при смене данных/варианта, не при тумблерах слоёв.
+    fitStageToData(map, overlayData);
+    // Переподгонка вида — только при смене данных/варианта/этапа, не при тумблерах слоёв.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, input, result, activeVariant]);
+  }, [ready, input, result, activeVariant, activeStage, treePass]);
 
   return (
     <div ref={containerRef} style={CONTAINER_STYLE}>

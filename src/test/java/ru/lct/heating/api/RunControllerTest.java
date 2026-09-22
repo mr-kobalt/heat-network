@@ -33,14 +33,14 @@ class RunControllerTest {
         UUID datasetId = UUID.randomUUID();
         CalculationRunEntity run = new CalculationRunEntity();
         run.setId(UUID.randomUUID());
-        when(runService.create(datasetId, "grid-forest")).thenReturn(run);
+        when(runService.create(datasetId, "grid-forest", false)).thenReturn(run);
         when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
 
         mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId)
                         .param("algorithm", "grid-forest"))
                 .andExpect(status().isAccepted());
 
-        verify(runService).create(datasetId, "grid-forest");
+        verify(runService).create(datasetId, "grid-forest", false);
     }
 
     @Test
@@ -48,12 +48,28 @@ class RunControllerTest {
         UUID datasetId = UUID.randomUUID();
         CalculationRunEntity run = new CalculationRunEntity();
         run.setId(UUID.randomUUID());
-        when(runService.create(datasetId, null)).thenReturn(run);
+        when(runService.create(datasetId, null, false)).thenReturn(run);
         when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
 
         mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId))
                 .andExpect(status().isAccepted());
 
-        verify(runService).create(eq(datasetId), isNull());
+        verify(runService).create(eq(datasetId), isNull(), eq(false));
+    }
+
+    @Test
+    void passesTraceParameter() throws Exception {
+        UUID datasetId = UUID.randomUUID();
+        CalculationRunEntity run = new CalculationRunEntity();
+        run.setId(UUID.randomUUID());
+        when(runService.create(datasetId, "grid-forest", true)).thenReturn(run);
+        when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
+
+        mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId)
+                        .param("algorithm", "grid-forest")
+                        .param("trace", "true"))
+                .andExpect(status().isAccepted());
+
+        verify(runService).create(datasetId, "grid-forest", true);
     }
 }

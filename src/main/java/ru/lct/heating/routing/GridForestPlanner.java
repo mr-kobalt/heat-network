@@ -29,6 +29,10 @@ import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.hydraulics.DiameterCatalog;
 import ru.lct.heating.hydraulics.DiameterRow;
 import ru.lct.heating.hydraulics.MaxLengthEnforcer;
+import ru.lct.heating.trace.GridMaskCodec;
+import ru.lct.heating.trace.GridMaskPayload;
+import ru.lct.heating.trace.StageFeature;
+import ru.lct.heating.trace.StageTrace;
 
 /**
  * Построение единого леса поиском по сетке (ADR-0034). Многоисточниковый
@@ -88,6 +92,12 @@ public class GridForestPlanner {
     public ForestPlanningResult plan(NetworkDataset dataset, ExistingNetworkGraph graph,
                                      ObstacleIndex obstacleIndex, List<String> warnings,
                                      Map<String, ConnectionExit> exits) {
+        return plan(dataset, graph, obstacleIndex, warnings, exits, StageTrace.disabled());
+    }
+
+    public ForestPlanningResult plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                     ObstacleIndex obstacleIndex, List<String> warnings,
+                                     Map<String, ConnectionExit> exits, StageTrace trace) {
         List<Terminal> terminals = terminals(dataset, exits, warnings);
         List<String> unconnected = new ArrayList<>();
         Set<String> terminalIds = new HashSet<>();
@@ -132,6 +142,9 @@ public class GridForestPlanner {
         long[] reachable = reachableCells(pass, sources.keySet());
         Map<Integer, Terminal> terminalCells = mapTerminals(pass, terminals, reachable,
                 new ArrayList<>(sources.values()));
+        if (trace.isEnabled()) {
+            captureGrid(trace, pass, sources, terminalCells, reachable);
+        }
         Map<String, Double> terminalFlow = new HashMap<>();
         double totalFlow = 0.0;
         for (Terminal terminal : terminals) {
@@ -146,22 +159,35 @@ public class GridForestPlanner {
         Set<String> connected = new HashSet<>();
         List<GridReport.Pass> passStats = new ArrayList<>();
         double bestScore = Double.POSITIVE_INFINITY;
+        int bestPassIndex = 0;
+        GridBuild bestBuild = null;
         for (int passIndex = 0; passIndex < iterations; passIndex++) {
             long passStart = System.nanoTime();
             GridBuild build = buildTrees(pass, sources, terminalCells, obstacleIndex, warnings,
-                    passIndex > 0, dnEstimate, terminalFlow);
+                    passIndex > 0, dnEstimate, terminalFlow, trace, passIndex + 1);
             long passMs = elapsedMs(passStart);
             passStats.add(GridReport.Pass.builder().index(passIndex + 1).score(build.score)
                     .trees(build.trees.size()).timeMs(passMs).build());
+            if (trace.isEnabled()) {
+                trace.addTreePass(passIndex + 1, build.rawFeatures);
+            }
             log.info("Grid pass {}/{}: score={} trees={} time={}ms", passIndex + 1, iterations,
                     build.score, build.trees.size(), passMs);
             if (build.score < bestScore - EPS) {
                 bestScore = build.score;
                 trees = build.trees;
                 connected = build.connected;
+                bestPassIndex = passIndex;
+                bestBuild = build;
             } else if (passIndex > 0) {
                 break;
             }
+        }
+        if (trace.isEnabled() && bestBuild != null) {
+            trace.addStage(StageTrace.REFINE, treeFeatures(bestBuild.refinedTrees));
+            trace.addStage(StageTrace.RELINK, treeFeatures(bestBuild.relinkedTrees));
+            trace.setPasses(passStats.size());
+            trace.setBestPass(bestPassIndex + 1);
         }
 
         for (Terminal terminal : terminals) {
@@ -527,7 +553,7 @@ public class GridForestPlanner {
     private GridBuild buildTrees(ObstacleMask pass, Map<Integer, TiePoint> sources,
                                  Map<Integer, Terminal> terminalCells, ObstacleIndex obstacleIndex,
                                  List<String> warnings, boolean costWeighted, int[] dnEstimate,
-                                 Map<String, Double> terminalFlow) {
+                                 Map<String, Double> terminalFlow, StageTrace trace, int passNumber) {
         int width = pass.width();
         int height = pass.height();
         int n = width * height;
@@ -654,6 +680,8 @@ public class GridForestPlanner {
                     current = parent;
                 }
             }
+            List<StageFeature> rawFeatures = trace.isEnabled()
+                    ? rawTreeFeatures(pass, treeCells, parentMap, passNumber) : List.of();
             Map<Integer, List<Integer>> children = new HashMap<>();
             Map<Integer, Integer> childCount = new HashMap<>();
             for (int cell : treeCells) {
@@ -723,6 +751,7 @@ public class GridForestPlanner {
                 }
                 treeIndex++;
             }
+            List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
 
             if (appProperties.isForestReattachPass() && !trees.isEmpty()) {
                 Map<String, ConnectionExit> exits = new HashMap<>();
@@ -753,10 +782,96 @@ public class GridForestPlanner {
                 }
             }
             double score = estimateScore(trees, unconnected, terminalFlow);
-            return new GridBuild(trees, score, connected);
+            List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
+            return new GridBuild(trees, score, connected, rawFeatures, refinedTrees, relinkedTrees);
         } finally {
             store.close();
         }
+    }
+
+    /** Сырое дерево прохода: отрезки сетки «родитель → клетка» до сглаживания. */
+    private List<StageFeature> rawTreeFeatures(ObstacleMask pass, Set<Integer> treeCells,
+                                               Map<Integer, Integer> parentMap, int passNumber) {
+        List<StageFeature> features = new ArrayList<>();
+        for (int cell : treeCells) {
+            int parent = parentMap.getOrDefault(cell, -1);
+            if (parent == -1) {
+                continue;
+            }
+            features.add(StageFeature.builder()
+                    .geometry(line(center(pass, parent), center(pass, cell)))
+                    .objectType("tree_cell")
+                    .properties(Map.of("pass", passNumber))
+                    .build());
+        }
+        return features;
+    }
+
+    /** Рёбра и узлы леса в виде объектов этапа (refine / relink). */
+    private List<StageFeature> treeFeatures(List<ForestTree> trees) {
+        List<StageFeature> features = new ArrayList<>();
+        if (trees == null) {
+            return features;
+        }
+        for (ForestTree tree : trees) {
+            for (ForestEdge edge : tree.getEdges()) {
+                features.add(StageFeature.builder()
+                        .geometry(GeometrySupport.GEOMETRY_FACTORY.createLineString(
+                                edge.getCoordinates().toArray(new Coordinate[0])))
+                        .objectType("forest_edge")
+                        .properties(Map.of(
+                                "id", edge.getId(),
+                                "from", edge.getFromNodeId(),
+                                "to", edge.getToNodeId(),
+                                "diameter_mm", edge.getDiameterMm(),
+                                "flow_tph", edge.getFlowTph()))
+                        .build());
+            }
+            for (ForestNode node : tree.getNodes().values()) {
+                features.add(StageFeature.builder()
+                        .geometry(GeometrySupport.GEOMETRY_FACTORY.createPoint(node.getCoordinate()))
+                        .objectType("forest_node")
+                        .properties(Map.of(
+                                "id", node.getId(),
+                                "node_type", node.getType().name(),
+                                "existing", node.isExisting()))
+                        .build());
+            }
+        }
+        return features;
+    }
+
+    /** Диагностика сетки для этапа «сетка» (ADR-0036). */
+    private void captureGrid(StageTrace trace, ObstacleMask pass, Map<Integer, TiePoint> sources,
+                             Map<Integer, Terminal> terminalCells, long[] reachable) {
+        int maxPixels = appProperties.getTraceGridMaxPixels();
+        GridMaskCodec.Downscale ds = GridMaskCodec.downscale(pass.width(), pass.height(), maxPixels);
+        int width = pass.width();
+        String blocked = GridMaskCodec.encode(width, pass.height(), ds,
+                index -> pass.blockedCell(index % width, index / width));
+        String reach = GridMaskCodec.encode(width, pass.height(), ds,
+                index -> (reachable[index >>> 6] & (1L << (index & 63))) != 0);
+        List<double[]> sourceCells = new ArrayList<>();
+        for (int cell : sources.keySet()) {
+            sourceCells.add(cellCenter(pass, cell));
+        }
+        List<double[]> terminals = new ArrayList<>();
+        for (int cell : terminalCells.keySet()) {
+            terminals.add(cellCenter(pass, cell));
+        }
+        trace.addGrid(GridMaskPayload.builder()
+                .originX(pass.originX()).originY(pass.originY()).cellM(pass.cellM())
+                .width(pass.width()).height(pass.height())
+                .imageWidth(ds.imageWidth).imageHeight(ds.imageHeight)
+                .imageCellM(pass.cellM() * ds.factor)
+                .downscaled(ds.factor > 1)
+                .blocked(blocked).reachable(reach)
+                .sources(sourceCells).terminalCells(terminals)
+                .build());
+    }
+
+    private double[] cellCenter(ObstacleMask pass, int cell) {
+        return new double[]{pass.centerX(cell % pass.width()), pass.centerY(cell / pass.width())};
     }
 
     private void updateEstimate(int[] dnEstimate, int parentCell, Chain chain, int dn) {
@@ -1229,11 +1344,19 @@ public class GridForestPlanner {
         private final List<ForestTree> trees;
         private final double score;
         private final Set<String> connected;
+        private final List<StageFeature> rawFeatures;
+        private final List<ForestTree> refinedTrees;
+        private final List<ForestTree> relinkedTrees;
 
-        private GridBuild(List<ForestTree> trees, double score, Set<String> connected) {
+        private GridBuild(List<ForestTree> trees, double score, Set<String> connected,
+                          List<StageFeature> rawFeatures, List<ForestTree> refinedTrees,
+                          List<ForestTree> relinkedTrees) {
             this.trees = trees;
             this.score = score;
             this.connected = connected;
+            this.rawFeatures = rawFeatures;
+            this.refinedTrees = refinedTrees;
+            this.relinkedTrees = relinkedTrees;
         }
     }
 

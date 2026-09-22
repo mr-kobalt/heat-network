@@ -51,6 +51,11 @@ public class StorageService {
         return directory(root.resolve("runs"), runId).resolve("warnings.json");
     }
 
+    /** Каталог промежуточных этапов расчёта (ADR-0036); создаётся писателем. */
+    public Path runStageDir(UUID runId) {
+        return directory(root.resolve("runs"), runId).resolve("stages");
+    }
+
     private Path directory(Path parent, UUID id) {
         Path directory = parent.resolve(id.toString());
         try {

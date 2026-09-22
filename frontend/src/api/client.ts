@@ -1,4 +1,4 @@
-import type { FeatureCollection } from '../types';
+import type { FeatureCollection, GridMask, StageManifest } from '../types';
 import { parseFeatureCollection } from '../types';
 
 /**
@@ -27,6 +27,7 @@ export interface RunResponse {
   datasetId: string;
   status: 'PENDING' | 'RUNNING' | 'DONE' | 'PARTIAL' | 'FAILED';
   algorithm?: string;
+  traced?: boolean;
   summary?: Record<string, unknown>;
   error?: string;
 }
@@ -58,8 +59,19 @@ export async function uploadDataset(file: File): Promise<DatasetResponse> {
   return response.json();
 }
 
-export async function createRun(datasetId: string, algorithm?: string | null): Promise<RunResponse> {
-  const query = algorithm ? `?algorithm=${encodeURIComponent(algorithm)}` : '';
+export async function createRun(
+  datasetId: string,
+  algorithm?: string | null,
+  trace = false,
+): Promise<RunResponse> {
+  const params = new URLSearchParams();
+  if (algorithm) {
+    params.set('algorithm', algorithm);
+  }
+  if (trace) {
+    params.set('trace', 'true');
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
   const response = await fetch(`${baseUrl}/api/v1/datasets/${datasetId}/runs${query}`, {
     method: 'POST',
   });
@@ -77,15 +89,40 @@ export async function fetchResult(runId: string): Promise<FeatureCollection> {
   return parseFeatureCollection(await response.json());
 }
 
+export async function fetchStages(runId: string): Promise<StageManifest> {
+  const response = await ensureOk(await fetch(`${baseUrl}/api/v1/runs/${runId}/stages`));
+  return response.json();
+}
+
+export async function fetchStage(runId: string, stageId: string): Promise<FeatureCollection> {
+  const response = await ensureOk(
+    await fetch(`${baseUrl}/api/v1/runs/${runId}/stages/${encodeURIComponent(stageId)}`),
+  );
+  return parseFeatureCollection(await response.json());
+}
+
+export async function fetchGridMask(runId: string): Promise<GridMask> {
+  const response = await ensureOk(
+    await fetch(`${baseUrl}/api/v1/runs/${runId}/stages/grid`),
+  );
+  return response.json();
+}
+
+export interface RunFetchResult {
+  runId: string;
+  result: FeatureCollection;
+  traced: boolean;
+}
+
 export async function runAndFetch(
   file: File,
   algorithm: string | null | undefined,
   onStatus: (status: string) => void,
-): Promise<FeatureCollection> {
+): Promise<RunFetchResult> {
   onStatus('Загрузка набора…');
   const dataset = await uploadDataset(file);
   onStatus('Запуск расчёта…');
-  const created = await createRun(dataset.id, algorithm);
+  const created = await createRun(dataset.id, algorithm, true);
   let run = created;
   while (run.status === 'PENDING' || run.status === 'RUNNING') {
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -96,5 +133,6 @@ export async function runAndFetch(
     throw new Error(run.error ?? 'Расчёт завершился ошибкой');
   }
   onStatus('Загрузка результата…');
-  return fetchResult(run.id);
+  const result = await fetchResult(run.id);
+  return { runId: run.id, result, traced: Boolean(run.traced) };
 }

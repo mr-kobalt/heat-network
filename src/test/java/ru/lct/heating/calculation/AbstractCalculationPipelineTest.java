@@ -88,7 +88,8 @@ abstract class AbstractCalculationPipelineTest {
                 new ObstacleIndexBuilder(resolver, envelopes),
                 new SpecialZoneIndexBuilder(resolver, new RestrictionAxisBuilder(), envelopes),
                 variantGenerator, new GeoJsonResultWriter(objectMapper), objectMapper,
-                appProperties, registry, approachResolver);
+                appProperties, registry, approachResolver,
+                new ru.lct.heating.trace.StageTraceWriter(objectMapper, crs));
     }
 
     /**

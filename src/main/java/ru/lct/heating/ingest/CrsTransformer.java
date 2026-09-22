@@ -63,4 +63,10 @@ public class CrsTransformer {
                 new ProjCoordinate(coordinate.x, coordinate.y), new ProjCoordinate());
         return new Coordinate(target.x, target.y);
     }
+
+    public Coordinate toWgs84(Coordinate coordinate) {
+        ProjCoordinate target = toWgs84.transform(
+                new ProjCoordinate(coordinate.x, coordinate.y), new ProjCoordinate());
+        return new Coordinate(target.x, target.y);
+    }
 }

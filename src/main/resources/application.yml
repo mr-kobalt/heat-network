@@ -89,6 +89,8 @@ heating:
     forest-reattach-pass: ${HEATING_FOREST_REATTACH_PASS:true}
     forest-reattach-iterations: ${HEATING_FOREST_REATTACH_ITERATIONS:2}
     oks-owning-include-boundary: ${HEATING_OKS_OWNING_INCLUDE_BOUNDARY:true}
+    # ADR-0036: предел пикселей растровой диагностики сетки (прореживание).
+    trace-grid-max-pixels: ${HEATING_TRACE_GRID_MAX_PIXELS:4194304}
     allowed-origins:
       - http://localhost:5173
       - http://localhost:8081

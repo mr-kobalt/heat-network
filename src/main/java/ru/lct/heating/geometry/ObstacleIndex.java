@@ -126,6 +126,15 @@ public class ObstacleIndex {
         return prohibited.size();
     }
 
+    /** Запретные геометрии (буферы минимальных расстояний) для визуализации. */
+    public List<Geometry> geometries() {
+        List<Geometry> result = new ArrayList<>(prohibited.size());
+        for (PreparedGeometry prepared : prohibited) {
+            result.add(prepared.getGeometry());
+        }
+        return result;
+    }
+
     /**
      * Новый индекс с дополнительными геометриями-препятствиями (например,
      * уже проложенными участками при разрешении пересечений, FR-29).

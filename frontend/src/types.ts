@@ -53,6 +53,45 @@ export function parseFeatureCollection(raw: unknown): FeatureCollection {
   return candidate as FeatureCollection;
 }
 
+/** Этап алгоритма в манифесте трассировки (ADR-0036). */
+export type StageDescriptor = {
+  id: string;
+  title: string;
+  kind: string;
+  format: 'input' | 'geojson' | 'mask';
+  available: boolean;
+  passes?: number[];
+  bestPass?: number;
+};
+
+export type StageManifest = {
+  runId: string | null;
+  algorithm: string | null;
+  passes: number;
+  bestPass: number;
+  stages: StageDescriptor[];
+};
+
+/** Растровая диагностика этапа «сетка» (ADR-0036). */
+export type GridMask = {
+  originX: number;
+  originY: number;
+  cellM: number;
+  width: number;
+  height: number;
+  imageWidth: number;
+  imageHeight: number;
+  imageCellM: number;
+  downscaled: boolean;
+  /** base64-битсеты, строка 0 — север. */
+  blocked: string;
+  reachable: string;
+  /** Углы изображения TL, TR, BR, BL: [lng, lat]. */
+  boundsWgs84: Array<[number, number]>;
+  sources: Array<[number, number]>;
+  terminalCells: Array<[number, number]>;
+};
+
 /** Типы объектов выходного GeoJSON (ТП v2 §7). */
 export function isResultFeature(objectType: string | undefined): boolean {
   return (

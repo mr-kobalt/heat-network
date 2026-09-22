@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -71,5 +72,43 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // ADR-0035: точка 6 присоединена коротким ребром (~35 м), а не через ствол.
         assertEdgeAtPointShorterThan(resultFile, new ObjectMapper(), 37.632012226474316,
                 55.700048261255056, 60.0);
+    }
+
+    /** ADR-0036: трассировка этапов на реальном наборе даёт валидные артефакты. */
+    @Test
+    void writesTraceStagesOnCorrectedDataset() throws Exception {
+        assumeTrue(Files.exists(SAMPLE),
+                "Набор source/Датасет скорректированный.geojson недоступен");
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        Path resultFile = tempDir.resolve("trace-result.geojson");
+        Path summaryFile = tempDir.resolve("trace-summary.json");
+        Path stagesDir = tempDir.resolve("stages");
+
+        CalculationOutcome outcome = service().calculate(SAMPLE, resultFile, summaryFile, null,
+                null, stagesDir);
+
+        assertThat(outcome.getSummary()).isNotNull();
+        assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
+
+        JsonNode manifest = objectMapper.readTree(stagesDir.resolve("manifest.json").toFile());
+        assertThat(manifest.path("bestPass").asInt()).isGreaterThanOrEqualTo(1);
+        JsonNode trees = manifest.path("stages").get(6);
+        assertThat(trees.path("id").asText()).isEqualTo("trees");
+        assertThat(trees.path("passes").size()).isGreaterThanOrEqualTo(1);
+
+        JsonNode grid = objectMapper.readTree(stagesDir.resolve("grid.json").toFile());
+        assertThat(grid.path("imageWidth").asInt()).isGreaterThan(0);
+        assertThat(grid.path("imageHeight").asInt()).isGreaterThan(0);
+        assertThat(grid.path("blocked").asText()).isNotEmpty();
+        assertThat(grid.path("boundsWgs84").size()).isEqualTo(4);
+        assertThat(grid.path("sources").size()).isGreaterThan(0);
+        assertThat(grid.path("terminalCells").size()).isGreaterThan(0);
+
+        JsonNode network = objectMapper.readTree(stagesDir.resolve("network.geojson").toFile());
+        assertThat(network.path("features").size()).isGreaterThan(0);
+        JsonNode refine = objectMapper.readTree(stagesDir.resolve("refine.geojson").toFile());
+        assertThat(refine.path("features").size()).isGreaterThan(0);
+        assertThat(Files.exists(stagesDir.resolve("relink.geojson"))).isTrue();
     }
 }

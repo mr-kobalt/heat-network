@@ -35,6 +35,11 @@ public class SpecialZoneIndex {
         return zones.size();
     }
 
+    /** Спецзоны для визуализации этапа «спецпроходы» (ADR-0036). */
+    public List<SpecialZone> zones() {
+        return zones;
+    }
+
     /**
      * Непрерывные специальные участки вдоль трассы (в метрах от начала).
      */

@@ -46,9 +46,10 @@ public class RunExecutor {
             Path resultFile = storageService.runResultFile(runId);
             Path summaryFile = storageService.runSummaryFile(runId);
             Path warningsFile = storageService.runWarningsFile(runId);
+            Path stagesDir = run.isTrace() ? storageService.runStageDir(runId) : null;
             CalculationOutcome outcome = calculationService.calculate(
                     storageService.datasetFile(run.getDatasetId()), resultFile, summaryFile,
-                    run.getAlgorithm(), warningsFile);
+                    run.getAlgorithm(), warningsFile, stagesDir);
             boolean partial = outcome.getSummary() == null
                     || !outcome.getSummary().getUnconnectedOksIds().isEmpty();
             run.setStatus(partial ? RunStatus.PARTIAL.name() : RunStatus.DONE.name());

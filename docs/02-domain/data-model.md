@@ -135,6 +135,25 @@
 }
 ```
 
+## 3.1. Промежуточные этапы (ADR-0036, диагностика)
+
+Формат визуализации, **не** часть конкурсной поставки; активируется
+`POST /runs?trace=true` и складывается в `data/runs/<id>/stages/`.
+
+- `manifest.json` — упорядоченный список этапов:
+  `{ id, title, kind, format, available }`; вкладка `trees` дополнительно
+  содержит `passes` (номера проходов) и `bestPass`.
+- `<этап>.geojson` — `FeatureCollection` в WGS84: `network`, `obstacles`,
+  `special`, `exits`, `trees-<проход>`, `refine`, `relink`. Каждый объект имеет
+  `object_type` (`network_segment`, `heat_chamber`, `source`, `obstacle`,
+  `special_zone`, `exit_target`, `exit_tail`, `tree_cell`, `forest_edge`,
+  `forest_node`) и вспомогательные атрибуты (`id`, `diameter_mm`, `flow_tph`,
+  `k_special`, `blocked`, `pass` и т. п.).
+- `grid.json` — растровая маска сетки: `originX/Y`, `cellM`, `width/height`,
+  `imageWidth/imageHeight`, `imageCellM`, `downscaled`, base64-битсеты
+  `blocked`/`reachable` (строка 0 — север, младший бит вперёд),
+  `boundsWgs84` (углы TL, TR, BR, BL), `sources`, `terminalCells`.
+
 ## 4. Правила формирования вывода
 
 - Один файл `FeatureCollection` на режим, все варианты вместе.
@@ -153,3 +172,4 @@
 | 2026-09-16 | Первоначальная версия (ТП 2, 10) | команда |
 | 2026-09-16 | Уточнения по протоколу встречи | команда |
 | 2026-09-19 | Ревизия по ТП v2: базовый вход без `oks_future`/`oks_existing`, ОКС как `restriction`; ID string/number; вывод только 4 типов; новая сводка `existing_chamber_tie_in_*`; без `tie_in` и реконструкции; доп. свойства допустимы | команда |
+| 2026-09-22 | ADR-0036: добавлен формат промежуточных этапов (manifest, stage GeoJSON, растровая маска сетки) | команда |

@@ -14,6 +14,7 @@ import ru.lct.heating.output.VariantResult;
 import ru.lct.heating.routing.ConnectionExit;
 import ru.lct.heating.routing.ForestPlanningResult;
 import ru.lct.heating.routing.algorithm.TracingAlgorithm;
+import ru.lct.heating.trace.StageTrace;
 
 /**
  * Формирование до трёх вариантов из плана выбранного алгоритма трассировки и
@@ -35,9 +36,17 @@ public class VariantGenerator {
                                         ExistingNetworkGraph graph, SpecialZoneIndex specialZones,
                                         List<String> warnings, Map<String, ConnectionExit> exits,
                                         TracingAlgorithm algorithm) {
+        return generate(dataset, obstacleIndex, graph, specialZones, warnings, exits, algorithm,
+                StageTrace.disabled());
+    }
+
+    public List<VariantResult> generate(NetworkDataset dataset, ObstacleIndex obstacleIndex,
+                                        ExistingNetworkGraph graph, SpecialZoneIndex specialZones,
+                                        List<String> warnings, Map<String, ConnectionExit> exits,
+                                        TracingAlgorithm algorithm, StageTrace trace) {
         List<VariantResult> variants = new ArrayList<>();
         for (ForestPlanningResult planning : algorithm.plan(dataset, graph, obstacleIndex, warnings,
-                exits)) {
+                exits, trace)) {
             if (variants.size() >= MAX_VARIANTS) {
                 break;
             }

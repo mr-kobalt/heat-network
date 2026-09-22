@@ -1,6 +1,9 @@
 import { create } from 'zustand';
-import { FeatureCollection, GeoFeature } from './types';
+import { FeatureCollection, GeoFeature, GridMask, StageDescriptor, StageManifest } from './types';
 import type { BasemapId } from './map/style';
+
+/** Итоговая вкладка (результат) — вне этапов. */
+export const RESULT_STAGE = 'result';
 
 export type LayerKey =
   | 'existingNetwork'
@@ -32,6 +35,16 @@ type State = {
   realPipeScale: boolean;
   algorithms: AlgorithmInfo[];
   selectedAlgorithm: string | null;
+  /** ADR-0036: трассировка этапов доступна для текущего запуска. */
+  runId: string | null;
+  traced: boolean;
+  stages: StageDescriptor[];
+  /** Активная вкладка: 'result', 'input' или id этапа. */
+  activeStage: string;
+  /** Выбранный проход этапа «Деревья». */
+  treePass: number;
+  stageData: Record<string, FeatureCollection>;
+  gridMask: GridMask | null;
   setInput: (input: FeatureCollection | null) => void;
   setResult: (result: FeatureCollection | null) => void;
   setActiveVariant: (variant: string | null) => void;
@@ -41,6 +54,11 @@ type State = {
   toggleRealPipeScale: () => void;
   setAlgorithms: (algorithms: AlgorithmInfo[]) => void;
   setSelectedAlgorithm: (algorithm: string | null) => void;
+  setStages: (runId: string, manifest: StageManifest) => void;
+  setActiveStage: (stage: string) => void;
+  setTreePass: (pass: number) => void;
+  setStageData: (stageId: string, data: FeatureCollection) => void;
+  setGridMask: (mask: GridMask | null) => void;
 };
 
 const defaultVisibility: Record<LayerKey, boolean> = {
@@ -65,6 +83,13 @@ export const useStore = create<State>((set) => ({
   realPipeScale: false,
   algorithms: [],
   selectedAlgorithm: null,
+  runId: null,
+  traced: false,
+  stages: [],
+  activeStage: RESULT_STAGE,
+  treePass: 1,
+  stageData: {},
+  gridMask: null,
   setInput: (input) => set({ input }),
   setResult: (result) => {
     const variants = result
@@ -76,7 +101,20 @@ export const useStore = create<State>((set) => ({
           ),
         ).sort()
       : [];
-    set({ result, variants, activeVariant: variants[0] ?? null, selected: null, selectedAnchor: null });
+    set({
+      result,
+      variants,
+      activeVariant: variants[0] ?? null,
+      selected: null,
+      selectedAnchor: null,
+      runId: null,
+      traced: false,
+      stages: [],
+      activeStage: RESULT_STAGE,
+      treePass: 1,
+      stageData: {},
+      gridMask: null,
+    });
   },
   setActiveVariant: (variant) => set({ activeVariant: variant, selected: null, selectedAnchor: null }),
   select: (feature, anchor = null) => set({
@@ -98,4 +136,19 @@ export const useStore = create<State>((set) => ({
       return { algorithms, selectedAlgorithm: preferred?.id ?? null };
     }),
   setSelectedAlgorithm: (algorithm) => set({ selectedAlgorithm: algorithm }),
+  setStages: (runId, manifest) =>
+    set({
+      runId,
+      traced: true,
+      stages: manifest.stages,
+      activeStage: RESULT_STAGE,
+      treePass: manifest.bestPass ?? manifest.passes ?? 1,
+      stageData: {},
+      gridMask: null,
+    }),
+  setActiveStage: (stage) => set({ activeStage: stage, selected: null, selectedAnchor: null }),
+  setTreePass: (pass) => set({ treePass: pass }),
+  setStageData: (stageId, data) =>
+    set((state) => ({ stageData: { ...state.stageData, [stageId]: data } })),
+  setGridMask: (mask) => set({ gridMask: mask }),
 }));

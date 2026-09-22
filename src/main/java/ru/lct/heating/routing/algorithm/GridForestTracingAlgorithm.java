@@ -9,6 +9,7 @@ import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.routing.ConnectionExit;
 import ru.lct.heating.routing.ForestPlanningResult;
 import ru.lct.heating.routing.GridForestPlanner;
+import ru.lct.heating.trace.StageTrace;
 
 /**
  * Алгоритм единого леса (ADR-0031/0034): топология поиском по сетке от
@@ -41,5 +42,12 @@ public class GridForestTracingAlgorithm implements TracingAlgorithm {
                                            ObstacleIndex obstacleIndex, List<String> warnings,
                                            Map<String, ConnectionExit> exits) {
         return List.of(forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits));
+    }
+
+    @Override
+    public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                           ObstacleIndex obstacleIndex, List<String> warnings,
+                                           Map<String, ConnectionExit> exits, StageTrace trace) {
+        return List.of(forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits, trace));
     }
 }

@@ -13,6 +13,7 @@ public class RunResponse {
     UUID datasetId;
     String status;
     String algorithm;
+    boolean traced;
     Instant createdAt;
     Instant startedAt;
     Instant finishedAt;

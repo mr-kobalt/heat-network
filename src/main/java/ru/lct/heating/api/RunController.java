@@ -33,10 +33,11 @@ public class RunController {
     }
 
     @PostMapping(path = "/datasets/{datasetId}/runs")
-    public ResponseEntity<RunResponse> create(@PathVariable UUID datasetId,
-                                              @RequestParam(name = "algorithm", required = false)
-                                              String algorithm) {
-        CalculationRunEntity run = runService.create(datasetId, algorithm);
+    public ResponseEntity<RunResponse> create(
+            @PathVariable UUID datasetId,
+            @RequestParam(name = "algorithm", required = false) String algorithm,
+            @RequestParam(name = "trace", required = false, defaultValue = "false") boolean trace) {
+        CalculationRunEntity run = runService.create(datasetId, algorithm, trace);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(apiMapper.toRunResponse(run));
     }
 
@@ -55,13 +56,35 @@ public class RunController {
     @GetMapping(path = "/runs/{runId}/result", produces = "application/geo+json")
     public ResponseEntity<StreamingResponseBody> result(@PathVariable UUID runId) {
         Path path = runService.requireResultFile(runId);
+        return stream(path, "result-" + runId + ".geojson");
+    }
+
+    /** Манифест промежуточных этапов расчёта (ADR-0036). */
+    @GetMapping(path = "/runs/{runId}/stages", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<StreamingResponseBody> stages(@PathVariable UUID runId) {
+        Path path = runService.requireStageManifestFile(runId);
+        return stream(path, "manifest-" + runId + ".json");
+    }
+
+    /**
+     * Файл одного этапа: GeoJSON, либо {@code grid.json} для растровой
+     * диагностики сетки (ADR-0036).
+     */
+    @GetMapping(path = "/runs/{runId}/stages/{stageId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<StreamingResponseBody> stage(@PathVariable UUID runId,
+                                                       @PathVariable String stageId) {
+        Path path = runService.requireStageFile(runId, stageId);
+        return stream(path, path.getFileName().toString());
+    }
+
+    private ResponseEntity<StreamingResponseBody> stream(Path path, String filename) {
         StreamingResponseBody body = outputStream -> {
             try (java.io.InputStream inputStream = Files.newInputStream(path)) {
                 inputStream.transferTo(outputStream);
             }
         };
         return ResponseEntity.ok()
-                .header("Content-Disposition", "attachment; filename=\"result-" + runId + ".geojson\"")
+                .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
                 .body(body);
     }
 }

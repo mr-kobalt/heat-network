@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRun } from './client';
+import { createRun, fetchGridMask, fetchStage, fetchStages } from './client';
 
 describe('createRun', () => {
   afterEach(() => {
@@ -35,5 +35,57 @@ describe('createRun', () => {
       '/api/v1/datasets/dataset-1/runs',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('adds the trace parameter', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'run-1' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createRun('dataset-1', 'grid-forest', true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/datasets/dataset-1/runs?algorithm=grid-forest&trace=true',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+});
+
+describe('stage endpoints', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('requests the stage manifest', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ stages: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchStages('run-7');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runs/run-7/stages');
+  });
+
+  it('requests a single stage', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ type: 'FeatureCollection', features: [] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchStage('run-7', 'trees-2');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runs/run-7/stages/trees-2');
+  });
+
+  it('requests the grid mask', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ width: 2 }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchGridMask('run-7');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runs/run-7/stages/grid');
   });
 });

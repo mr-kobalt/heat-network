@@ -66,6 +66,8 @@ public class AppProperties {
     private int forestReattachIterations = 2;
     /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
     private boolean oksOwningIncludeBoundary = true;
+    /** ADR-0036: предел пикселей растровой диагностики сетки при трассировке. */
+    private int traceGridMaxPixels = 2048 * 2048;
     private int maxRunHistory = 50;
     private List<String> allowedOrigins = new ArrayList<>(
             List.of("http://localhost:5173", "http://localhost:8081"));

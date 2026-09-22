@@ -24,3 +24,6 @@ CREATE INDEX IF NOT EXISTS idx_calculation_run_dataset ON calculation_run (datas
 
 -- ADR-0027: выбранный алгоритм трассировки (идемпотентно для существующих БД).
 ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS algorithm VARCHAR(64);
+
+-- ADR-0036: поэтапная трассировка для визуализации (идемпотентно).
+ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS trace BOOLEAN NOT NULL DEFAULT FALSE;
