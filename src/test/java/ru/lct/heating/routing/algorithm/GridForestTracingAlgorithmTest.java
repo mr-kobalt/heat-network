@@ -204,6 +204,63 @@ class GridForestTracingAlgorithmTest {
         }
     }
 
+    /**
+     * FR-34: стык вывода из ОКС не превышает 90° — при недопустимом угле
+     * вставляется промежуточная вершина (два соседних поворота ≤90°).
+     */
+    @Test
+    void plan_exitFromOks_respectsTurnLimit() {
+        Polygon building = square(800, 300, 1000, 500);
+        OksConnectionPointObject a = point("a", 900, 400, 10.0);
+        RestrictionObject oks = RestrictionObject.builder().id("oks").restrictionType("oks")
+                .geometry(building).build();
+        NetworkSegment segment = NetworkSegment.builder().id("seg1").diameterMm(400)
+                .geometry(line(0, 0, 2000, 0)).build();
+        NetworkDataset dataset = dataset(List.of(segment), List.of(a), List.of(oks));
+        List<String> warnings = new ArrayList<>();
+
+        ForestPlanningResult plan = algorithm.plan(dataset,
+                new NetworkGraphBuilder().build(dataset), new ObstacleIndex(List.of()), warnings,
+                resolver().resolveExits(dataset)).get(0);
+
+        assertThat(warnings).noneMatch(warning -> warning.startsWith("FOREST_TURN_UNRESOLVED"));
+        for (ForestTree tree : plan.getTrees()) {
+            for (ForestEdge edge : tree.getEdges()) {
+                assertThat(maxTurn(edge)).as("ребро %s", edge.getId()).isLessThanOrEqualTo(90.5);
+            }
+        }
+    }
+
+    /**
+     * ADR-0035 (опция): многоточечный вход терминала не ломает дерево —
+     * все точки подключены, листья сохранены, повороты в пределах.
+     */
+    @Test
+    void plan_multiEntry_connectsValidTree() {
+        NetworkSegment segment = NetworkSegment.builder().id("seg1").diameterMm(400)
+                .geometry(line(0, 0, 2000, 0)).build();
+        OksConnectionPointObject a = point("a", 900, 400, 10.0);
+        OksConnectionPointObject b = point("b", 950, 430, 20.0);
+        NetworkDataset dataset = dataset(List.of(segment), List.of(a, b));
+        AppProperties properties = new AppProperties();
+        properties.setForestTerminalMultiEntry(true);
+        properties.setForestTerminalEntryCells(4);
+        GridForestTracingAlgorithm multi = new GridForestTracingAlgorithm(planner(properties));
+
+        ForestPlanningResult plan = multi.plan(dataset,
+                new NetworkGraphBuilder().build(dataset), new ObstacleIndex(List.of()),
+                new ArrayList<>(), Map.of("a", directExit(a), "b", directExit(b))).get(0);
+
+        assertThat(plan.getUnconnectedConnectionPointIds()).isEmpty();
+        assertThat(plan.getTrees()).isNotEmpty();
+        for (ForestTree tree : plan.getTrees()) {
+            for (ForestEdge edge : tree.getEdges()) {
+                assertThat(maxTurn(edge)).as("ребро %s", edge.getId()).isLessThanOrEqualTo(90.5);
+            }
+        }
+        assertConnectionPointsAreLeaves(plan);
+    }
+
     private double maxTurn(ForestEdge edge) {
         List<Coordinate> coordinates = edge.getCoordinates();
         double max = 0.0;

@@ -79,6 +79,16 @@ heating:
     # FR-34/ТП 2.1: ограничение угла поворота трассы (0° — прямая, ≤ 90°).
     forest-max-turn-deg: ${HEATING_FOREST_MAX_TURN_DEG:90}
     forest-turn-enforcement: ${HEATING_FOREST_TURN_ENFORCEMENT:hard}
+    # ADR-0034: локальный ремонт поворотов в refine и grid-заход на выход.
+    forest-refine-local-passes: ${HEATING_FOREST_REFINE_LOCAL_PASSES:2}
+    forest-exit-grid-dogleg: ${HEATING_FOREST_EXIT_GRID_DOGLEG:true}
+    # ADR-0035: присоединение терминалов (выбор клетки входа, мультивход).
+    forest-terminal-multi-entry: ${HEATING_FOREST_TERMINAL_MULTI_ENTRY:false}
+    forest-terminal-entry-cells: ${HEATING_FOREST_TERMINAL_ENTRY_CELLS:8}
+    forest-terminal-cell-search: ${HEATING_FOREST_TERMINAL_CELL_SEARCH:nearest}
+    forest-reattach-pass: ${HEATING_FOREST_REATTACH_PASS:true}
+    forest-reattach-iterations: ${HEATING_FOREST_REATTACH_ITERATIONS:2}
+    oks-owning-include-boundary: ${HEATING_OKS_OWNING_INCLUDE_BOUNDARY:true}
     allowed-origins:
       - http://localhost:5173
       - http://localhost:8081

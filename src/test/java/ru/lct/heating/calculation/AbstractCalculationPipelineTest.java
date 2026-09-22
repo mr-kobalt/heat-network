@@ -212,6 +212,57 @@ abstract class AbstractCalculationPipelineTest {
         }
     }
 
+    /**
+     * Регресс зигзагов: каждый участок новой сети имеет не более
+     * {@code maxPerEdge} вершин (ADR-0034, локальный ремонт поворотов).
+     */
+    protected void assertNoExcessiveVertices(Path result, ObjectMapper mapper, int maxPerEdge)
+            throws Exception {
+        int checked = 0;
+        for (com.fasterxml.jackson.databind.JsonNode feature
+                : mapper.readTree(result.toFile()).path("features")) {
+            if (!"heat_network".equals(feature.path("properties").path("object_type").asText())) {
+                continue;
+            }
+            int vertices = feature.path("geometry").path("coordinates").size();
+            assertThat(vertices).as("вершины участка %s",
+                    feature.path("properties").path("id").asText()).isLessThanOrEqualTo(maxPerEdge);
+            checked++;
+        }
+        assertThat(checked).isGreaterThan(0);
+    }
+
+    /**
+     * Геометрический регресс присоединения (ADR-0035): ребро, инцидентное точке
+     * подключения с координатами {@code lon,lat} (WGS84), короче {@code maxM}.
+     */
+    protected void assertEdgeAtPointShorterThan(Path result, ObjectMapper mapper, double lon,
+                                                double lat, double maxM) throws Exception {
+        double bestDistance = Double.POSITIVE_INFINITY;
+        double edgeLength = Double.NaN;
+        for (com.fasterxml.jackson.databind.JsonNode feature
+                : mapper.readTree(result.toFile()).path("features")) {
+            com.fasterxml.jackson.databind.JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            com.fasterxml.jackson.databind.JsonNode coordinates = feature.path("geometry")
+                    .path("coordinates");
+            for (com.fasterxml.jackson.databind.JsonNode endpoint : List.of(
+                    coordinates.get(0), coordinates.get(coordinates.size() - 1))) {
+                double dx = (endpoint.get(0).asDouble() - lon) * Math.cos(Math.toRadians(lat));
+                double dy = endpoint.get(1).asDouble() - lat;
+                double distance = Math.hypot(dx, dy);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    edgeLength = properties.path("length").asDouble();
+                }
+            }
+        }
+        assertThat(bestDistance).as("точка подключения найдена в выводе").isLessThan(2e-5);
+        assertThat(edgeLength).as("длина ребра к точке (%s,%s)", lon, lat).isLessThan(maxM);
+    }
+
     /** Ветвления (степень ≥3) допускаются только в камерах (FR-25). */
     protected void assertBranchOnlyInChambers(Path result, ObjectMapper mapper) throws Exception {
         Set<String> chambers = new java.util.HashSet<>();

@@ -245,9 +245,16 @@ public class OksApproachResolver {
             return null;
         }
         for (RestrictionObject restriction : dataset.getRestrictions()) {
-            if ("oks".equals(restriction.getRestrictionType())
-                    && restriction.getGeometry() != null
-                    && restriction.getGeometry().contains(point)) {
+            if (!"oks".equals(restriction.getRestrictionType())
+                    || restriction.getGeometry() == null) {
+                continue;
+            }
+            // ADR-0035: точка подключения часто лежит на границе ОКС, где
+            // contains() ложно; covers() учитывает и границу.
+            boolean owns = appProperties.isOksOwningIncludeBoundary()
+                    ? restriction.getGeometry().covers(point)
+                    : restriction.getGeometry().contains(point);
+            if (owns) {
                 return restriction;
             }
         }

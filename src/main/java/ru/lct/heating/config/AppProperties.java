@@ -46,6 +46,26 @@ public class AppProperties {
     private double forestMaxTurnDeg = 90.0;
     /** Режим ограничения поворота: hard | warn. */
     private String forestTurnEnforcement = "hard";
+    /**
+     * Локальный ремонт недопустимых поворотов в `refine` (число проходов,
+     * ADR-0034): вместо отката всего ребра возвращает сеточную ломаную только
+     * в окрестности нарушения.
+     */
+    private int forestRefineLocalPasses = 2;
+    /** Локальный заход на выход по сетке (8 соседей), чтобы стык был ≤90°. */
+    private boolean forestExitGridDogleg = true;
+    /** ADR-0035: многоточечный вход терминала (несколько клеток-кандидатов). */
+    private boolean forestTerminalMultiEntry = false;
+    /** ADR-0035: число клеток-кандидатов входа на терминал. */
+    private int forestTerminalEntryCells = 8;
+    /** ADR-0035: выбор стартовой клетки терминала (raster | nearest | toward-network). */
+    private String forestTerminalCellSearch = "nearest";
+    /** ADR-0035: переприсоединение терминалов на уровне дерева (relink). */
+    private boolean forestReattachPass = true;
+    /** ADR-0035: число проходов переприсоединения. */
+    private int forestReattachIterations = 2;
+    /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
+    private boolean oksOwningIncludeBoundary = true;
     private int maxRunHistory = 50;
     private List<String> allowedOrigins = new ArrayList<>(
             List.of("http://localhost:5173", "http://localhost:8081"));

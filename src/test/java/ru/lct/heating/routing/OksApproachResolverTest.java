@@ -150,6 +150,33 @@ class OksApproachResolverTest {
     }
 
     @Test
+    void resolveExits_pointOnOksBoundary_isOwnedWithCovers() {
+        Polygon own = square(0, 0, 100, 100);
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 0, 50));
+
+        ConnectionExit exit = resolver.resolveExits(dataset).get("cp");
+
+        assertThat(exit.isBlocked()).isFalse();
+        assertThat(exit.hasTail()).as("точка на границе распознана как своя ОКС").isTrue();
+    }
+
+    @Test
+    void resolveExits_pointOnOksBoundary_ignoredWithoutCovers() {
+        Polygon own = square(0, 0, 100, 100);
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 0, 50));
+        AppProperties properties = new AppProperties();
+        properties.setOksOwningIncludeBoundary(false);
+        OksApproachResolver strict = new OksApproachResolver(
+                new RestrictionRuleResolver(rules()),
+                new EnvelopeCatalog(tables()), new DiameterCatalog(tables()), properties);
+
+        ConnectionExit exit = strict.resolveExits(dataset).get("cp");
+
+        assertThat(exit.isBlocked()).isFalse();
+        assertThat(exit.hasTail()).isFalse();
+    }
+
+    @Test
     void resolveExits_exitBlockedByNeighbourBuffer_isBlocked() {
         Polygon own = square(0, 0, 100, 100);
         Polygon neighbour = square(-20, 0, -10, 100);

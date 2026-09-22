@@ -42,8 +42,9 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
     }
 
     /**
-     * Регресс рабочих дефолтов (ADR-0034, baseline run-28): cell=2.0,
-     * cost-iterations=2, turn=90, storage=auto.
+     * Регресс рабочих дефолтов (ADR-0034/0035): cell=2.0, cost-iterations=2,
+     * turn=90, storage=auto, локальный ремонт поворотов, grid-заход на выход,
+     * выбор клетки входа терминала {@code nearest}, граница ОКС.
      */
     @Test
     void producesRun28BaselineWithDefaultParameters() throws Exception {
@@ -57,10 +58,18 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.761880820008793, within(1e-6));
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.069134574591006, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1906.0125240029313, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(287280116L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(68000000L);
+                .isCloseTo(1810.5472955303355, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(272767596L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(62000000L);
+        // Допустимый >90° остаётся только на стыке вывода (задокументировано).
+        assertThat(outcome.getWarnings().stream()
+                .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
+                .isLessThanOrEqualTo(2L);
+        assertNoExcessiveVertices(resultFile, new ObjectMapper(), 12);
+        // ADR-0035: точка 6 присоединена коротким ребром (~35 м), а не через ствол.
+        assertEdgeAtPointShorterThan(resultFile, new ObjectMapper(), 37.632012226474316,
+                55.700048261255056, 60.0);
     }
 }
