@@ -20,10 +20,15 @@ import ru.lct.heating.domain.SourceObject;
 import ru.lct.heating.geometry.LineStringSimplifier;
 import ru.lct.heating.geometry.ObstacleIndex;
 import ru.lct.heating.geometry.ObstacleMaskBuilder;
+import ru.lct.heating.geometry.RestrictionMode;
+import ru.lct.heating.geometry.RestrictionRule;
+import ru.lct.heating.geometry.RestrictionRuleResolver;
+import ru.lct.heating.geometry.RestrictionRulesProperties;
 import ru.lct.heating.geometry.SpecialSpanSplitter;
 import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.hydraulics.DiameterCatalog;
 import ru.lct.heating.hydraulics.DiameterRow;
+import ru.lct.heating.hydraulics.EnvelopeCatalog;
 import ru.lct.heating.hydraulics.HeatingTablesProperties;
 import ru.lct.heating.hydraulics.MaxLengthEnforcer;
 import ru.lct.heating.output.ForestResultBuilder;
@@ -31,6 +36,7 @@ import ru.lct.heating.output.VariantResult;
 import ru.lct.heating.routing.ConnectionExit;
 import ru.lct.heating.routing.CellStoreFactory;
 import ru.lct.heating.routing.GridForestPlanner;
+import ru.lct.heating.routing.OksApproachResolver;
 import ru.lct.heating.routing.TieInCandidateProvider;
 import ru.lct.heating.routing.algorithm.GridForestTracingAlgorithm;
 import ru.lct.heating.routing.algorithm.TracingAlgorithm;
@@ -43,9 +49,10 @@ class VariantGeneratorTest {
         DiameterCatalog catalog = catalog();
         CostModel costModel = new CostModel(catalog, new CostProperties());
         LineStringSimplifier simplifier = new LineStringSimplifier();
-        GridForestPlanner planner = new GridForestPlanner(new TieInCandidateProvider(), catalog,
+        GridForestPlanner planner = new GridForestPlanner(new TieInCandidateProvider(appProperties),
+                catalog,
                 costModel, new MaxLengthEnforcer(catalog), simplifier, new ObstacleMaskBuilder(),
-                new CellStoreFactory(appProperties, null), appProperties);
+                new CellStoreFactory(appProperties, null), appProperties, approachResolver());
         ForestResultBuilder resultBuilder = new ForestResultBuilder(
                 new ru.lct.heating.ingest.CrsTransformer(), costModel, new SpecialSpanSplitter(),
                 appProperties);
@@ -79,6 +86,10 @@ class VariantGeneratorTest {
     }
 
     private DiameterCatalog catalog() {
+        return new DiameterCatalog(tables());
+    }
+
+    private HeatingTablesProperties tables() {
         HeatingTablesProperties tables = new HeatingTablesProperties();
         List<DiameterRow> rows = new ArrayList<>();
         rows.add(row(50, 3.5));
@@ -86,7 +97,25 @@ class VariantGeneratorTest {
         rows.add(row(200, 152.3));
         rows.add(row(400, 943.1));
         tables.setDiameters(rows);
-        return new DiameterCatalog(tables);
+        tables.setEnvelopes(new ArrayList<>());
+        return tables;
+    }
+
+    private OksApproachResolver approachResolver() {
+        HeatingTablesProperties tables = tables();
+        RestrictionRulesProperties rulesProperties = new RestrictionRulesProperties();
+        Map<String, RestrictionRule> rules = new LinkedHashMap<>();
+        RestrictionRule oks = new RestrictionRule();
+        oks.setMode(RestrictionMode.PROHIBITED);
+        oks.setMinDistanceM(5.0);
+        rules.put("oks", oks);
+        RestrictionRule fallback = new RestrictionRule();
+        fallback.setMode(RestrictionMode.PROHIBITED);
+        fallback.setMinDistanceM(1.0);
+        rulesProperties.setRules(rules);
+        rulesProperties.setFallback(fallback);
+        return new OksApproachResolver(new RestrictionRuleResolver(rulesProperties),
+                new EnvelopeCatalog(tables), new DiameterCatalog(tables), new AppProperties());
     }
 
     private DiameterRow row(int dn, double capacity) {

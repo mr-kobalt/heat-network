@@ -76,16 +76,18 @@ abstract class AbstractCalculationPipelineTest {
                 new ru.lct.heating.routing.OksApproachResolver(resolver, envelopes, catalog,
                         appProperties);
         GridForestPlanner forestPlanner = new GridForestPlanner(
-                new TieInCandidateProvider(), catalog, costModel, new MaxLengthEnforcer(catalog),
+                new TieInCandidateProvider(appProperties), catalog, costModel,
+                new MaxLengthEnforcer(catalog),
                 simplifier, new ru.lct.heating.geometry.ObstacleMaskBuilder(),
-                new ru.lct.heating.routing.CellStoreFactory(appProperties, null), appProperties);
+                new ru.lct.heating.routing.CellStoreFactory(appProperties, null), appProperties,
+                approachResolver);
         TracingAlgorithmRegistry registry = new TracingAlgorithmRegistry(
                 List.of(new GridForestTracingAlgorithm(forestPlanner)), appProperties);
         VariantGenerator variantGenerator = new VariantGenerator(
                 new ForestResultBuilder(crs, costModel, new SpecialSpanSplitter(), appProperties));
 
         return new CalculationService(ingest, new NetworkGraphBuilder(),
-                new ObstacleIndexBuilder(resolver, envelopes),
+                new ObstacleIndexBuilder(resolver, envelopes, catalog),
                 new SpecialZoneIndexBuilder(resolver, new RestrictionAxisBuilder(), envelopes),
                 variantGenerator, new GeoJsonResultWriter(objectMapper), objectMapper,
                 appProperties, registry, approachResolver,
@@ -197,18 +199,25 @@ abstract class AbstractCalculationPipelineTest {
                 connectionPoints.add(feature.path("properties").path("id").asText());
             }
         }
-        Map<String, Integer> degree = new HashMap<>();
+        Map<String, Map<String, Integer>> degreeByVariant = new HashMap<>();
         for (com.fasterxml.jackson.databind.JsonNode feature
                 : mapper.readTree(result.toFile()).path("features")) {
             if (!"heat_network".equals(feature.path("properties").path("object_type").asText())) {
                 continue;
             }
+            String variant = feature.path("properties").path("variant_id").asText();
+            Map<String, Integer> degree =
+                    degreeByVariant.computeIfAbsent(variant, key -> new HashMap<>());
             degree.merge(feature.path("properties").path("start_node_id").asText(), 1, Integer::sum);
             degree.merge(feature.path("properties").path("end_node_id").asText(), 1, Integer::sum);
         }
-        for (String id : connectionPoints) {
-            if (degree.containsKey(id)) {
-                assertThat(degree.get(id)).as("точка подключения %s", id).isEqualTo(1);
+        for (Map.Entry<String, Map<String, Integer>> entry : degreeByVariant.entrySet()) {
+            for (String id : connectionPoints) {
+                if (entry.getValue().containsKey(id)) {
+                    assertThat(entry.getValue().get(id))
+                            .as("точка подключения %s (вариант %s)", id, entry.getKey())
+                            .isEqualTo(1);
+                }
             }
         }
     }

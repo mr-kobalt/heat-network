@@ -140,16 +140,14 @@ public class CalculationService {
         traceNetwork(trace, graph);
 
         stage = System.nanoTime();
-        ObstacleIndex obstacleIndex = obstacleIndexBuilder.build(
-                dataset, appProperties.getDefaultDiameterMm(), warnings);
+        ObstacleIndex obstacleIndex = obstacleIndexBuilder.build(dataset, warnings);
         log.info("Stage obstacle index: {} ms; size={}", elapsedMs(stage), obstacleIndex.size());
-        traceObstacles(trace, obstacleIndex);
 
         stage = System.nanoTime();
         SpecialZoneIndex specialZones = specialZoneIndexBuilder.build(
                 dataset, appProperties.getDefaultDiameterMm(), warnings);
         log.info("Stage special zones: {} ms; size={}", elapsedMs(stage), specialZones.size());
-        traceSpecial(trace, specialZones);
+        traceRestrictions(trace, obstacleIndex, specialZones);
 
         stage = System.nanoTime();
         Map<String, ConnectionExit> exits = approachResolver.resolveExits(dataset);
@@ -235,7 +233,9 @@ public class CalculationService {
         trace.addStage(StageTrace.NETWORK, features);
     }
 
-    private void traceObstacles(StageTrace trace, ObstacleIndex obstacleIndex) {
+    /** Объединённый этап «Ограничения»: запретные буферы + спецзоны (ADR-0037). */
+    private void traceRestrictions(StageTrace trace, ObstacleIndex obstacleIndex,
+                                   SpecialZoneIndex specialZones) {
         if (!trace.isEnabled()) {
             return;
         }
@@ -247,14 +247,6 @@ public class CalculationService {
                     .properties(Map.of())
                     .build());
         }
-        trace.addStage(StageTrace.OBSTACLES, features);
-    }
-
-    private void traceSpecial(StageTrace trace, SpecialZoneIndex specialZones) {
-        if (!trace.isEnabled()) {
-            return;
-        }
-        List<StageFeature> features = new ArrayList<>();
         for (SpecialZone zone : specialZones.zones()) {
             Map<String, Object> properties = new LinkedHashMap<>();
             properties.put("restriction_type", zone.getRestrictionType());
@@ -268,7 +260,7 @@ public class CalculationService {
                     .properties(properties)
                     .build());
         }
-        trace.addStage(StageTrace.SPECIAL, features);
+        trace.addStage(StageTrace.RESTRICTIONS, features);
     }
 
     private void traceExits(StageTrace trace, Map<String, ConnectionExit> exits) {

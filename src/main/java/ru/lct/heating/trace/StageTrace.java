@@ -14,8 +14,8 @@ import java.util.Map;
 public final class StageTrace {
 
     public static final String NETWORK = "network";
-    public static final String OBSTACLES = "obstacles";
-    public static final String SPECIAL = "special";
+    /** Объединённый этап: запретные буферы (`obstacle`) и спецзоны (`special_zone`). */
+    public static final String RESTRICTIONS = "restrictions";
     public static final String EXITS = "exits";
     public static final String GRID = "grid";
     public static final String REFINE = "refine";

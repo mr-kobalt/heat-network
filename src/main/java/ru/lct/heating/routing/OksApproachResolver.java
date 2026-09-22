@@ -47,6 +47,8 @@ public class OksApproachResolver {
 
     private static final double EPS = 1e-6;
     private static final double VERTEX_TOLERANCE_M = 1e-3;
+    /** Радиус поиска соседних запретных буферов для «узкого промежутка», м. */
+    private static final double NARROW_GAP_SEARCH_M = 20.0;
     private static final int MAX_CANDIDATES = 6;
     private static final int FALLBACK_DIRECTIONS = 72;
     private static final double FALLBACK_STEP_M = 0.25;
@@ -70,7 +72,7 @@ public class OksApproachResolver {
      * (ADR-0032): одна точка на подключение. Ду выбирается минимальным под
      * расход точки (FR-43), точка выхода — перпендикуляр к ближайшему ребру
      * выпуклой оболочки полигона, продолженный на расстояние
-     * `minDistance(oks, Ду) + halfPairWidth(Ду)`.
+     * `minDistance(oks, Ду) + halfPairWidth(Ду) + диагональ клетки` (ADR-0037).
      */
     public Map<String, ConnectionExit> resolveExits(NetworkDataset dataset) {
         long start = System.nanoTime();
@@ -98,41 +100,245 @@ public class OksApproachResolver {
         return result;
     }
 
+    /**
+     * Выход ОКС (ADR-0037): перпендикуляр к внешней границе своей компоненты;
+     * продолжение луча до границы буфера всего ОКС
+     * ({@code minDistance + halfPairWidth}, без диагонали клетки); среди валидных
+     * пересечений — минимальное расстояние до точки. Другие компоненты ОКС и
+     * прочие ограничения не должны нарушаться.
+     */
     private ConnectionExit exitFor(OksConnectionPointObject connectionPoint,
                                    NetworkDataset dataset, double flow) {
+        return exitCandidates(connectionPoint, dataset, flow).get(0);
+    }
+
+    /**
+     * Все валидные выходы точки, упорядоченные по возрастанию `p→target`
+     * (ADR-0037). Первый — основной; остальные используются планировщиком как
+     * альтернативы, если клетка основного выхода недостижима от сети.
+     */
+    public List<ConnectionExit> candidatesFor(NetworkDataset dataset, String pointId) {
+        if (dataset.getConnectionPoints() == null || pointId == null) {
+            return List.of();
+        }
+        for (OksConnectionPointObject point : dataset.getConnectionPoints()) {
+            if (pointId.equals(point.getId())) {
+                Double flow = point.getFlowTph();
+                if (flow == null || flow <= 0.0 || point.getGeometry() == null) {
+                    return List.of();
+                }
+                return exitCandidates(point, dataset, flow);
+            }
+        }
+        return List.of();
+    }
+
+    private List<ConnectionExit> exitCandidates(OksConnectionPointObject connectionPoint,
+                                                NetworkDataset dataset, double flow) {
         Point point = connectionPoint.getGeometry();
         Coordinate p = point.getCoordinate();
         Integer dn = designDiameter(flow);
         if (dn == null) {
-            return ConnectionExit.builder()
-                    .connectionPointId(connectionPoint.getId())
-                    .target(p).tail(List.of()).blocked(true).designDiameterMm(0)
-                    .build();
+            return List.of(exit(connectionPoint, p, List.of(), true, 0));
         }
         RestrictionObject own = owningRestriction(dataset, point);
         if (own == null) {
-            return ConnectionExit.builder()
-                    .connectionPointId(connectionPoint.getId())
-                    .target(p).tail(List.of()).blocked(false).designDiameterMm(dn)
-                    .build();
+            return List.of(exit(connectionPoint, p, List.of(), false, dn));
+        }
+        Polygon component = containingPolygon(own.getGeometry(), point);
+        if (component == null) {
+            return List.of(exit(connectionPoint, p, List.of(), true, dn));
         }
         double halfWidth = envelopes.halfPairWidthM(dn);
-        double offset = rules.resolve("oks").minDistanceForDn(dn) + halfWidth;
+        double buffer = rules.resolve("oks").minDistanceForDn(dn) + halfWidth;
         List<Prohibited> prohibited = prohibited(dataset, dn, halfWidth);
-        Candidate candidate = hullPerpendicular(p, own.getGeometry().convexHull(), offset);
-        if (candidate == null || !feasible(candidate, p, own, prohibited, offset)) {
-            return ConnectionExit.builder()
-                    .connectionPointId(connectionPoint.getId())
-                    .target(p).tail(List.of()).blocked(true).designDiameterMm(dn)
-                    .build();
+        List<Candidate> candidates = exitCandidates(p, component, own, buffer, prohibited);
+        if (candidates.isEmpty()) {
+            return List.of(exit(connectionPoint, p, List.of(), true, dn));
         }
+        List<ConnectionExit> result = new ArrayList<>();
+        for (Candidate candidate : candidates) {
+            result.add(exit(connectionPoint, candidate.outer, List.of(candidate.outer, p), false, dn));
+        }
+        return result;
+    }
+
+    private ConnectionExit exit(OksConnectionPointObject connectionPoint, Coordinate target,
+                                List<Coordinate> tail, boolean blocked, int dn) {
         return ConnectionExit.builder()
                 .connectionPointId(connectionPoint.getId())
-                .target(candidate.outer)
-                .tail(List.of(candidate.outer, p))
-                .blocked(false)
+                .target(target)
+                .tail(tail)
+                .blocked(blocked)
                 .designDiameterMm(dn)
                 .build();
+    }
+
+    /** Компонента-полигон, содержащая точку (внешнее кольцо — граница выхода). */
+    private Polygon containingPolygon(Geometry restriction, Point point) {
+        for (int i = 0; i < restriction.getNumGeometries(); i++) {
+            Geometry component = restriction.getGeometryN(i);
+            if (component instanceof Polygon && component.covers(point)) {
+                return (Polygon) component;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Внешний контур буфера ОКС (внешние кольца полигонов, без внутренних
+     * «дырок»): цель не должна попадать во внутренний двор/карман, замкнутый
+     * буфером кластера ОКС.
+     */
+    private Geometry exteriorBoundary(Geometry buffered) {
+        List<LineString> rings = new ArrayList<>();
+        collectExteriorRings(buffered, rings);
+        if (rings.isEmpty()) {
+            return buffered.getFactory().createGeometryCollection();
+        }
+        return buffered.getFactory().createMultiLineString(rings.toArray(new LineString[0]));
+    }
+
+    private void collectExteriorRings(Geometry geometry, List<LineString> rings) {
+        for (int i = 0; i < geometry.getNumGeometries(); i++) {
+            Geometry component = geometry.getGeometryN(i);
+            if (component instanceof Polygon) {
+                rings.add(((Polygon) component).getExteriorRing());
+            } else if (component.getNumGeometries() > 1) {
+                collectExteriorRings(component, rings);
+            }
+        }
+    }
+
+    /** Все валидные пересечения луча с буфером ОКС, по возрастанию `p→target`. */
+    private List<Candidate> exitCandidates(Coordinate p, Polygon component, RestrictionObject own,
+                                           double buffer, List<Prohibited> prohibited) {
+        Geometry bufferBoundary = exteriorBoundary(own.getGeometry().buffer(buffer));
+        Envelope ownEnvelope = own.getGeometry().getEnvelopeInternal();
+        double rayLength = Math.hypot(ownEnvelope.getWidth(), ownEnvelope.getHeight())
+                + 2.0 * buffer + 1.0 + NARROW_GAP_SEARCH_M;
+        double maxPairWidth = envelopes.maxPairWidthM();
+        LineString ring = component.getExteriorRing();
+        Coordinate[] ringCoordinates = ring.getCoordinates();
+        List<Candidate> candidates = new ArrayList<>();
+        for (int i = 0; i < ringCoordinates.length - 1; i++) {
+            Coordinate a = ringCoordinates[i];
+            Coordinate b = ringCoordinates[i + 1];
+            if (a.distance(b) < EPS) {
+                continue;
+            }
+            Coordinate q = nearestPointOnSegment(p, a, b);
+            double length = p.distance(q);
+            if (length < EPS) {
+                continue;
+            }
+            if (q.distance(a) < VERTEX_TOLERANCE_M || q.distance(b) < VERTEX_TOLERANCE_M) {
+                continue;
+            }
+            double ux = (q.x - p.x) / length;
+            double uy = (q.y - p.y) / length;
+            LineString ray = line(p, new Coordinate(p.x + ux * rayLength, p.y + uy * rayLength));
+            Coordinate target = nearestCrossing(ray.intersection(bufferBoundary), p, length);
+            if (target == null) {
+                continue;
+            }
+            // Узкий промежуток между близкими зданиями: если сразу за выходом
+            // луч снова упирается в запретный буфер ближе ширины пары, ставим
+            // выход в середине промежутка — так клетка попадает в проходимый коридор.
+            Coordinate next = nextBufferCrossing(ray, p, target, prohibited);
+            if (next != null && target.distance(next) < maxPairWidth) {
+                target = new Coordinate((target.x + next.x) / 2.0, (target.y + next.y) / 2.0);
+            }
+            if (!tailAllowed(p, target, own, prohibited)) {
+                continue;
+            }
+            candidates.add(new Candidate(target, p.distance(target)));
+        }
+        candidates.sort(Comparator.comparingDouble(candidate -> candidate.length));
+        return candidates;
+    }
+
+    /**
+     * Ближайшее пересечение луча с запретным буфером (включая свой ОКС) строго
+     * дальше {@code target}. Буферы ищутся только у ограничений рядом с целью
+     * (envelope-фильтр), чтобы не буферизовать весь набор.
+     */
+    private Coordinate nextBufferCrossing(LineString ray, Coordinate p, Coordinate target,
+                                          List<Prohibited> prohibited) {
+        Envelope window = new Envelope(target);
+        window.expandBy(NARROW_GAP_SEARCH_M);
+        double fromDistance = p.distance(target);
+        Coordinate best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        for (Prohibited obstacle : prohibited) {
+            Envelope envelope = obstacle.restriction.getGeometry().getEnvelopeInternal();
+            if (!window.intersects(envelope)) {
+                continue;
+            }
+            Geometry boundary = obstacle.restriction.getGeometry()
+                    .buffer(obstacle.distance).getBoundary();
+            for (Coordinate coordinate : ray.intersection(boundary).getCoordinates()) {
+                double distance = p.distance(coordinate);
+                if (distance <= fromDistance + EPS) {
+                    continue;
+                }
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = coordinate;
+                }
+            }
+        }
+        return best;
+    }
+
+    private Coordinate nearestPointOnSegment(Coordinate p, Coordinate a, Coordinate b) {
+        double dx = b.x - a.x;
+        double dy = b.y - a.y;
+        double lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared < EPS) {
+            return a;
+        }
+        double t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared;
+        t = Math.max(0.0, Math.min(1.0, t));
+        return new Coordinate(a.x + t * dx, a.y + t * dy);
+    }
+
+    /** Ближайшее к точке пересечение (строго за основанием перпендикуляра). */
+    private Coordinate nearestCrossing(Geometry intersection, Coordinate p, double minDistance) {
+        Coordinate best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        for (Coordinate coordinate : intersection.getCoordinates()) {
+            double distance = p.distance(coordinate);
+            if (distance < minDistance - EPS) {
+                continue;
+            }
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = coordinate;
+            }
+        }
+        return best;
+    }
+
+    /** Хвост не должен нарушать буферы прочих ограничений (кроме своего ОКС). */
+    private boolean tailAllowed(Coordinate p, Coordinate target, RestrictionObject own,
+                                List<Prohibited> prohibited) {
+        LineString tail = line(p, target);
+        Envelope tailEnvelope = tail.getEnvelopeInternal();
+        for (Prohibited obstacle : prohibited) {
+            if (obstacle.restriction == own) {
+                continue;
+            }
+            Envelope envelope = obstacle.restriction.getGeometry().getEnvelopeInternal();
+            if (tailEnvelope.distance(envelope) > obstacle.distance) {
+                continue;
+            }
+            if (DistanceOp.distance(tail, obstacle.restriction.getGeometry())
+                    < obstacle.distance - EPS) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Минимальный Ду под расход точки; {@code null}, если расход выше номенклатуры. */
@@ -142,24 +348,6 @@ public class OksApproachResolver {
         } catch (IllegalArgumentException overflow) {
             return null;
         }
-    }
-
-    /** Ближайший перпендикуляр к контуру выпуклой оболочки, вынесенный на offset. */
-    private Candidate hullPerpendicular(Coordinate p, Geometry hull, double offset) {
-        Candidate best = null;
-        double bestLength = Double.POSITIVE_INFINITY;
-        for (LineString segment : boundarySegments(hull)) {
-            Coordinate[] nearest = DistanceOp.nearestPoints(segment, point(p));
-            if (nearest.length == 0) {
-                continue;
-            }
-            Candidate candidate = candidateFrom(p, nearest[0], offset, 0.0);
-            if (candidate != null && candidate.length < bestLength - EPS) {
-                bestLength = candidate.length;
-                best = candidate;
-            }
-        }
-        return best;
     }
 
     public Map<String, Approach> resolve(NetworkDataset dataset, int designDiameterMm) {

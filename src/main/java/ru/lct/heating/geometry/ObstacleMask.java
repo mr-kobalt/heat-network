@@ -1,5 +1,6 @@
 package ru.lct.heating.geometry;
 
+import java.util.Collection;
 import org.locationtech.jts.geom.Coordinate;
 
 /**
@@ -160,6 +161,30 @@ public final class ObstacleMask {
 
     public long buildMs() {
         return buildMs;
+    }
+
+    /**
+     * Копия маски с принудительно снятой блокировкой у указанных клеток
+     * (ADR-0037: клетки выхода ОКС открываются как проходимые для финального
+     * вывода). Используется только одноуровневой маской проходимости.
+     */
+    public ObstacleMask withClearedCells(Collection<Integer> cells) {
+        long[] freed = fine.clone();
+        long cleared = 0L;
+        for (int index : cells) {
+            if (index < 0 || index >= (long) width * height) {
+                continue;
+            }
+            int word = index >>> 6;
+            long mask = 1L << (index & 63);
+            if ((freed[word] & mask) != 0L) {
+                freed[word] &= ~mask;
+                cleared++;
+            }
+        }
+        long[] freedCoarse = coarse == fine ? freed : coarse;
+        return new ObstacleMask(originX, originY, cell, width, height, freed, coarseFactor,
+                coarseWidth, coarseHeight, freedCoarse, blockedCells - cleared, buildMs);
     }
 
     public String describe() {

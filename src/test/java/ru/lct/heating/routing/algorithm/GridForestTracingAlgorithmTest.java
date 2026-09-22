@@ -232,33 +232,32 @@ class GridForestTracingAlgorithmTest {
     }
 
     /**
-     * ADR-0035 (опция): многоточечный вход терминала не ломает дерево —
-     * все точки подключены, листья сохранены, повороты в пределах.
+     * ADR-0037: план возвращается списком (варианты по проходам); все точки
+     * подключены, листья сохранены, повороты в пределах.
      */
     @Test
-    void plan_multiEntry_connectsValidTree() {
+    void plan_returnsPlansList() {
         NetworkSegment segment = NetworkSegment.builder().id("seg1").diameterMm(400)
                 .geometry(line(0, 0, 2000, 0)).build();
         OksConnectionPointObject a = point("a", 900, 400, 10.0);
         OksConnectionPointObject b = point("b", 950, 430, 20.0);
         NetworkDataset dataset = dataset(List.of(segment), List.of(a, b));
-        AppProperties properties = new AppProperties();
-        properties.setForestTerminalMultiEntry(true);
-        properties.setForestTerminalEntryCells(4);
-        GridForestTracingAlgorithm multi = new GridForestTracingAlgorithm(planner(properties));
 
-        ForestPlanningResult plan = multi.plan(dataset,
+        List<ForestPlanningResult> plans = algorithm.plan(dataset,
                 new NetworkGraphBuilder().build(dataset), new ObstacleIndex(List.of()),
-                new ArrayList<>(), Map.of("a", directExit(a), "b", directExit(b))).get(0);
+                new ArrayList<>(), Map.of("a", directExit(a), "b", directExit(b)));
 
-        assertThat(plan.getUnconnectedConnectionPointIds()).isEmpty();
-        assertThat(plan.getTrees()).isNotEmpty();
-        for (ForestTree tree : plan.getTrees()) {
-            for (ForestEdge edge : tree.getEdges()) {
-                assertThat(maxTurn(edge)).as("ребро %s", edge.getId()).isLessThanOrEqualTo(90.5);
+        assertThat(plans).isNotEmpty();
+        for (ForestPlanningResult plan : plans) {
+            assertThat(plan.getUnconnectedConnectionPointIds()).isEmpty();
+            assertThat(plan.getTrees()).isNotEmpty();
+            for (ForestTree tree : plan.getTrees()) {
+                for (ForestEdge edge : tree.getEdges()) {
+                    assertThat(maxTurn(edge)).as("ребро %s", edge.getId()).isLessThanOrEqualTo(90.5);
+                }
             }
+            assertConnectionPointsAreLeaves(plan);
         }
-        assertConnectionPointsAreLeaves(plan);
     }
 
     private double maxTurn(ForestEdge edge) {
@@ -311,9 +310,9 @@ class GridForestTracingAlgorithmTest {
         HeatingTablesProperties tables = tables();
         DiameterCatalog catalog = new DiameterCatalog(tables);
         CostModel costModel = new CostModel(catalog, new CostProperties());
-        return new GridForestPlanner(new TieInCandidateProvider(), catalog, costModel,
+        return new GridForestPlanner(new TieInCandidateProvider(appProperties), catalog, costModel,
                 new MaxLengthEnforcer(catalog), new LineStringSimplifier(), new ObstacleMaskBuilder(),
-                new CellStoreFactory(appProperties, null), appProperties);
+                new CellStoreFactory(appProperties, null), appProperties, resolver());
     }
 
     private HeatingTablesProperties tables() {

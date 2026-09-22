@@ -10,7 +10,7 @@ import {
   CHAMBER_NEW_COLOR,
   SELECTABLE_LAYER_IDS,
 } from './layers';
-import { applyOverlays, fitStageToData } from './stageLayers';
+import { applyOverlays, fitStageToData, refreshStageGridCells } from './stageLayers';
 import { addOverlayIcons, overlayIconById } from './icons';
 import { EMPTY_COLLECTION, buildRestrictionBuffers } from './buffers';
 import { FitZoomControl } from './controls';
@@ -157,6 +157,9 @@ export function MapView() {
         addOverlayIcons(map, CHAMBER_EXISTING_COLOR, CHAMBER_NEW_COLOR);
         applyOverlays(map, overlayRef.current);
       });
+      // Контуры ячеек сетки пересчитываются под текущий вьюпорт (ADR-0037).
+      map.on('moveend', () => refreshStageGridCells(map, overlayRef.current));
+      map.on('zoomend', () => refreshStageGridCells(map, overlayRef.current));
       map.on('load', () => setReady(true));
       map.on('styleimagemissing', (event) => {
         if (map.hasImage(event.id)) {
@@ -288,9 +291,10 @@ export function MapView() {
       return;
     }
     fitStageToData(map, overlayData);
-    // Переподгонка вида — только при смене данных/варианта/этапа, не при тумблерах слоёв.
+    // Переподгонка — только при смене данных/варианта, не при переключении
+    // вкладок этапов (ADR-0037): масштаб сохраняется.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, input, result, activeVariant, activeStage, treePass]);
+  }, [ready, input, result, activeVariant]);
 
   return (
     <div ref={containerRef} style={CONTAINER_STYLE}>

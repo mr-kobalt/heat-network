@@ -116,8 +116,9 @@ class OksApproachResolverTest {
         assertThat(exit.isBlocked()).isFalse();
         assertThat(exit.getDesignDiameterMm()).isEqualTo(DN);
         assertThat(exit.hasTail()).isTrue();
+        // ADR-0037: цель на границе буфера ОКС (minDistance + halfPairWidth).
         assertThat(exit.getTarget().x)
-                .isCloseTo(-OFFSET, org.assertj.core.data.Offset.offset(1e-3));
+                .isCloseTo(-(5.0 + 0.255), org.assertj.core.data.Offset.offset(1e-3));
         assertThat(exit.getTarget().y)
                 .isCloseTo(50.0, org.assertj.core.data.Offset.offset(1e-3));
         assertThat(distanceTo(exit.getTarget(), own)).isGreaterThanOrEqualTo(OFFSET);
@@ -126,7 +127,7 @@ class OksApproachResolverTest {
     @Test
     void resolveExits_diameterFollowsPointFlow() {
         Polygon own = square(0, 0, 100, 100);
-        // flow 3.0 → Ду 50 (пропускная 3.5), полуширина 0.2 → offset 5.2.
+        // flow 3.0 → Ду 50 (пропускная 3.5), буфер = 5 + 0.2.
         NetworkDataset dataset = dataset(List.of(restriction("own", own)),
                 point("cp", 10, 50, 3.0));
 
@@ -134,7 +135,26 @@ class OksApproachResolverTest {
 
         assertThat(exit.getDesignDiameterMm()).isEqualTo(50);
         assertThat(exit.getTarget().x)
-                .isCloseTo(-5.2, org.assertj.core.data.Offset.offset(1e-3));
+                .isCloseTo(-(5.0 + 0.2), org.assertj.core.data.Offset.offset(1e-3));
+    }
+
+    /** ADR-0037: точка получает несколько выходов-кандидатов по возрастанию p→target. */
+    @Test
+    void candidatesFor_returnsAlternativesSortedByDistance() {
+        Polygon own = square(0, 0, 100, 100);
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 10, 50));
+
+        List<ConnectionExit> candidates = resolver.candidatesFor(dataset, "cp");
+
+        assertThat(candidates).hasSizeGreaterThanOrEqualTo(2);
+        double previous = -1.0;
+        for (ConnectionExit candidate : candidates) {
+            assertThat(candidate.isBlocked()).isFalse();
+            assertThat(candidate.hasTail()).isTrue();
+            double distance = candidate.getTarget().distance(new Coordinate(10, 50));
+            assertThat(distance).isGreaterThanOrEqualTo(previous);
+            previous = distance;
+        }
     }
 
     @Test
@@ -176,18 +196,24 @@ class OksApproachResolverTest {
         assertThat(exit.hasTail()).isFalse();
     }
 
+    /**
+     * ADR-0037: если цель ближайшего перпендикуляра оказывается внутри буфера
+     * соседа, берётся следующий по расстоянию перпендикуляр (не блокировка).
+     */
     @Test
-    void resolveExits_exitBlockedByNeighbourBuffer_isBlocked() {
+    void resolveExits_neighbourBlocksNearestEdge_exitsThroughAnotherEdge() {
         Polygon own = square(0, 0, 100, 100);
-        Polygon neighbour = square(-20, 0, -10, 100);
+        Polygon neighbour = square(-6, 0, -2, 100);
         NetworkDataset dataset = dataset(
                 List.of(restriction("own", own), restriction("neighbour", neighbour)),
                 point("cp", 10, 50));
 
         ConnectionExit exit = resolver.resolveExits(dataset).get("cp");
 
-        assertThat(exit.isBlocked()).isTrue();
-        assertThat(exit.hasTail()).isFalse();
+        assertThat(exit.isBlocked()).isFalse();
+        assertThat(exit.hasTail()).isTrue();
+        // Цель не в буфере соседа (мимо западной грани, заблокированной им).
+        assertThat(distanceTo(exit.getTarget(), neighbour)).isGreaterThanOrEqualTo(OFFSET - 1e-3);
     }
 
     @Test

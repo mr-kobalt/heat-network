@@ -41,6 +41,15 @@ public class EnvelopeCatalog {
                 .orElse(0.0);
     }
 
+    /** Наибольшая ширина пары труб по номенклатуре (ADR-0037, порог узкого промежутка). */
+    public double maxPairWidthM() {
+        return rows.stream()
+                .mapToDouble(EnvelopeRow::getPairWidthM)
+                .filter(width -> width > 0.0)
+                .max()
+                .orElse(0.0);
+    }
+
     public double heightM(int dn) {
         return rowForDn(dn).getHeightM();
     }

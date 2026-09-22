@@ -14,6 +14,8 @@ import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.domain.OksConnectionPointObject;
 import ru.lct.heating.domain.RestrictionObject;
+import ru.lct.heating.hydraulics.DiameterCatalog;
+import ru.lct.heating.hydraulics.DiameterRow;
 import ru.lct.heating.hydraulics.EnvelopeCatalog;
 import ru.lct.heating.hydraulics.HeatingTablesProperties;
 
@@ -40,9 +42,11 @@ class ObstacleIndexBuilderTest {
                 .oksExisting(List.of())
                 .build();
 
+        HeatingTablesProperties tables = tables();
         ObstacleIndex index = new ObstacleIndexBuilder(
-                new RestrictionRuleResolver(rules()), new EnvelopeCatalog(new HeatingTablesProperties()))
-                .build(dataset, 100, new ArrayList<>());
+                new RestrictionRuleResolver(rules()), new EnvelopeCatalog(tables),
+                new DiameterCatalog(tables))
+                .build(dataset, new ArrayList<>());
 
         // Исключение для вывода к точке добавляется в геометрии участка, а не
         // вырезается из запретного индекса: сам полигон непроходим целиком.
@@ -50,6 +54,18 @@ class ObstacleIndexBuilderTest {
         assertThat(index.isBlocked(line(10, 50, 10, 90))).isTrue();
         assertThat(index.isBlocked(line(60, 50, 60, 90))).isTrue();
         assertThat(index.isBlocked(line(-20, 50, -10, 50))).isFalse();
+    }
+
+    private HeatingTablesProperties tables() {
+        HeatingTablesProperties tables = new HeatingTablesProperties();
+        DiameterRow row = new DiameterRow();
+        row.setDn(100);
+        row.setCapacityTph(22.3);
+        row.setMaxLengthM(419);
+        row.setNewCostPerM(89748);
+        tables.setDiameters(new ArrayList<>(List.of(row)));
+        tables.setEnvelopes(new ArrayList<>());
+        return tables;
     }
 
     private RestrictionRulesProperties rules() {

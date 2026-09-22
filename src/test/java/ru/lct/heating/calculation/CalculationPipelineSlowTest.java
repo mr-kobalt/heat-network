@@ -59,17 +59,20 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
-        assertThat(outcome.getSummary().getScore()).isCloseTo(12.810426512224796, within(1e-6));
+        // ADR-0037: буферы по мин. Ду, выход — ближайшая точка на внешнем контуре
+        // буфера всего ОКС (с учётом узких промежутков и достижимости), кандидаты 1 м.
+        // baseline пересчитан (S 12.810 → 13.596, длина 1816.8 → 1928.6 м).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.596223780264122, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1816.7935200749323, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(262858784L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(52000000L);
-        // Допустимый >90° остаётся только на стыке вывода (задокументировано).
+                .isCloseTo(1928.6432080880413, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(278939077L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(58000000L);
+        // Допустимые >90° остаются на стыках вывода; вариантов теперь до 3.
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
-                .isLessThanOrEqualTo(2L);
+                .isLessThanOrEqualTo(6L);
         assertNoExcessiveVertices(resultFile, new ObjectMapper(), 12);
-        // ADR-0035: точка 6 присоединена коротким ребром (~35 м), а не через ствол.
+        // ADR-0035/0037: точка 6 присоединена коротким ребром, а не через ствол.
         assertEdgeAtPointShorterThan(resultFile, new ObjectMapper(), 37.632012226474316,
                 55.700048261255056, 60.0);
     }
@@ -93,7 +96,7 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         JsonNode manifest = objectMapper.readTree(stagesDir.resolve("manifest.json").toFile());
         assertThat(manifest.path("bestPass").asInt()).isGreaterThanOrEqualTo(1);
-        JsonNode trees = manifest.path("stages").get(6);
+        JsonNode trees = manifest.path("stages").get(5);
         assertThat(trees.path("id").asText()).isEqualTo("trees");
         assertThat(trees.path("passes").size()).isGreaterThanOrEqualTo(1);
 

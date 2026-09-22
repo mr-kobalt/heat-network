@@ -41,9 +41,7 @@ class AlgorithmParameterSweepV2Test {
     private static final double[] POINT6 = {37.632012226474316, 55.700048261255056};
 
     private static final boolean[] BOOLS = {false, true};
-    private static final String[] SEARCHES = {"raster", "nearest", "toward-network"};
     private static final int[] REFINE_PASSES = {1, 2};
-    private static final int[] ENTRY_CELLS = {4, 8, 16};
     private static final double[] CELLS = {1.0, 2.0, 3.0};
     private static final int[] ITERATIONS = {1, 2, 3};
     private static final String[] STORAGES = {"memory", "postgis"};
@@ -88,42 +86,24 @@ class AlgorithmParameterSweepV2Test {
         Files.createDirectories(OUTPUT);
         ObjectMapper mapper = new ObjectMapper();
 
-        run(mapper, "stage1", "warmup", 2.0, 2, "memory", true, 8, "nearest", true, 2, 2, true,
-                true);
+        run(mapper, "stage1", "warmup", 2.0, 2, "memory", true, 2, 2, true, true);
 
         List<Map<String, Object>> stage1 = new ArrayList<>();
         int index = 0;
-        for (boolean multi : BOOLS) {
-            for (String search : SEARCHES) {
-                for (boolean reattach : BOOLS) {
-                    for (int refine : REFINE_PASSES) {
-                        for (boolean dogleg : BOOLS) {
-                            for (boolean boundary : BOOLS) {
-                                stage1.add(run(mapper, "stage1", "s1-" + index++, 2.0, 2, "memory",
-                                        multi, 8, search, reattach, 2, refine, dogleg, boundary));
-                            }
-                        }
+        for (boolean reattach : BOOLS) {
+            for (int refine : REFINE_PASSES) {
+                for (boolean dogleg : BOOLS) {
+                    for (boolean boundary : BOOLS) {
+                        stage1.add(run(mapper, "stage1", "s1-" + index++, 2.0, 2, "memory",
+                                reattach, 2, refine, dogleg, boundary));
                     }
                 }
             }
         }
         writeReports(stage1, mapper, "stage1");
-        assertStage(stage1, BOOLS.length * SEARCHES.length * BOOLS.length * REFINE_PASSES.length
-                * BOOLS.length * BOOLS.length);
+        assertStage(stage1, BOOLS.length * REFINE_PASSES.length * BOOLS.length * BOOLS.length);
 
         Map<String, Object> best = bestBy(stage1, "score");
-
-        List<Map<String, Object>> entries = new ArrayList<>();
-        index = 0;
-        for (int entry : ENTRY_CELLS) {
-            entries.add(run(mapper, "entrycells", "ec-" + index++, 2.0, 2, "memory", true, entry,
-                    str(best, "cellSearch"), bool(best, "reattachPass"), 2,
-                    intOf(best, "refinePasses"), bool(best, "exitGridDogleg"),
-                    bool(best, "boundary")));
-        }
-        writeReports(entries, mapper, "entrycells");
-        assertStage(entries, ENTRY_CELLS.length);
-        Map<String, Object> bestEntry = bestBy(entries, "score");
 
         List<Map<String, Object>> stage2 = new ArrayList<>();
         index = 0;
@@ -131,9 +111,8 @@ class AlgorithmParameterSweepV2Test {
             for (int iterations : ITERATIONS) {
                 for (String storage : STORAGES) {
                     stage2.add(run(mapper, "stage2", "s2-" + index++, cell, iterations, storage,
-                            true, intOf(bestEntry, "entryCells"), str(bestEntry, "cellSearch"),
-                            bool(bestEntry, "reattachPass"), 2, intOf(bestEntry, "refinePasses"),
-                            bool(bestEntry, "exitGridDogleg"), bool(bestEntry, "boundary")));
+                            bool(best, "reattachPass"), 2, intOf(best, "refinePasses"),
+                            bool(best, "exitGridDogleg"), bool(best, "boundary")));
                 }
             }
         }
@@ -141,16 +120,15 @@ class AlgorithmParameterSweepV2Test {
         assertStage(stage2, CELLS.length * ITERATIONS.length * STORAGES.length);
 
         System.out.println("BEST stage1: " + summarize(bestBy(stage1, "score")));
-        System.out.println("BEST entryCells: " + summarize(bestBy(entries, "score")));
         System.out.println("BEST stage2: " + summarize(bestBy(stage2, "score")));
         System.out.println("MIN edgePoint6: " + summarize(minEdgePoint6(stage1)));
         System.out.println("Reports: " + OUTPUT.toAbsolutePath());
     }
 
     private Map<String, Object> run(ObjectMapper mapper, String stage, String label, double cell,
-                                    int iterations, String storage, boolean multi, int entryCells,
-                                    String search, boolean reattach, int reattachIters,
-                                    int refinePasses, boolean dogleg, boolean boundary)
+                                    int iterations, String storage, boolean reattach,
+                                    int reattachIters, int refinePasses, boolean dogleg,
+                                    boolean boundary)
             throws Exception {
         Path directory = OUTPUT.resolve(stage).resolve(label);
         Files.createDirectories(directory);
@@ -163,9 +141,6 @@ class AlgorithmParameterSweepV2Test {
         properties.setForestMaxTurnDeg(90.0);
         properties.setForestTurnEnforcement("hard");
         properties.setForestGridStorage(storage);
-        properties.setForestTerminalMultiEntry(multi);
-        properties.setForestTerminalEntryCells(entryCells);
-        properties.setForestTerminalCellSearch(search);
         properties.setForestReattachPass(reattach);
         properties.setForestReattachIterations(reattachIters);
         properties.setForestRefineLocalPasses(refinePasses);
@@ -177,9 +152,6 @@ class AlgorithmParameterSweepV2Test {
         row.put("cellM", cell);
         row.put("iterations", iterations);
         row.put("storage", storage);
-        row.put("multiEntry", multi);
-        row.put("entryCells", entryCells);
-        row.put("cellSearch", search);
         row.put("reattachPass", reattach);
         row.put("reattachIters", reattachIters);
         row.put("refinePasses", refinePasses);
@@ -305,8 +277,8 @@ class AlgorithmParameterSweepV2Test {
 
     private void writeReports(List<Map<String, Object>> rows, ObjectMapper mapper, String stage)
             throws Exception {
-        String[] columns = {"run", "cellM", "iterations", "storage", "multiEntry", "entryCells",
-                "cellSearch", "reattachPass", "reattachIters", "refinePasses", "exitGridDogleg",
+        String[] columns = {"run", "cellM", "iterations", "storage", "reattachPass",
+                "reattachIters", "refinePasses", "exitGridDogleg",
                 "boundary", "totalMs", "gridMs", "gridStorage", "gridSize", "blockedCells",
                 "sources", "terminals", "trees", "unconnected", "warn90", "edgePoint6", "score",
                 "lengthM", "calculatedCost", "chamberCost", "warnings", "warningCodes", "passes",
@@ -393,14 +365,9 @@ class AlgorithmParameterSweepV2Test {
                 + ", length=" + row.get("lengthM") + ", edgePoint6=" + row.get("edgePoint6")
                 + ", totalMs=" + row.get("totalMs")
                 + ", cell=" + row.get("cellM") + ", iter=" + row.get("iterations")
-                + ", storage=" + row.get("storage") + ", multi=" + row.get("multiEntry")
-                + ", entryCells=" + row.get("entryCells") + ", search=" + row.get("cellSearch")
+                + ", storage=" + row.get("storage")
                 + ", reattach=" + row.get("reattachPass") + ", refine=" + row.get("refinePasses")
                 + ", dogleg=" + row.get("exitGridDogleg") + ", boundary=" + row.get("boundary");
-    }
-
-    private String str(Map<String, Object> row, String key) {
-        return row == null ? "nearest" : String.valueOf(row.get(key));
     }
 
     private boolean bool(Map<String, Object> row, String key) {

@@ -4,11 +4,13 @@ import { FeatureCollection, GeoFeature, GridMask } from '../types';
 import { RESULT_STAGE } from '../store';
 import { OverlayData, fitToData, updateOverlays } from './layers';
 import { decodeBits } from './gridMask';
+import { utmToWgs84, wgs84ToUtm } from './utm';
 
 /**
- * Отрисовка промежуточных этапов алгоритма (ADR-0036). Когда активна вкладка
- * этапа — результат скрывается, поверх контекста накладываются объекты этапа;
- * для этапа «сетка» дополнительно строится растровое изображение маски.
+ * Отрисовка промежуточных этапов алгоритма (ADR-0036/0037). Когда активна
+ * вкладка этапа — результат скрывается, поверх контекста накладываются объекты
+ * этапа; для этапа «сетка» рисуется растровая маска (без сглаживания) и, при
+ * достаточном приближении, контуры ячеек.
  */
 
 export interface StageOverlayData extends OverlayData {
@@ -17,29 +19,40 @@ export interface StageOverlayData extends OverlayData {
   gridMask: GridMask | null;
 }
 
-const STAGE_SOURCES = ['stage-polygons', 'stage-lines', 'stage-points', 'stage-grid'];
+const STAGE_SOURCES = ['stage-polygons', 'stage-lines', 'stage-points', 'stage-grid', 'stage-grid-cells'];
 const STAGE_LAYERS = [
   'layer-stage-polygons',
   'layer-stage-polygons-outline',
   'layer-stage-lines',
   'layer-stage-points',
   'layer-stage-grid',
+  'layer-stage-grid-cells',
 ];
 
+/** Минимальный зум, при котором рисуются контуры ячеек сетки. */
+const GRID_CELL_MIN_ZOOM = 16;
+/** Предел числа линий ячеек (защита от перерисовки на большом вьюпорте). */
+const MAX_GRID_CELL_LINES = 3000;
+/** Шаг сэмплирования линий при переводе UTM→WGS84, м. */
+const GRID_LINE_SAMPLE_STEP_M = 200.0;
+
 interface StageColors {
-  polygon?: string;
+  polygon?: unknown;
   line?: string;
   point?: string;
+}
+
+function restrictionPolygonColor(): unknown {
+  return ['match', ['get', 'object_type'], 'special_zone', '#f59e0b', 'obstacle', '#dc2626',
+    '#dc2626'];
 }
 
 function stageColors(kind: string): StageColors {
   switch (kind) {
     case 'network':
       return { line: '#64748b', point: '#64748b' };
-    case 'obstacles':
-      return { polygon: '#dc2626' };
-    case 'special':
-      return { polygon: '#f59e0b' };
+    case 'restrictions':
+      return { polygon: restrictionPolygonColor() };
     case 'exits':
       return { line: '#2563eb', point: '#2563eb' };
     case 'trees':
@@ -177,6 +190,69 @@ function updateStageLayers(map: MapLibreMap, data: StageOverlayData): void {
   }
 
   updateGridLayer(map, kind === 'grid' ? data.gridMask : null);
+  refreshStageGridCells(map, data);
+}
+
+/** Контуры ячеек сетки в текущем вьюпорте (при достаточном зуме). */
+export function refreshStageGridCells(map: MapLibreMap, data: StageOverlayData): void {
+  const mask = data.activeStage === 'grid' ? data.gridMask : null;
+  if (!mask || map.getZoom() < GRID_CELL_MIN_ZOOM) {
+    setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features: [] });
+    setLayerVisibility(map, 'layer-stage-grid-cells', false);
+    return;
+  }
+  const cell = mask.cellM;
+  const gridMaxX = mask.originX + mask.width * cell;
+  const gridMaxY = mask.originY + mask.height * cell;
+  const bounds = map.getBounds();
+  const sw = wgs84ToUtm(bounds.getWest(), bounds.getSouth());
+  const ne = wgs84ToUtm(bounds.getEast(), bounds.getNorth());
+  const minX = Math.max(sw.x, mask.originX);
+  const maxX = Math.min(ne.x, gridMaxX);
+  const minY = Math.max(sw.y, mask.originY);
+  const maxY = Math.min(ne.y, gridMaxY);
+  if (maxX <= minX || maxY <= minY) {
+    setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features: [] });
+    setLayerVisibility(map, 'layer-stage-grid-cells', false);
+    return;
+  }
+  const col0 = Math.floor((minX - mask.originX) / cell);
+  const col1 = Math.ceil((maxX - mask.originX) / cell);
+  const row0 = Math.floor((minY - mask.originY) / cell);
+  const row1 = Math.ceil((maxY - mask.originY) / cell);
+  if ((col1 - col0) + (row1 - row0) > MAX_GRID_CELL_LINES) {
+    setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features: [] });
+    setLayerVisibility(map, 'layer-stage-grid-cells', false);
+    return;
+  }
+  const features: GeoFeature[] = [];
+  for (let col = col0; col <= col1; col++) {
+    const x = mask.originX + col * cell;
+    features.push(cellLine(x, minY, x, maxY));
+  }
+  for (let row = row0; row <= row1; row++) {
+    const y = mask.originY + row * cell;
+    features.push(cellLine(minX, y, maxX, y));
+  }
+  setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features });
+  ensureLine(map, 'layer-stage-grid-cells', 'stage-grid-cells', '#0f172a', 0.5);
+  setLayerVisibility(map, 'layer-stage-grid-cells', true);
+}
+
+/** Прямая в UTM как ломаная в WGS84 (кривизна меридианов). */
+function cellLine(x1: number, y1: number, x2: number, y2: number): GeoFeature {
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const steps = Math.max(1, Math.ceil(length / GRID_LINE_SAMPLE_STEP_M));
+  const coordinates: Array<[number, number]> = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    coordinates.push(utmToWgs84(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t));
+  }
+  return {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates },
+    properties: { object_type: 'grid_cell' },
+  };
 }
 
 function gridMaskPoints(mask: GridMask): FeatureCollection {
@@ -214,7 +290,11 @@ function updateGridLayer(map: MapLibreMap, mask: GridMask | null): void {
       id: 'layer-stage-grid',
       type: 'raster',
       source: 'stage-grid',
-      paint: { 'raster-opacity': 0.75, 'raster-fade-duration': 0 },
+      paint: {
+        'raster-opacity': 0.75,
+        'raster-fade-duration': 0,
+        'raster-resampling': 'nearest',
+      },
     } as never);
   } catch (error) {
     console.error('[map] не удалось показать маску сетки', error);
@@ -296,7 +376,7 @@ function ensureFill(
   map: MapLibreMap,
   id: string,
   source: string,
-  color: string,
+  color: unknown,
   opacity: number,
 ): void {
   if (!map.getLayer(id)) {
@@ -318,7 +398,7 @@ function ensureLine(
   map: MapLibreMap,
   id: string,
   source: string,
-  color: string,
+  color: unknown,
   width: number,
 ): void {
   if (!map.getLayer(id)) {

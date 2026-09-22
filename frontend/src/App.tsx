@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppShell, Badge, Box, Burger, Group, Title, Text } from '@mantine/core';
+import { AppShell, Badge, Box, Burger, Group, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { MapView } from './map/MapView';
 import { DataSourcePanel } from './components/DataSourcePanel';
@@ -71,9 +71,6 @@ export function App() {
             <Badge variant="light">ТП v2</Badge>
           </Group>
           <StageTabs />
-          <Text size="xs" c="dimmed" visibleFrom="lg" style={{ whiteSpace: 'nowrap' }}>
-            визуализатор (ADR-0013)
-          </Text>
         </Group>
       </AppShell.Header>
 

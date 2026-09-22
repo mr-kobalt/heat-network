@@ -31,14 +31,21 @@ public class ObstacleMaskBuilder {
                 "MASK_COARSENED", warnings);
     }
 
-    /** Одноуровневая консервативная маска проходимости для поиска по сетке. */
+    /**
+     * Одноуровневая маска проходимости для поиска по сетке (ADR-0037, вариант B):
+     * без расширения на полудиагональ — клетка блокируется только если её центр
+     * внутри самого буфера препятствия. Так точка выхода, лежащая на границе
+     * буфера ОКС, попадает в свободную клетку. Гарантию «свободная клетка ⇒
+     * отрезок не пересекает запрет» снимаем; корректность геометрии обеспечивает
+     * точное уточнение `refine` ({@code ObstacleIndex.isInteriorBlocked}).
+     */
     public ObstacleMask buildPassability(ObstacleIndex index, Envelope bounds, double requestedCellM,
                                          long maxBytes, List<String> warnings) {
         if (bounds == null || bounds.isNull()) {
             return null;
         }
         ObstacleIndex effective = index != null ? index : new ObstacleIndex(java.util.List.of());
-        return rasterize(effective, bounds, requestedCellM, 1, maxBytes, true, "GRID_COARSENED",
+        return rasterize(effective, bounds, requestedCellM, 1, maxBytes, false, "GRID_COARSENED",
                 warnings);
     }
 

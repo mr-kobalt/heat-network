@@ -2,6 +2,7 @@ package ru.lct.heating.routing;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -48,6 +49,8 @@ public class GridForestPlanner {
 
     private static final double EPS = 1e-6;
     private static final double ANGLE_EPS = 1e-6;
+    /** Предел числа планов-вариантов (FR-75, ADR-0037). */
+    private static final int MAX_PLANS = 3;
     private static final double SQRT2 = Math.sqrt(2.0);
     private static final int[][] NEIGHBORS = {
             {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
@@ -61,11 +64,13 @@ public class GridForestPlanner {
     private final ObstacleMaskBuilder maskBuilder;
     private final CellStoreFactory cellStoreFactory;
     private final AppProperties appProperties;
+    private final OksApproachResolver approachResolver;
 
     public GridForestPlanner(TieInCandidateProvider candidateProvider, DiameterCatalog diameters,
                              CostModel costModel, MaxLengthEnforcer maxLengthEnforcer,
                              LineStringSimplifier simplifier, ObstacleMaskBuilder maskBuilder,
-                             CellStoreFactory cellStoreFactory, AppProperties appProperties) {
+                             CellStoreFactory cellStoreFactory, AppProperties appProperties,
+                             OksApproachResolver approachResolver) {
         this.candidateProvider = candidateProvider;
         this.diameters = diameters;
         this.costModel = costModel;
@@ -74,6 +79,7 @@ public class GridForestPlanner {
         this.maskBuilder = maskBuilder;
         this.cellStoreFactory = cellStoreFactory;
         this.appProperties = appProperties;
+        this.approachResolver = approachResolver;
     }
 
     private double maxTurnDeg() {
@@ -89,40 +95,45 @@ public class GridForestPlanner {
         return appProperties.isForestExitGridDogleg();
     }
 
-    public ForestPlanningResult plan(NetworkDataset dataset, ExistingNetworkGraph graph,
-                                     ObstacleIndex obstacleIndex, List<String> warnings,
-                                     Map<String, ConnectionExit> exits) {
+    public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                           ObstacleIndex obstacleIndex, List<String> warnings,
+                                           Map<String, ConnectionExit> exits) {
         return plan(dataset, graph, obstacleIndex, warnings, exits, StageTrace.disabled());
     }
 
-    public ForestPlanningResult plan(NetworkDataset dataset, ExistingNetworkGraph graph,
-                                     ObstacleIndex obstacleIndex, List<String> warnings,
-                                     Map<String, ConnectionExit> exits, StageTrace trace) {
+    /**
+     * @return до {@link #MAX_PLANS} содержательно различающихся планов — по одному
+     *         на выполненный проход поиска (ADR-0037): каждый лес прогоняется
+     *         дальше по конвейеру как отдельный вариант.
+     */
+    public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                           ObstacleIndex obstacleIndex, List<String> warnings,
+                                           Map<String, ConnectionExit> exits, StageTrace trace) {
         List<Terminal> terminals = terminals(dataset, exits, warnings);
-        List<String> unconnected = new ArrayList<>();
+        List<String> baseUnconnected = new ArrayList<>();
         Set<String> terminalIds = new HashSet<>();
         for (Terminal terminal : terminals) {
             terminalIds.add(terminal.pointId);
         }
         for (OksConnectionPointObject point : dataset.getConnectionPoints()) {
             if (!terminalIds.contains(point.getId())) {
-                unconnected.add(point.getId());
+                baseUnconnected.add(point.getId());
             }
         }
         if (terminals.isEmpty()) {
-            return result(List.of(), unconnected);
+            return List.of(result(List.of(), baseUnconnected));
         }
         List<TieInCandidate> ties = tieCandidates(dataset, terminals);
         if (ties.isEmpty()) {
             warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
-            unconnected.addAll(terminalIds);
-            return result(List.of(), unconnected);
+            baseUnconnected.addAll(terminalIds);
+            return List.of(result(List.of(), baseUnconnected));
         }
 
         long start = System.nanoTime();
         double cell = appProperties.getForestGridCellM() > 0
                 ? appProperties.getForestGridCellM() : 2.0;
-        Envelope bounds = bounds(terminals, ties, cell);
+        Envelope bounds = bounds(dataset, terminals, ties, cell);
         long estimatedCells = (long) Math.ceil(bounds.getWidth() / cell + 2)
                 * (long) Math.ceil(bounds.getHeight() / cell + 2);
         boolean spill = cellStoreFactory.spillEnabled(estimatedCells);
@@ -131,8 +142,8 @@ public class GridForestPlanner {
         ObstacleMask pass = maskBuilder.buildPassability(obstacleIndex, bounds, cell, maxBytes,
                 warnings);
         if (pass == null) {
-            unconnected.addAll(terminalIds);
-            return result(List.of(), unconnected);
+            baseUnconnected.addAll(terminalIds);
+            return List.of(result(List.of(), baseUnconnected));
         }
         log.info("Grid: cell={} size={}x{} blocked={} build={}ms storage={}", pass.cellM(),
                 pass.width(), pass.height(), pass.blockedCells(), pass.buildMs(),
@@ -140,9 +151,33 @@ public class GridForestPlanner {
 
         Map<Integer, TiePoint> sources = mapSources(pass, ties);
         long[] reachable = reachableCells(pass, sources.keySet());
-        Map<Integer, Terminal> terminalCells = mapTerminals(pass, terminals, reachable,
-                new ArrayList<>(sources.values()));
+        // ADR-0037: если клетка основного выхода заблокирована или недостижима,
+        // берём ближайший альтернативный выход, ведущий в достижимую клетку.
+        for (Terminal terminal : terminals) {
+            if (exitReachable(pass, reachable, terminal.target)) {
+                continue;
+            }
+            for (ConnectionExit candidate : approachResolver.candidatesFor(dataset, terminal.pointId)) {
+                if (!candidate.isBlocked() && candidate.getTarget() != null
+                        && exitReachable(pass, reachable, candidate.getTarget())) {
+                    terminal.target = candidate.getTarget();
+                    terminal.tail = candidate.getTail() == null ? List.of() : candidate.getTail();
+                    break;
+                }
+            }
+        }
+        // Клетки выхода ОКС принудительно проходимы (цель — на границе буфера ОКС).
+        Map<Integer, Terminal> terminalCells = new LinkedHashMap<>();
+        List<Integer> exitCells = new ArrayList<>();
+        for (Terminal terminal : terminals) {
+            int terminalCell = pass.rowOf(terminal.target.y) * pass.width()
+                    + pass.colOf(terminal.target.x);
+            terminalCells.putIfAbsent(terminalCell, terminal);
+            exitCells.add(terminalCell);
+        }
+        pass = pass.withClearedCells(exitCells);
         if (trace.isEnabled()) {
+            reachable = reachableCells(pass, sources.keySet());
             captureGrid(trace, pass, sources, terminalCells, reachable);
         }
         Map<String, Double> terminalFlow = new HashMap<>();
@@ -155,8 +190,7 @@ public class GridForestPlanner {
         int iterations = Math.max(1, appProperties.getForestCostIterations());
         int[] dnEstimate = new int[pass.width() * pass.height()];
         Arrays.fill(dnEstimate, selectDiameter(totalFlow));
-        List<ForestTree> trees = List.of();
-        Set<String> connected = new HashSet<>();
+        List<GridBuild> builds = new ArrayList<>();
         List<GridReport.Pass> passStats = new ArrayList<>();
         double bestScore = Double.POSITIVE_INFINITY;
         int bestPassIndex = 0;
@@ -166,6 +200,7 @@ public class GridForestPlanner {
             GridBuild build = buildTrees(pass, sources, terminalCells, obstacleIndex, warnings,
                     passIndex > 0, dnEstimate, terminalFlow, trace, passIndex + 1);
             long passMs = elapsedMs(passStart);
+            builds.add(build);
             passStats.add(GridReport.Pass.builder().index(passIndex + 1).score(build.score)
                     .trees(build.trees.size()).timeMs(passMs).build());
             if (trace.isEnabled()) {
@@ -175,8 +210,6 @@ public class GridForestPlanner {
                     build.score, build.trees.size(), passMs);
             if (build.score < bestScore - EPS) {
                 bestScore = build.score;
-                trees = build.trees;
-                connected = build.connected;
                 bestPassIndex = passIndex;
                 bestBuild = build;
             } else if (passIndex > 0) {
@@ -190,23 +223,65 @@ public class GridForestPlanner {
             trace.setBestPass(bestPassIndex + 1);
         }
 
+        long totalMs = elapsedMs(start);
+        List<ForestPlanningResult> variants = new ArrayList<>();
+        Set<String> signatures = new HashSet<>();
+        for (GridBuild build : builds) {
+            if (variants.size() >= MAX_PLANS) {
+                break;
+            }
+            if (!signatures.add(signature(build.trees))) {
+                continue;
+            }
+            variants.add(toResult(build, terminals, baseUnconnected, pass, spill, sources,
+                    terminalCells, passStats, totalMs));
+        }
+        if (variants.isEmpty()) {
+            variants.add(result(List.of(), baseUnconnected));
+        }
+        log.info("Grid total: sources={} terminals={} plans={} unconnected={} time={}ms",
+                sources.size(), distinctTerminals(terminalCells), variants.size(),
+                variants.get(0).getUnconnectedConnectionPointIds().size(), totalMs);
+        return variants;
+    }
+
+    private ForestPlanningResult toResult(GridBuild build, List<Terminal> terminals,
+                                          List<String> baseUnconnected, ObstacleMask pass,
+                                          boolean spill, Map<Integer, TiePoint> sources,
+                                          Map<Integer, Terminal> terminalCells,
+                                          List<GridReport.Pass> passStats, long totalMs) {
+        List<String> unconnected = new ArrayList<>(baseUnconnected);
         for (Terminal terminal : terminals) {
-            if (!connected.contains(terminal.pointId)) {
+            if (!build.connected.contains(terminal.pointId)) {
                 unconnected.add(terminal.pointId);
             }
         }
-        long totalMs = elapsedMs(start);
-        log.info("Grid total: sources={} terminals={} trees={} unconnected={} time={}ms",
-                sources.size(), distinctTerminals(terminalCells), trees.size(), unconnected.size(),
-                totalMs);
         GridReport report = GridReport.builder()
                 .cellM(pass.cellM()).width(pass.width()).height(pass.height())
                 .blockedCells(pass.blockedCells()).storage(spill ? "postgis" : "memory")
                 .sources(sources.size()).terminals(distinctTerminals(terminalCells))
-                .trees(trees.size()).unconnected(unconnected.size()).timeMs(totalMs)
+                .trees(build.trees.size()).unconnected(unconnected.size()).timeMs(totalMs)
                 .passes(passStats).build();
-        return ForestPlanningResult.builder().trees(trees)
+        return ForestPlanningResult.builder().trees(build.trees)
                 .unconnectedConnectionPointIds(unconnected).gridReport(report).build();
+    }
+
+    /** Сигнатура геометрии леса для дедупликации одинаковых проходов. */
+    private String signature(List<ForestTree> trees) {
+        List<String> parts = new ArrayList<>();
+        for (ForestTree tree : trees) {
+            for (ForestEdge edge : tree.getEdges()) {
+                StringBuilder part = new StringBuilder(edge.getFromNodeId())
+                        .append('>').append(edge.getToNodeId());
+                for (Coordinate coordinate : edge.getCoordinates()) {
+                    part.append(';').append(Math.round(coordinate.x * 100.0))
+                            .append(',').append(Math.round(coordinate.y * 100.0));
+                }
+                parts.add(part.toString());
+            }
+        }
+        Collections.sort(parts);
+        return String.join("|", parts);
     }
 
     private ForestPlanningResult result(List<ForestTree> trees, List<String> unconnected) {
@@ -241,16 +316,27 @@ public class GridForestPlanner {
         for (Terminal terminal : terminals) {
             all.addAll(candidateProvider.projections(dataset, terminal.target));
         }
-        return candidateProvider.distinct(all);
+        return candidateProvider.distinct(candidateProvider.excludeNearChambers(dataset, all));
     }
 
-    private Envelope bounds(List<Terminal> terminals, List<TieInCandidate> ties, double cell) {
+    /**
+     * Границы сетки: терминалы и кандидаты врезки, а также (ADR-0037) bbox всех
+     * входных объектов — иначе обход препятствия, выходящий за точки сети,
+     * окажется неисследованным. Отключается {@code forest-grid-include-input-bounds}.
+     */
+    private Envelope bounds(NetworkDataset dataset, List<Terminal> terminals,
+                            List<TieInCandidate> ties, double cell) {
         Envelope bounds = new Envelope();
         for (Terminal terminal : terminals) {
             bounds.expandToInclude(terminal.target);
         }
         for (TieInCandidate tie : ties) {
             bounds.expandToInclude(tie.getCoordinate());
+        }
+        Envelope datasetBounds = dataset.getBounds();
+        if (appProperties.isForestGridIncludeInputBounds() && datasetBounds != null
+                && !datasetBounds.isNull()) {
+            bounds.expandToInclude(datasetBounds);
         }
         bounds.expandBy(Math.max(cell * 2.0, 10.0));
         return bounds;
@@ -273,184 +359,32 @@ public class GridForestPlanner {
         return sources;
     }
 
-    private Map<Integer, Terminal> mapTerminals(ObstacleMask pass, List<Terminal> terminals,
-                                                long[] reachable, List<TiePoint> sources) {
-        Map<Integer, Terminal> cells = new LinkedHashMap<>();
-        Set<Integer> used = new HashSet<>();
-        int count = multiEntry() ? entryCellCount() : 1;
-        for (Terminal terminal : terminals) {
-            List<Integer> entry = pickTerminalCells(pass, terminal.target, used, reachable, sources,
-                    count);
-            if (entry.isEmpty()) {
-                continue;
-            }
-            terminal.entryCells = entry;
-            for (int cell : entry) {
-                cells.putIfAbsent(cell, terminal);
-            }
-        }
-        return cells;
-    }
-
     private int distinctTerminals(Map<Integer, Terminal> terminalCells) {
         return new LinkedHashSet<>(terminalCells.values()).size();
     }
 
-    /**
-     * ADR-0035: клетки-кандидаты входа терминала. Первичная — по правилу
-     * {@code forest-terminal-cell-search}; при мультивходе добавляются ближайшие
-     * свободные клетки разных секторов вокруг {@code target}.
-     */
-    private List<Integer> pickTerminalCells(ObstacleMask pass, Coordinate coordinate,
-                                            Set<Integer> used, long[] reachable,
-                                            List<TiePoint> sources, int count) {
-        int width = pass.width();
+    /** Достижима ли клетка выхода (или её сосед) от сети — с учётом открытия клетки. */
+    private boolean exitReachable(ObstacleMask pass, long[] reachable, Coordinate coordinate) {
         int col = pass.colOf(coordinate.x);
         int row = pass.rowOf(coordinate.y);
-        if (!multiEntry() && "raster".equalsIgnoreCase(cellSearch())) {
-            int cell = nearestFreeCell(pass, coordinate, used, reachable);
-            if (cell < 0) {
-                return List.of();
-            }
-            used.add(cell);
-            return List.of(cell);
+        if (reachableAt(pass, reachable, col, row)) {
+            return true;
         }
-        if (isFree(pass, col, row, used, reachable)) {
-            int cell = row * width + col;
-            used.add(cell);
-            return List.of(cell);
-        }
-        List<Integer> cells = new ArrayList<>();
-        int maxRing = 128;
-        for (int ring = 1; ring <= maxRing; ring++) {
-            for (int dx = -ring; dx <= ring; dx++) {
-                for (int dy = -ring; dy <= ring; dy++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dy)) != ring) {
-                        continue;
-                    }
-                    int c = col + dx;
-                    int r = row + dy;
-                    if (c < 0 || r < 0 || c >= pass.width() || r >= pass.height()) {
-                        continue;
-                    }
-                    if (isFree(pass, c, r, used, reachable)) {
-                        cells.add(r * width + c);
-                    }
-                }
-            }
-            if (cells.size() >= count * 4 && ring >= 2) {
-                break;
-            }
-            if (cells.size() >= count && ring >= 3) {
-                break;
+        for (int[] step : NEIGHBORS) {
+            if (reachableAt(pass, reachable, col + step[0], row + step[1])) {
+                return true;
             }
         }
-        if (cells.isEmpty()) {
-            return List.of();
-        }
-        final double cx = coordinate.x;
-        final double cy = coordinate.y;
-        cells.sort(Comparator.comparingDouble(cell -> {
-            double x = pass.centerX(cell % width) - cx;
-            double y = pass.centerY(cell / width) - cy;
-            return x * x + y * y;
-        }));
-        List<Integer> chosen = new ArrayList<>();
-        chosen.add(choosePrimaryCell(pass, cells, coordinate, sources));
-        if (count > 1) {
-            boolean[] sectors = new boolean[16];
-            sectors[sectorOf(pass, chosen.get(0), coordinate)] = true;
-            for (int cell : cells) {
-                if (chosen.size() >= count) {
-                    break;
-                }
-                if (chosen.contains(cell)) {
-                    continue;
-                }
-                int sector = sectorOf(pass, cell, coordinate);
-                if (sectors[sector]) {
-                    continue;
-                }
-                sectors[sector] = true;
-                chosen.add(cell);
-            }
-            for (int cell : cells) {
-                if (chosen.size() >= count) {
-                    break;
-                }
-                if (!chosen.contains(cell)) {
-                    chosen.add(cell);
-                }
-            }
-        }
-        used.add(chosen.get(0));
-        return chosen;
+        return false;
     }
 
-    private int choosePrimaryCell(ObstacleMask pass, List<Integer> sorted, Coordinate coordinate,
-                                  List<TiePoint> sources) {
-        if (!"toward-network".equalsIgnoreCase(cellSearch()) || sources.isEmpty()
-                || sorted.size() < 2) {
-            return sorted.get(0);
+    private boolean reachableAt(ObstacleMask pass, long[] reachable, int col, int row) {
+        if (col < 0 || row < 0 || col >= pass.width() || row >= pass.height()) {
+            return false;
         }
-        double sx = 0.0;
-        double sy = 0.0;
-        for (TiePoint tie : sources) {
-            sx += tie.coordinate.x;
-            sy += tie.coordinate.y;
-        }
-        sx /= sources.size();
-        sy /= sources.size();
-        double vx = sx - coordinate.x;
-        double vy = sy - coordinate.y;
-        double vlen = Math.hypot(vx, vy);
-        if (vlen < EPS) {
-            return sorted.get(0);
-        }
-        double nearest = distance(pass, sorted.get(0), coordinate);
-        double tolerance = pass.cellM();
-        int best = sorted.get(0);
-        double bestAlign = Double.NEGATIVE_INFINITY;
-        for (int cell : sorted) {
-            if (distance(pass, cell, coordinate) > nearest + tolerance) {
-                break;
-            }
-            double x = pass.centerX(cell % pass.width()) - coordinate.x;
-            double y = pass.centerY(cell / pass.width()) - coordinate.y;
-            double align = (x * vx + y * vy) / (Math.hypot(x, y) * vlen + EPS);
-            if (align > bestAlign) {
-                bestAlign = align;
-                best = cell;
-            }
-        }
-        return best;
+        int cell = row * pass.width() + col;
+        return (reachable[cell >>> 6] & (1L << (cell & 63))) != 0;
     }
-
-    private double distance(ObstacleMask pass, int cell, Coordinate coordinate) {
-        double x = pass.centerX(cell % pass.width()) - coordinate.x;
-        double y = pass.centerY(cell / pass.width()) - coordinate.y;
-        return Math.hypot(x, y);
-    }
-
-    private int sectorOf(ObstacleMask pass, int cell, Coordinate coordinate) {
-        double x = pass.centerX(cell % pass.width()) - coordinate.x;
-        double y = pass.centerY(cell / pass.width()) - coordinate.y;
-        double angle = (Math.toDegrees(Math.atan2(y, x)) + 360.0) % 360.0;
-        return (int) (angle / 22.5) % 16;
-    }
-
-    private boolean multiEntry() {
-        return appProperties.isForestTerminalMultiEntry();
-    }
-
-    private int entryCellCount() {
-        return Math.max(1, appProperties.getForestTerminalEntryCells());
-    }
-
-    private String cellSearch() {
-        return appProperties.getForestTerminalCellSearch();
-    }
-
 
     private int nearestFreeCell(ObstacleMask pass, Coordinate coordinate, Set<Integer> used) {
         return nearestFreeCell(pass, coordinate, used, null);
@@ -1313,11 +1247,10 @@ public class GridForestPlanner {
     private static final class Terminal {
         private final String pointId;
         private final Coordinate point;
-        private final Coordinate target;
-        private final List<Coordinate> tail;
+        private Coordinate target;
+        private List<Coordinate> tail;
         private final double flow;
         private Integer startCell;
-        private List<Integer> entryCells = List.of();
         private boolean connected;
 
         private Terminal(String pointId, Coordinate point, Coordinate target,

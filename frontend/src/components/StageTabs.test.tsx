@@ -49,4 +49,28 @@ describe('StageTabs', () => {
     const { container } = renderTabs();
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
+
+  it('shows the current tree pass in the tab title', () => {
+    useStore.setState({
+      traced: true,
+      runId: 'run-1',
+      stages: [
+        {
+          id: 'trees',
+          title: 'Деревья',
+          kind: 'trees',
+          format: 'geojson',
+          available: true,
+          passes: [1, 2],
+          bestPass: 2,
+        },
+      ],
+      activeStage: RESULT_STAGE,
+      treePass: 2,
+      stageData: {},
+      gridMask: null,
+    });
+    renderTabs();
+    expect(screen.getByText('Деревья #2')).toBeInTheDocument();
+  });
 });

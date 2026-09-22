@@ -72,9 +72,9 @@ class StageTraceWriterTest {
         assertThat(manifest.path("bestPass").asInt()).isEqualTo(1);
         List<String> ids = new ArrayList<>();
         manifest.path("stages").forEach(stage -> ids.add(stage.path("id").asText()));
-        assertThat(ids).containsExactly("input", "network", "obstacles", "special", "exits", "grid",
+        assertThat(ids).containsExactly("input", "network", "restrictions", "exits", "grid",
                 "trees", "refine", "relink");
-        JsonNode trees = manifest.path("stages").get(6);
+        JsonNode trees = manifest.path("stages").get(5);
         assertThat(trees.path("passes").get(0).asInt()).isEqualTo(1);
 
         JsonNode grid = objectMapper.readTree(dir.resolve("grid.json").toFile());

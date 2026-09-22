@@ -50,8 +50,7 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
         assertThat(Files.exists(stagesDir.resolve("manifest.json"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("grid.json"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("network.geojson"))).isTrue();
-        assertThat(Files.exists(stagesDir.resolve("obstacles.geojson"))).isTrue();
-        assertThat(Files.exists(stagesDir.resolve("special.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("restrictions.geojson"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("exits.geojson"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("trees-1.geojson"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("refine.geojson"))).isTrue();

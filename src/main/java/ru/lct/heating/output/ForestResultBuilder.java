@@ -75,6 +75,10 @@ public class ForestResultBuilder {
                 chamberDiameter.merge(edge.getFromNodeId(), edge.getDiameterMm(), Math::max);
                 chamberDiameter.merge(edge.getToNodeId(), edge.getDiameterMm(), Math::max);
             }
+            // Идентификаторы узлов уникальны в пределах варианта: сгенерированные
+            // камеры/тех. узлы получают префикс variant_id, существующие камеры и
+            // точки подключения сохраняют входные id.
+            Map<String, String> nodeIds = outputNodeIds(variantId, tree);
             int connectionDiameter = chamberDiameter.getOrDefault(connectionNode.getId(), 0);
             if (connectionNode.isExisting()) {
                 int tieIns = countOutgoing(connectionNode.getId(), tree.getEdges());
@@ -84,7 +88,7 @@ public class ForestResultBuilder {
                 long chamberCost = costModel.chamberCost(connectionDiameter);
                 chamberConstructionCost += chamberCost;
                 chambers.add(OutputChamber.builder()
-                        .id(connectionNode.getId())
+                        .id(nodeIds.get(connectionNode.getId()))
                         .diameterMm(connectionDiameter)
                         .cost(chamberCost)
                         .geometryWgs84(toWgs84Point(connectionNode.getCoordinate()))
@@ -98,7 +102,7 @@ public class ForestResultBuilder {
                     long chamberCost = costModel.chamberCost(diameterMm);
                     chamberConstructionCost += chamberCost;
                     chambers.add(OutputChamber.builder()
-                            .id(node.getId())
+                            .id(nodeIds.get(node.getId()))
                             .diameterMm(diameterMm)
                             .cost(chamberCost)
                             .geometryWgs84(toWgs84Point(node.getCoordinate()))
@@ -123,12 +127,12 @@ public class ForestResultBuilder {
                     newLength += length;
 
                     String startNode = chunkIndex == 0
-                            ? edge.getFromNodeId()
-                            : techNodeId(edge, distance, chunk.getGeometry().getCoordinateN(0),
-                                    technicalNodes);
+                            ? nodeIds.get(edge.getFromNodeId())
+                            : techNodeId(variantId, edge, distance,
+                                    chunk.getGeometry().getCoordinateN(0), technicalNodes);
                     String endNode = chunkIndex == chunks.size() - 1
-                            ? edge.getToNodeId()
-                            : techNodeId(edge, distance + chunk.getGeometry().getLength(),
+                            ? nodeIds.get(edge.getToNodeId())
+                            : techNodeId(variantId, edge, distance + chunk.getGeometry().getLength(),
                                     chunk.getGeometry().getCoordinateN(chunk.getGeometry().getNumPoints() - 1),
                                     technicalNodes);
                     segments.add(OutputSegment.builder()
@@ -212,9 +216,27 @@ public class ForestResultBuilder {
         return count;
     }
 
-    private String techNodeId(ForestEdge edge, double distance, Coordinate coordinate,
+    private Map<String, String> outputNodeIds(String variantId, ForestTree tree) {
+        Map<String, String> ids = new HashMap<>();
+        for (ForestNode node : tree.getNodes().values()) {
+            ids.put(node.getId(), outputNodeId(variantId, node));
+        }
+        return ids;
+    }
+
+    private String outputNodeId(String variantId, ForestNode node) {
+        if (node.isExisting() && node.getExistingObjectId() != null) {
+            return node.getExistingObjectId();
+        }
+        if (node.getType() == NodeType.CONNECTION_POINT) {
+            return node.getId();
+        }
+        return variantId + "_" + node.getId();
+    }
+
+    private String techNodeId(String variantId, ForestEdge edge, double distance, Coordinate coordinate,
                               List<OutputTechnicalNode> technicalNodes) {
-        String id = "tech_" + edge.getId() + "_" + Math.round(distance * 1000.0);
+        String id = variantId + "_tech_" + edge.getId() + "_" + Math.round(distance * 1000.0);
         technicalNodes.add(OutputTechnicalNode.builder()
                 .id(id)
                 .geometryWgs84(toWgs84Point(coordinate))

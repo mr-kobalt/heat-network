@@ -259,10 +259,8 @@ public class StageTraceWriter {
         stages.add(descriptor("input", "Вход", "input", "input", true));
         stages.add(descriptor(StageTrace.NETWORK, "Сеть", "network", "geojson",
                 trace.hasStage(StageTrace.NETWORK)));
-        stages.add(descriptor(StageTrace.OBSTACLES, "Ограничения", "obstacles", "geojson",
-                trace.hasStage(StageTrace.OBSTACLES)));
-        stages.add(descriptor(StageTrace.SPECIAL, "Спецпроходы", "special", "geojson",
-                trace.hasStage(StageTrace.SPECIAL)));
+        stages.add(descriptor(StageTrace.RESTRICTIONS, "Ограничения", "restrictions", "geojson",
+                trace.hasStage(StageTrace.RESTRICTIONS)));
         stages.add(descriptor(StageTrace.EXITS, "Выходы", "exits", "geojson",
                 trace.hasStage(StageTrace.EXITS)));
         stages.add(descriptor(StageTrace.GRID, "Сетка", "grid", "mask", trace.grid() != null));
@@ -273,7 +271,7 @@ public class StageTraceWriter {
         stages.add(trees);
         stages.add(descriptor(StageTrace.REFINE, "Refine", "refine", "geojson",
                 trace.hasStage(StageTrace.REFINE)));
-        stages.add(descriptor(StageTrace.RELINK, "Переподключение", "relink", "geojson",
+        stages.add(descriptor(StageTrace.RELINK, "Relink", "relink", "geojson",
                 trace.hasStage(StageTrace.RELINK)));
         manifest.put("stages", stages);
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), manifest);

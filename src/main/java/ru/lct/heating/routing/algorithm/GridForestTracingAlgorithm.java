@@ -41,13 +41,13 @@ public class GridForestTracingAlgorithm implements TracingAlgorithm {
     public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
                                            ObstacleIndex obstacleIndex, List<String> warnings,
                                            Map<String, ConnectionExit> exits) {
-        return List.of(forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits));
+        return forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits);
     }
 
     @Override
     public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
                                            ObstacleIndex obstacleIndex, List<String> warnings,
                                            Map<String, ConnectionExit> exits, StageTrace trace) {
-        return List.of(forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits, trace));
+        return forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits, trace);
     }
 }

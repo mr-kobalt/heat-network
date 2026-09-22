@@ -21,11 +21,12 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.getForestTurnEnforcement()).isEqualTo("hard");
         assertThat(properties.getForestRefineLocalPasses()).isEqualTo(2);
         assertThat(properties.isForestExitGridDogleg()).isTrue();
-        assertThat(properties.getForestTerminalCellSearch()).isEqualTo("nearest");
-        assertThat(properties.isForestTerminalMultiEntry()).isTrue();
         assertThat(properties.isForestReattachPass()).isTrue();
         assertThat(properties.getForestReattachIterations()).isEqualTo(2);
         assertThat(properties.isOksOwningIncludeBoundary()).isTrue();
+        assertThat(properties.getTieInSampleStepM()).isEqualTo(1.0);
+        assertThat(properties.getTieInChamberExclusionM()).isEqualTo(1.0);
+        assertThat(properties.isForestGridIncludeInputBounds()).isTrue();
     }
 
     @Test
