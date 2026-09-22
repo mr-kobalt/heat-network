@@ -33,6 +33,8 @@ const STAGE_LAYERS = [
 const GRID_CELL_MIN_ZOOM = 16;
 /** Предел числа линий ячеек (защита от перерисовки на большом вьюпорте). */
 const MAX_GRID_CELL_LINES = 3000;
+/** Масштаб canvas при рисовке гекс-ячеек маски, px на клетку (ADR-0041). */
+const GRID_HEX_SCALE = 3;
 /** Шаг сэмплирования линий при переводе UTM→WGS84, м. */
 const GRID_LINE_SAMPLE_STEP_M = 200.0;
 
@@ -348,6 +350,14 @@ function removeGridLayer(map: MapLibreMap): void {
 export function buildGridDataUrl(mask: GridMask): string {
   const width = mask.imageWidth;
   const height = mask.imageHeight;
+  const blocked = decodeBits(mask.blocked, width * height);
+  const reachable = decodeBits(mask.reachable, width * height);
+  if (!blocked.length) {
+    return '';
+  }
+  if (mask.gridShape === 'hex') {
+    return buildHexGridDataUrl(mask, width, height, blocked, reachable);
+  }
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -356,8 +366,6 @@ export function buildGridDataUrl(mask: GridMask): string {
     return '';
   }
   const image = context.createImageData(width, height);
-  const blocked = decodeBits(mask.blocked, width * height);
-  const reachable = decodeBits(mask.reachable, width * height);
   for (let index = 0; index < width * height; index++) {
     const offset = index * 4;
     if (blocked[index]) {
@@ -373,6 +381,56 @@ export function buildGridDataUrl(mask: GridMask): string {
     }
   }
   context.putImageData(image, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+/**
+ * Маска гексагональной сетки (ADR-0041): каждая клетка рисуется шестиугольником
+ * pointy-top, со сдвигом чётных строк. Строка 0 битсета — север (верх canvas).
+ */
+function buildHexGridDataUrl(mask: GridMask, width: number, height: number,
+                             blocked: Uint8Array, reachable: Uint8Array): string {
+  const scale = GRID_HEX_SCALE;
+  const rowSpacing = mask.rowSpacing && mask.rowSpacing > 0 ? mask.rowSpacing : mask.cellM;
+  const rowFactor = mask.cellM > 0 ? rowSpacing / mask.cellM : Math.sqrt(3) / 2;
+  const rowPx = scale * rowFactor;
+  const radius = scale / Math.sqrt(3);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * rowPx));
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return '';
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  const blockedColor = 'rgba(100,116,139,0.51)';
+  const reachableColor = 'rgba(37,99,235,0.216)';
+  for (let index = 0; index < width * height; index++) {
+    const isBlocked = blocked[index] === 1;
+    const isReachable = reachable[index] === 1;
+    if (!isBlocked && !isReachable) {
+      continue;
+    }
+    const imageRow = Math.floor(index / width);
+    const imageCol = index % width;
+    const parity = (height - 1 - imageRow) & 1;
+    const cx = (imageCol + 0.5 + parity * 0.5) * scale;
+    const cy = (imageRow + 0.5) * rowPx;
+    context.fillStyle = isBlocked ? blockedColor : reachableColor;
+    context.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const angle = (Math.PI / 180) * (60 * k + 30);
+      const x = cx + radius * Math.cos(angle);
+      const y = cy + radius * Math.sin(angle);
+      if (k === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    }
+    context.closePath();
+    context.fill();
+  }
   return canvas.toDataURL('image/png');
 }
 

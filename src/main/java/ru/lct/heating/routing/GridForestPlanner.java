@@ -139,13 +139,14 @@ public class GridForestPlanner {
         double cell = appProperties.getForestGridCellM() > 0
                 ? appProperties.getForestGridCellM() : 2.0;
         Envelope bounds = bounds(dataset, terminals, ties, cell);
-        long estimatedCells = (long) Math.ceil(bounds.getWidth() / cell + 2)
-                * (long) Math.ceil(bounds.getHeight() / cell + 2);
+        GridShape shape = gridShape();
+        long estimatedCells = (long) shape.columns(bounds.getWidth(), cell)
+                * shape.rows(bounds.getHeight(), cell);
         boolean spill = cellStoreFactory.spillEnabled(estimatedCells);
         long maxBytes = spill ? Long.MAX_VALUE / 4
                 : Math.max(1L, appProperties.getForestGridMaxCells() / 4);
         ObstacleMask pass = maskBuilder.buildPassability(obstacleIndex, bounds, cell, maxBytes,
-                warnings, gridShape());
+                warnings, shape);
         if (pass == null) {
             baseUnconnected.addAll(terminalIds);
             return List.of(result(List.of(), baseUnconnected));
