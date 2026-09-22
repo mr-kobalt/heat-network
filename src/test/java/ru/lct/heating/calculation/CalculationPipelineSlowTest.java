@@ -61,15 +61,16 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         // ADR-0037: буферы по мин. Ду, выход — ближайшая точка на внешнем контуре
         // буфера всего ОКС (с учётом узких промежутков и достижимости), кандидаты 1 м.
-        // ADR-0038: уточнение геометрии (refine) выполняется после переприсоединения
-        // (relink) — baseline пересчитан (S 13.596 → 13.530, длина 1928.6 → 1918.4 м,
-        // стоимость 278.9 → 277.7 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.529938514114438, within(1e-6));
+        // ADR-0038: уточнение геометрии (refine) выполняется после переприсоединения.
+        // ADR-0040: выходы фильтруются (соседние корпуса, повторный вход, глубина
+        // > 15 м). ADR-0041: сетка поиска — гексагональная (по умолчанию) —
+        // baseline пересчитан (S 13.099 → 12.973, длина 1863.7 → 1836.5 м,
+        // стоимость 268.1 → 266.5 млн, камеры 54 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(12.97263500963936, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1918.4338393714797, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(277665607L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(58000000L);
-        // Допустимые >90° остаются на стыках вывода; вариантов теперь до 3.
+                .isCloseTo(1836.4861965464534, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(266542015L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(54000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
                 .isLessThanOrEqualTo(6L);
@@ -77,6 +78,8 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // ADR-0035/0037: точка 6 присоединена коротким ребром, а не через ствол.
         assertEdgeAtPointShorterThan(resultFile, new ObjectMapper(), 37.632012226474316,
                 55.700048261255056, 60.0);
+        // ADR-0039/0041: точки 3, 6, 8 сходятся на одной камере (гекс-сетка).
+        assertConnectionPointsShareChamber(resultFile, new ObjectMapper(), "3", "6", "8");
     }
 
     /** ADR-0036: трассировка этапов на реальном наборе даёт валидные артефакты. */

@@ -17,6 +17,10 @@ public class GridMaskPayload {
     double originX;
     double originY;
     double cellM;
+    /** Форма сетки: square | hex (ADR-0041). */
+    String gridShape;
+    /** Вертикальный шаг строк, м (для hex меньше {@code cellM}). */
+    double rowSpacing;
     /** Размер исходной сетки поиска. */
     int width;
     int height;

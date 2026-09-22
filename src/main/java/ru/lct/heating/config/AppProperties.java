@@ -32,10 +32,20 @@ public class AppProperties {
     private OksApproachPolicy oksApproachPolicy = OksApproachPolicy.PERPENDICULAR_NEAREST;
     /** Запас точки стыковки за границей буфера ОКС, м (ADR-0024). */
     private double oksExitClearanceM = 1.0;
+    /**
+     * ADR-0040: фильтрация выходов-кандидатов ОКС — отбрасывать хвосты,
+     * проходящие через соседние компоненты своего ОКС, повторно входящие в
+     * корпус и длиннее {@link #oksExitMaxTailM}.
+     */
+    private boolean oksExitFilter = true;
+    /** ADR-0040: предельная длина хвоста выхода из ОКС, м. */
+    private double oksExitMaxTailM = 15.0;
     /** Алгоритм трассировки по умолчанию (ADR-0027/0034). */
     private String routingAlgorithm = "grid-forest";
     /** Ячейка сетки поиска пути, м (ADR-0034). */
     private double forestGridCellM = 2.0;
+    /** Форма сетки поиска пути: square | hex (ADR-0041). Дефолт — hex. */
+    private String forestGridShape = "hex";
     /** Предел числа клеток сетки поиска. */
     private long forestGridMaxCells = 16_000_000L;
     /** Число проходов поиска (1 по длине + уточнения по стоимости, ADR-0034). */
@@ -62,6 +72,14 @@ public class AppProperties {
     private boolean forestReattachPass = true;
     /** ADR-0035: число проходов переприсоединения. */
     private int forestReattachIterations = 2;
+    /**
+     * ADR-0039: переприсоединение перебирает все выходы-кандидаты точки
+     * ({@code OksApproachResolver.candidatesFor}), а не только канонический —
+     * иначе смена расчёта выхода (ADR-0037) ломает консолидацию соседних точек.
+     */
+    private boolean forestRelinkExitCandidates = true;
+    /** ADR-0039: предел числа выходов-кандидатов на точку при relink. */
+    private int forestRelinkExitCandidatesMax = 6;
     /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */

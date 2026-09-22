@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.operation.distance.DistanceOp;
 import ru.lct.heating.config.AppProperties;
@@ -109,7 +110,7 @@ class OksApproachResolverTest {
     @Test
     void resolveExits_pointInSquare_returnsPerpendicularExitWithPerPointDiameter() {
         Polygon own = square(0, 0, 100, 100);
-        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 10, 50));
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 3, 50));
 
         ConnectionExit exit = resolver.resolveExits(dataset).get("cp");
 
@@ -129,7 +130,7 @@ class OksApproachResolverTest {
         Polygon own = square(0, 0, 100, 100);
         // flow 3.0 → Ду 50 (пропускная 3.5), буфер = 5 + 0.2.
         NetworkDataset dataset = dataset(List.of(restriction("own", own)),
-                point("cp", 10, 50, 3.0));
+                point("cp", 3, 50, 3.0));
 
         ConnectionExit exit = resolver.resolveExits(dataset).get("cp");
 
@@ -141,8 +142,8 @@ class OksApproachResolverTest {
     /** ADR-0037: точка получает несколько выходов-кандидатов по возрастанию p→target. */
     @Test
     void candidatesFor_returnsAlternativesSortedByDistance() {
-        Polygon own = square(0, 0, 100, 100);
-        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 10, 50));
+        Polygon own = square(0, 0, 12, 12);
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 3, 3));
 
         List<ConnectionExit> candidates = resolver.candidatesFor(dataset, "cp");
 
@@ -151,7 +152,7 @@ class OksApproachResolverTest {
         for (ConnectionExit candidate : candidates) {
             assertThat(candidate.isBlocked()).isFalse();
             assertThat(candidate.hasTail()).isTrue();
-            double distance = candidate.getTarget().distance(new Coordinate(10, 50));
+            double distance = candidate.getTarget().distance(new Coordinate(3, 3));
             assertThat(distance).isGreaterThanOrEqualTo(previous);
             previous = distance;
         }
@@ -203,17 +204,73 @@ class OksApproachResolverTest {
     @Test
     void resolveExits_neighbourBlocksNearestEdge_exitsThroughAnotherEdge() {
         Polygon own = square(0, 0, 100, 100);
-        Polygon neighbour = square(-6, 0, -2, 100);
+        Polygon neighbour = square(-20, 0, -10, 100);
         NetworkDataset dataset = dataset(
                 List.of(restriction("own", own), restriction("neighbour", neighbour)),
-                point("cp", 10, 50));
+                point("cp", 3, 3));
 
         ConnectionExit exit = resolver.resolveExits(dataset).get("cp");
 
         assertThat(exit.isBlocked()).isFalse();
         assertThat(exit.hasTail()).isTrue();
+        // Западная грань блокирована соседом — вывод уходит через y=0.
+        assertThat(exit.getTarget().y).isLessThan(0.0);
+        assertThat(exit.getTarget().x).isCloseTo(3.0, org.assertj.core.data.Offset.offset(1e-3));
         // Цель не в буфере соседа (мимо западной грани, заблокированной им).
         assertThat(distanceTo(exit.getTarget(), neighbour)).isGreaterThanOrEqualTo(OFFSET - 1e-3);
+    }
+
+    /** ADR-0040: длинный хвост (дальняя стена) отбраковывается — точка blocked. */
+    @Test
+    void resolveExits_filterRejectsLongTail_pointBlocked() {
+        Polygon own = square(0, 0, 100, 100);
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 20, 50));
+
+        ConnectionExit exit = resolver.resolveExits(dataset).get("cp");
+
+        assertThat(exit.isBlocked()).isTrue();
+    }
+
+    /** ADR-0040: при выключенном фильтре дальние выходы допустимы. */
+    @Test
+    void resolveExits_filterDisabled_allowsLongTail() {
+        Polygon own = square(0, 0, 100, 100);
+        NetworkDataset dataset = dataset(List.of(restriction("own", own)), point("cp", 20, 50));
+        AppProperties properties = new AppProperties();
+        properties.setOksExitFilter(false);
+        OksApproachResolver permissive = new OksApproachResolver(
+                new RestrictionRuleResolver(rules()), new EnvelopeCatalog(tables()),
+                new DiameterCatalog(tables()), properties);
+
+        ConnectionExit exit = permissive.resolveExits(dataset).get("cp");
+
+        assertThat(exit.isBlocked()).isFalse();
+        assertThat(exit.hasTail()).isTrue();
+    }
+
+    /** ADR-0040: хвост через соседний компонент своего ОКС отбраковывается. */
+    @Test
+    void resolveExits_filterRejectsTailThroughSiblingComponent() {
+        Polygon left = square(0, 0, 10, 40);
+        Polygon right = square(14, 0, 24, 40);
+        Geometry multi = GeometrySupport.GEOMETRY_FACTORY
+                .createMultiPolygon(new Polygon[]{left, right});
+        RestrictionObject own = RestrictionObject.builder()
+                .id("own").restrictionType("oks").geometry(multi).build();
+        // Точка у восточной стены левого корпуса: восточный выход идёт через правый.
+        NetworkDataset dataset = dataset(List.of(own), point("cp", 8, 20));
+        AppProperties properties = new AppProperties();
+        properties.setOksExitMaxTailM(0.0);
+        OksApproachResolver filter = new OksApproachResolver(
+                new RestrictionRuleResolver(rules()), new EnvelopeCatalog(tables()),
+                new DiameterCatalog(tables()), properties);
+
+        ConnectionExit exit = filter.resolveExits(dataset).get("cp");
+
+        assertThat(exit.isBlocked()).isFalse();
+        assertThat(DistanceOp.distance(
+                GeometrySupport.GEOMETRY_FACTORY.createPoint(exit.getTarget()), right))
+                .isGreaterThan(0.0);
     }
 
     @Test

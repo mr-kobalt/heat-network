@@ -150,7 +150,8 @@
   `special_zone`, `exit_target`, `exit_tail`, `tree_cell`, `forest_edge`,
   `forest_node`) и вспомогательные атрибуты (`id`, `diameter_mm`, `flow_tph`,
   `k_special`, `blocked`, `pass` и т. п.).
-- `grid.json` — растровая маска сетки: `originX/Y`, `cellM`, `width/height`,
+- `grid.json` — растровая маска сетки: `originX/Y`, `cellM`, `gridShape`
+  (`square`/`hex`), `rowSpacing` (вертикальный шаг строк), `width/height`,
   `imageWidth/imageHeight`, `imageCellM`, `downscaled`, base64-битсеты
   `blocked`/`reachable` (строка 0 — север, младший бит вперёд),
   `boundsWgs84` (углы TL, TR, BR, BL), `sources`, `terminalCells`.
@@ -176,3 +177,4 @@
 | 2026-09-22 | ADR-0036: добавлен формат промежуточных этапов (manifest, stage GeoJSON, растровая маска сетки) | команда |
 | 2026-09-22 | ADR-0037: этапы `obstacles`/`special` объединены в `restrictions`; варианты по проходам, id узлов с префиксом варианта | команда |
 | 2026-09-22 | ADR-0038: порядок этапов `trees` → `relink` → `refine` | команда |
+| 2026-09-22 | ADR-0041: в `grid.json` добавлены `gridShape` и `rowSpacing` (гекс-сетка) | команда |

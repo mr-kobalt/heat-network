@@ -24,10 +24,18 @@ public final class ObstacleMask {
     private final long[] coarse;
     private final long blockedCells;
     private final long buildMs;
+    private final GridShape shape;
 
     ObstacleMask(double originX, double originY, double cell, int width, int height, long[] fine,
                  int coarseFactor, int coarseWidth, int coarseHeight, long[] coarse,
                  long blockedCells, long buildMs) {
+        this(originX, originY, cell, width, height, fine, coarseFactor, coarseWidth, coarseHeight,
+                coarse, blockedCells, buildMs, SquareGridShape.INSTANCE);
+    }
+
+    ObstacleMask(double originX, double originY, double cell, int width, int height, long[] fine,
+                 int coarseFactor, int coarseWidth, int coarseHeight, long[] coarse,
+                 long blockedCells, long buildMs, GridShape shape) {
         this.originX = originX;
         this.originY = originY;
         this.cell = cell;
@@ -40,6 +48,7 @@ public final class ObstacleMask {
         this.coarse = coarse;
         this.blockedCells = blockedCells;
         this.buildMs = buildMs;
+        this.shape = shape == null ? SquareGridShape.INSTANCE : shape;
     }
 
     /**
@@ -139,20 +148,50 @@ public final class ObstacleMask {
         return (fine[(int) (index >>> 6)] & (1L << (index & 63))) != 0;
     }
 
-    public int colOf(double x) {
-        return clamp((int) Math.floor((x - originX) / cell), width);
+    /** Индекс клетки, содержащей точку. */
+    public int cellAt(double x, double y) {
+        int[] cr = shape.cell(x, y, originX, originY, cell, width, height);
+        return cr[1] * width + cr[0];
     }
 
-    public int rowOf(double y) {
-        return clamp((int) Math.floor((y - originY) / cell), height);
+    public double centerX(int col, int row) {
+        return shape.centerX(col, row, originX, cell);
     }
 
-    public double centerX(int col) {
-        return originX + (col + 0.5) * cell;
+    public double centerY(int col, int row) {
+        return shape.centerY(col, row, originY, cell);
     }
 
-    public double centerY(int row) {
-        return originY + (row + 0.5) * cell;
+    public double cellCenterX(int cellIndex) {
+        return centerX(cellIndex % width, cellIndex / width);
+    }
+
+    public double cellCenterY(int cellIndex) {
+        return centerY(cellIndex % width, cellIndex / width);
+    }
+
+    public java.util.List<int[]> neighbors(int col, int row) {
+        return shape.neighbors(col, row);
+    }
+
+    public boolean diagonalStep(int dcol, int drow) {
+        return shape.diagonal(dcol, drow);
+    }
+
+    public double stepLength(int dcol, int drow) {
+        return shape.stepLength(cell, dcol, drow);
+    }
+
+    public double rowSpacing() {
+        return shape.rowSpacing(cell);
+    }
+
+    public GridShape shape() {
+        return shape;
+    }
+
+    public String shapeId() {
+        return shape.id();
     }
 
     public long blockedCells() {
@@ -184,7 +223,7 @@ public final class ObstacleMask {
         }
         long[] freedCoarse = coarse == fine ? freed : coarse;
         return new ObstacleMask(originX, originY, cell, width, height, freed, coarseFactor,
-                coarseWidth, coarseHeight, freedCoarse, blockedCells - cleared, buildMs);
+                coarseWidth, coarseHeight, freedCoarse, blockedCells - cleared, buildMs, shape);
     }
 
     public String describe() {

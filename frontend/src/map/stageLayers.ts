@@ -202,8 +202,9 @@ export function refreshStageGridCells(map: MapLibreMap, data: StageOverlayData):
     return;
   }
   const cell = mask.cellM;
+  const rowSpacing = mask.rowSpacing && mask.rowSpacing > 0 ? mask.rowSpacing : cell;
   const gridMaxX = mask.originX + mask.width * cell;
-  const gridMaxY = mask.originY + mask.height * cell;
+  const gridMaxY = mask.originY + mask.height * rowSpacing;
   const bounds = map.getBounds();
   const sw = wgs84ToUtm(bounds.getWest(), bounds.getSouth());
   const ne = wgs84ToUtm(bounds.getEast(), bounds.getNorth());
@@ -218,25 +219,58 @@ export function refreshStageGridCells(map: MapLibreMap, data: StageOverlayData):
   }
   const col0 = Math.floor((minX - mask.originX) / cell);
   const col1 = Math.ceil((maxX - mask.originX) / cell);
-  const row0 = Math.floor((minY - mask.originY) / cell);
-  const row1 = Math.ceil((maxY - mask.originY) / cell);
-  if ((col1 - col0) + (row1 - row0) > MAX_GRID_CELL_LINES) {
-    setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features: [] });
-    setLayerVisibility(map, 'layer-stage-grid-cells', false);
-    return;
-  }
+  const row0 = Math.floor((minY - mask.originY) / rowSpacing);
+  const row1 = Math.ceil((maxY - mask.originY) / rowSpacing);
   const features: GeoFeature[] = [];
-  for (let col = col0; col <= col1; col++) {
-    const x = mask.originX + col * cell;
-    features.push(cellLine(x, minY, x, maxY));
-  }
-  for (let row = row0; row <= row1; row++) {
-    const y = mask.originY + row * cell;
-    features.push(cellLine(minX, y, maxX, y));
+  if (mask.gridShape === 'hex') {
+    const size = cell / Math.sqrt(3);
+    if ((col1 - col0 + 1) * (row1 - row0 + 1) > MAX_GRID_CELL_LINES) {
+      setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features: [] });
+      setLayerVisibility(map, 'layer-stage-grid-cells', false);
+      return;
+    }
+    for (let row = row0; row <= row1; row++) {
+      const cy = mask.originY + (row + 0.5) * rowSpacing;
+      for (let col = col0; col <= col1; col++) {
+        const cx = mask.originX + (col + 0.5 + (row & 1) * 0.5) * cell;
+        if (cx < minX || cx > maxX || cy < minY || cy > maxY) {
+          continue;
+        }
+        features.push(hexRing(cx, cy, size));
+      }
+    }
+  } else {
+    if ((col1 - col0) + (row1 - row0) > MAX_GRID_CELL_LINES) {
+      setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features: [] });
+      setLayerVisibility(map, 'layer-stage-grid-cells', false);
+      return;
+    }
+    for (let col = col0; col <= col1; col++) {
+      const x = mask.originX + col * cell;
+      features.push(cellLine(x, minY, x, maxY));
+    }
+    for (let row = row0; row <= row1; row++) {
+      const y = mask.originY + row * rowSpacing;
+      features.push(cellLine(minX, y, maxX, y));
+    }
   }
   setSource(map, 'stage-grid-cells', { type: 'FeatureCollection', features });
   ensureLine(map, 'layer-stage-grid-cells', 'stage-grid-cells', '#0f172a', 0.5);
   setLayerVisibility(map, 'layer-stage-grid-cells', true);
+}
+
+/** Контур гексагональной ячейки (pointy-top) в UTM → WGS84. */
+function hexRing(cx: number, cy: number, size: number): GeoFeature {
+  const coordinates: Array<[number, number]> = [];
+  for (let k = 0; k <= 6; k++) {
+    const angle = (Math.PI / 180) * (60 * k + 30);
+    coordinates.push(utmToWgs84(cx + size * Math.cos(angle), cy + size * Math.sin(angle)));
+  }
+  return {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates },
+    properties: { object_type: 'grid_cell' },
+  };
 }
 
 /** Прямая в UTM как ломаная в WGS84 (кривизна меридианов). */

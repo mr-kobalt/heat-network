@@ -77,6 +77,10 @@ export type GridMask = {
   originX: number;
   originY: number;
   cellM: number;
+  /** Форма сетки: square | hex (ADR-0041). */
+  gridShape?: string;
+  /** Вертикальный шаг строк, м (для hex меньше cellM). */
+  rowSpacing?: number;
   width: number;
   height: number;
   imageWidth: number;

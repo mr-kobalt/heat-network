@@ -24,11 +24,18 @@ public class ObstacleMaskBuilder {
 
     public ObstacleMask build(ObstacleIndex index, Envelope bounds, double requestedCellM,
                               int coarseFactor, long maxBytes, List<String> warnings) {
+        return build(index, bounds, requestedCellM, coarseFactor, maxBytes, warnings,
+                SquareGridShape.INSTANCE);
+    }
+
+    public ObstacleMask build(ObstacleIndex index, Envelope bounds, double requestedCellM,
+                              int coarseFactor, long maxBytes, List<String> warnings,
+                              GridShape shape) {
         if (index == null || index.size() == 0) {
             return null;
         }
         return rasterize(index, bounds, requestedCellM, Math.max(1, coarseFactor), maxBytes, true,
-                "MASK_COARSENED", warnings);
+                "MASK_COARSENED", warnings, shape);
     }
 
     /**
@@ -41,20 +48,27 @@ public class ObstacleMaskBuilder {
      */
     public ObstacleMask buildPassability(ObstacleIndex index, Envelope bounds, double requestedCellM,
                                          long maxBytes, List<String> warnings) {
+        return buildPassability(index, bounds, requestedCellM, maxBytes, warnings,
+                SquareGridShape.INSTANCE);
+    }
+
+    public ObstacleMask buildPassability(ObstacleIndex index, Envelope bounds, double requestedCellM,
+                                         long maxBytes, List<String> warnings, GridShape shape) {
         if (bounds == null || bounds.isNull()) {
             return null;
         }
         ObstacleIndex effective = index != null ? index : new ObstacleIndex(java.util.List.of());
         return rasterize(effective, bounds, requestedCellM, 1, maxBytes, false, "GRID_COARSENED",
-                warnings);
+                warnings, shape);
     }
 
     private ObstacleMask rasterize(ObstacleIndex index, Envelope bounds, double requestedCellM,
                                    int factor, long maxBytes, boolean dilate, String warnCode,
-                                   List<String> warnings) {
+                                   List<String> warnings, GridShape shape) {
         if (bounds == null || bounds.isNull()) {
             return null;
         }
+        GridShape grid = shape == null ? SquareGridShape.INSTANCE : shape;
         double requested = requestedCellM > 0 ? requestedCellM : 1.0;
         double cell = requested;
         long budget = maxBytes > 0 ? maxBytes : Long.MAX_VALUE;
@@ -66,8 +80,8 @@ public class ObstacleMaskBuilder {
         int coarseWidth;
         int coarseHeight;
         while (true) {
-            width = (int) Math.floor(bounds.getWidth() / cell) + 2;
-            height = (int) Math.floor(bounds.getHeight() / cell) + 2;
+            width = grid.columns(bounds.getWidth(), cell);
+            height = grid.rows(bounds.getHeight(), cell);
             coarseWidth = single ? width : (width + factor - 1) / factor;
             coarseHeight = single ? height : (height + factor - 1) / factor;
             long fineBytes = ((long) width * height + 7) / 8;
@@ -88,7 +102,7 @@ public class ObstacleMaskBuilder {
         long[] coarse = single ? fine : new long[(int) (((long) coarseWidth * coarseHeight + 63) / 64)];
         double originX = bounds.getMinX();
         double originY = bounds.getMinY();
-        double dilation = dilate ? cell * Math.sqrt(2.0) / 2.0 : 0.0;
+        double dilation = dilate ? grid.conservativeDilation(cell) : 0.0;
         Coordinate probe = new Coordinate();
         long blocked = 0L;
 
@@ -100,14 +114,15 @@ public class ObstacleMaskBuilder {
             boolean areal = expanded.getDimension() >= 2;
             IndexedPointInAreaLocator locator = areal ? new IndexedPointInAreaLocator(expanded) : null;
             Envelope envelope = expanded.getEnvelopeInternal();
-            int col0 = clamp((int) Math.floor((envelope.getMinX() - originX) / cell), width);
-            int col1 = clamp((int) Math.floor((envelope.getMaxX() - originX) / cell), width);
-            int row0 = clamp((int) Math.floor((envelope.getMinY() - originY) / cell), height);
-            int row1 = clamp((int) Math.floor((envelope.getMaxY() - originY) / cell), height);
+            int col0 = clamp((int) Math.floor((envelope.getMinX() - originX) / cell) - 1, width);
+            int col1 = clamp((int) Math.floor((envelope.getMaxX() - originX) / cell) + 1, width);
+            double rowSpacing = grid.rowSpacing(cell);
+            int row0 = clamp((int) Math.floor((envelope.getMinY() - originY) / rowSpacing) - 1, height);
+            int row1 = clamp((int) Math.floor((envelope.getMaxY() - originY) / rowSpacing) + 1, height);
             for (int row = row0; row <= row1; row++) {
-                probe.y = originY + (row + 0.5) * cell;
+                probe.y = grid.centerY(0, row, originY, cell);
                 for (int col = col0; col <= col1; col++) {
-                    probe.x = originX + (col + 0.5) * cell;
+                    probe.x = grid.centerX(col, row, originX, cell);
                     boolean inside = areal
                             ? locator.locate(probe) != Location.EXTERIOR
                             : envelope.intersects(probe);
@@ -128,7 +143,7 @@ public class ObstacleMaskBuilder {
         }
         long buildMs = (System.nanoTime() - start) / 1_000_000L;
         return new ObstacleMask(originX, originY, cell, width, height, fine, factor, coarseWidth,
-                coarseHeight, coarse, blocked, buildMs);
+                coarseHeight, coarse, blocked, buildMs, grid);
     }
 
     private int clamp(int value, int size) {

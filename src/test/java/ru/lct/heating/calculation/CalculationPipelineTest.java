@@ -30,7 +30,7 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
         Path resultFile = tempDir.resolve("result.geojson");
         Path summaryFile = tempDir.resolve("summary.json");
 
-        CalculationOutcome outcome = service().calculate(SAMPLE, resultFile, summaryFile);
+        CalculationOutcome outcome = service(permissiveExitProperties()).calculate(SAMPLE, resultFile, summaryFile);
 
         assertGridForestResult(resultFile, outcome, objectMapper);
     }
@@ -43,7 +43,7 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
         Path summaryFile = tempDir.resolve("traced-summary.json");
         Path stagesDir = tempDir.resolve("stages");
 
-        CalculationOutcome outcome = service().calculate(SAMPLE, resultFile, summaryFile, null,
+        CalculationOutcome outcome = service(permissiveExitProperties()).calculate(SAMPLE, resultFile, summaryFile, null,
                 null, stagesDir);
 
         assertThat(outcome.getSummary()).isNotNull();
@@ -69,7 +69,7 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
         Path resultFile = tempDir.resolve("result-grid.geojson");
         Path summaryFile = tempDir.resolve("summary-grid.json");
 
-        CalculationOutcome outcome = service().calculate(SAMPLE, resultFile, summaryFile,
+        CalculationOutcome outcome = service(permissiveExitProperties()).calculate(SAMPLE, resultFile, summaryFile,
                 "grid-forest");
 
         assertGridForestResult(resultFile, outcome, objectMapper);

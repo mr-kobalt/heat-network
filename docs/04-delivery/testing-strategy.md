@@ -145,11 +145,15 @@
   `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`,
   `terminal-cell-search=nearest`, мультивход, переприсоединение, граница ОКС.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0037/0038:
-  `score` ≈ 13.5299, длина ≈ 1918.43 м, `calculatedCost` = 277665607,
-  `chamberConstructionCost` = 58000000, `unconnected` = 0,
+  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0040/0041:
+  `score` ≈ 12.9730, длина ≈ 1836.49 м, `calculatedCost` = 266542015,
+  `chamberConstructionCost` = 54000000, `unconnected` = 0,
   `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок, ребро к точке 6
-  < 60 м — геометрический регресс присоединения).
+  < 60 м — геометрический регресс присоединения; точки 3, 6, 8 сходятся на
+  одной камере; дефолт — гекс-сетка `forest-grid-shape=hex`).
+- **A/B формы сетки** `GridShapeExperimentTest` (тег slow, ADR-0041): квадрат
+  против гекса на реальном наборе, отчёт `target/grid-shape/report.md` (`S`,
+  длина, стоимость, камеры, углы, пересечения, консолидация 3/6/8, время).
 - Вывод алгоритма `grid-forest` (единый лес, ADR-0034) дополнительно проверяется на
   фикстуре: ссылки узлов = концы геометрии, точки подключения — листья,
   ветвления только в камерах, нет камер с id точки подключения, участки не
@@ -177,3 +181,6 @@
 | 2026-09-22 | ADR-0035 (доп.): baseline с переприсоединением (`S` 13.0691); геометрический регресс ребра к точке 6 (< 60 м) | команда |
 | 2026-09-22 | Свип v2 (угол 90°) `AlgorithmParameterSweepV2Test`; `multiEntry=true` дефолтом, baseline `S` 12.8104 | команда |
 | 2026-09-22 | ADR-0038: baseline после refine-после-relink (`S` 13.5299, длина 1918.43 м); обновлён порядок этапов | команда |
+| 2026-09-22 | ADR-0039: baseline relink с выходами-кандидатами (`S` 12.3063, длина 1730.80 м); регресс общей камеры 3/6/8 | команда |
+| 2026-09-22 | ADR-0040: baseline с фильтром выходов (`S` 13.0990, длина 1863.73 м); `permissiveExitProperties` для fast-фикстур | команда |
+| 2026-09-22 | ADR-0041: baseline на гекс-сетке (`S` 12.9730, длина 1836.49 м); A/B `GridShapeExperimentTest` | команда |

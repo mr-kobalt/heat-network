@@ -16,6 +16,7 @@ class AppPropertiesDefaultsTest {
     void gridForestDefaultsMatchCalibratedBaseline() {
         assertThat(properties.getRoutingAlgorithm()).isEqualTo("grid-forest");
         assertThat(properties.getForestGridCellM()).isEqualTo(2.0);
+        assertThat(properties.getForestGridShape()).isEqualTo("hex");
         assertThat(properties.getForestCostIterations()).isEqualTo(2);
         assertThat(properties.getForestMaxTurnDeg()).isEqualTo(90.0);
         assertThat(properties.getForestTurnEnforcement()).isEqualTo("hard");
@@ -23,7 +24,11 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.isForestExitGridDogleg()).isTrue();
         assertThat(properties.isForestReattachPass()).isTrue();
         assertThat(properties.getForestReattachIterations()).isEqualTo(2);
+        assertThat(properties.isForestRelinkExitCandidates()).isTrue();
+        assertThat(properties.getForestRelinkExitCandidatesMax()).isEqualTo(6);
         assertThat(properties.isOksOwningIncludeBoundary()).isTrue();
+        assertThat(properties.isOksExitFilter()).isTrue();
+        assertThat(properties.getOksExitMaxTailM()).isEqualTo(15.0);
         assertThat(properties.getTieInSampleStepM()).isEqualTo(1.0);
         assertThat(properties.getTieInChamberExclusionM()).isEqualTo(1.0);
         assertThat(properties.isForestGridIncludeInputBounds()).isTrue();

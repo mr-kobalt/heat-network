@@ -218,11 +218,12 @@ public class StageTraceWriter {
     }
 
     private void writeGrid(GridMaskPayload grid, Path file) throws IOException {
+        double rowSpacing = grid.getRowSpacing() > 0 ? grid.getRowSpacing() : grid.getCellM();
         GridMaskPayload enriched = grid.toBuilder()
                 .boundsWgs84(List.of(
-                        toWgs84(grid.getOriginX(), grid.getOriginY() + (double) grid.getHeight() * grid.getCellM()),
+                        toWgs84(grid.getOriginX(), grid.getOriginY() + (double) grid.getHeight() * rowSpacing),
                         toWgs84(grid.getOriginX() + (double) grid.getWidth() * grid.getCellM(),
-                                grid.getOriginY() + (double) grid.getHeight() * grid.getCellM()),
+                                grid.getOriginY() + (double) grid.getHeight() * rowSpacing),
                         toWgs84(grid.getOriginX() + (double) grid.getWidth() * grid.getCellM(),
                                 grid.getOriginY()),
                         toWgs84(grid.getOriginX(), grid.getOriginY())))

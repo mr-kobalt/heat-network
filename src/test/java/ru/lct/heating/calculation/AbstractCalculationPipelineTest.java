@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +59,16 @@ abstract class AbstractCalculationPipelineTest {
 
     protected CalculationService service() {
         return service(new AppProperties());
+    }
+
+    /**
+     * Настройки для фикстур с крупными ОКС и точками вдали от стен: фильтр
+     * выходов (ADR-0040) отключён, чтобы проверялся конвейер, а не политика выхода.
+     */
+    protected AppProperties permissiveExitProperties() {
+        AppProperties properties = new AppProperties();
+        properties.setOksExitFilter(false);
+        return properties;
     }
 
     protected CalculationService service(AppProperties appProperties) {
@@ -298,6 +309,58 @@ abstract class AbstractCalculationPipelineTest {
                         .contains(entry.getKey());
             }
         }
+    }
+
+    /**
+     * ADR-0039: точки подключения сходятся на одной камере. От каждой точки
+     * идём по рёбрам через узлы степени 2 (технические) до первой камеры
+     * (степень != 2) и проверяем, что камера общая. Вариант — лучший по score.
+     */
+    protected void assertConnectionPointsShareChamber(Path result, ObjectMapper mapper,
+                                                      String... pointIds) throws Exception {
+        com.fasterxml.jackson.databind.JsonNode features =
+                mapper.readTree(result.toFile()).path("features");
+        String best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (com.fasterxml.jackson.databind.JsonNode feature : features) {
+            com.fasterxml.jackson.databind.JsonNode properties = feature.path("properties");
+            if ("variant_summary".equals(properties.path("object_type").asText())
+                    && properties.path("score").asDouble() < bestScore) {
+                bestScore = properties.path("score").asDouble();
+                best = properties.path("variant_id").asText();
+            }
+        }
+        Map<String, Integer> degree = new HashMap<>();
+        Map<String, List<String>> adjacency = new HashMap<>();
+        for (com.fasterxml.jackson.databind.JsonNode feature : features) {
+            com.fasterxml.jackson.databind.JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())
+                    || (best != null && !best.equals(properties.path("variant_id").asText()))) {
+                continue;
+            }
+            String a = properties.path("start_node_id").asText();
+            String b = properties.path("end_node_id").asText();
+            adjacency.computeIfAbsent(a, key -> new ArrayList<>()).add(b);
+            adjacency.computeIfAbsent(b, key -> new ArrayList<>()).add(a);
+            degree.merge(a, 1, Integer::sum);
+            degree.merge(b, 1, Integer::sum);
+        }
+        Set<String> chambers = new java.util.LinkedHashSet<>();
+        for (String point : pointIds) {
+            List<String> neighbours = adjacency.get(point);
+            assertThat(neighbours).as("ребро точки подключения %s", point).hasSize(1);
+            String previous = point;
+            String current = neighbours.get(0);
+            Set<String> visited = new HashSet<>();
+            while (degree.getOrDefault(current, 0) == 2 && visited.add(current)) {
+                List<String> next = adjacency.get(current);
+                String step = next.get(0).equals(previous) ? next.get(1) : next.get(0);
+                previous = current;
+                current = step;
+            }
+            chambers.add(current);
+        }
+        assertThat(chambers).as("общая камера точек %s", String.join(", ", pointIds)).hasSize(1);
     }
 
     private int matchNode(Map<String, double[]> nodes, String nodeId, double[] point) {

@@ -47,6 +47,8 @@ public class OksApproachResolver {
 
     private static final double EPS = 1e-6;
     private static final double VERTEX_TOLERANCE_M = 1e-3;
+    /** Эрозия при проверке соседних компонент своего ОКС (ADR-0040). */
+    private static final double SIBLING_EROSION_M = 1e-3;
     /** Радиус поиска соседних запретных буферов для «узкого промежутка», м. */
     private static final double NARROW_GAP_SEARCH_M = 20.0;
     private static final int MAX_CANDIDATES = 6;
@@ -218,6 +220,9 @@ public class OksApproachResolver {
         double rayLength = Math.hypot(ownEnvelope.getWidth(), ownEnvelope.getHeight())
                 + 2.0 * buffer + 1.0 + NARROW_GAP_SEARCH_M;
         double maxPairWidth = envelopes.maxPairWidthM();
+        boolean filter = appProperties.isOksExitFilter();
+        double maxTail = appProperties.getOksExitMaxTailM();
+        Geometry siblings = filter ? siblingInterior(own.getGeometry(), component) : null;
         LineString ring = component.getExteriorRing();
         Coordinate[] ringCoordinates = ring.getCoordinates();
         List<Candidate> candidates = new ArrayList<>();
@@ -229,14 +234,32 @@ public class OksApproachResolver {
             }
             Coordinate q = nearestPointOnSegment(p, a, b);
             double length = p.distance(q);
+            double ux;
+            double uy;
             if (length < EPS) {
-                continue;
+                // Точка лежит на грани: направление выхода — внешняя нормаль ребра.
+                double ex = b.x - a.x;
+                double ey = b.y - a.y;
+                double edge = Math.hypot(ex, ey);
+                if (edge < EPS) {
+                    continue;
+                }
+                double nx = -ey / edge;
+                double ny = ex / edge;
+                Coordinate probe = new Coordinate(p.x + nx * 0.1, p.y + ny * 0.1);
+                if (component.covers(point(probe))) {
+                    nx = -nx;
+                    ny = -ny;
+                }
+                ux = nx;
+                uy = ny;
+            } else {
+                if (q.distance(a) < VERTEX_TOLERANCE_M || q.distance(b) < VERTEX_TOLERANCE_M) {
+                    continue;
+                }
+                ux = (q.x - p.x) / length;
+                uy = (q.y - p.y) / length;
             }
-            if (q.distance(a) < VERTEX_TOLERANCE_M || q.distance(b) < VERTEX_TOLERANCE_M) {
-                continue;
-            }
-            double ux = (q.x - p.x) / length;
-            double uy = (q.y - p.y) / length;
             LineString ray = line(p, new Coordinate(p.x + ux * rayLength, p.y + uy * rayLength));
             Coordinate target = nearestCrossing(ray.intersection(bufferBoundary), p, length);
             if (target == null) {
@@ -252,10 +275,52 @@ public class OksApproachResolver {
             if (!tailAllowed(p, target, own, prohibited)) {
                 continue;
             }
+            // ADR-0040: отбраковка недопустимых выходов — «через всё здание»
+            // (повторный вход в свой корпус), через соседние корпуса своего ОКС
+            // и хвосты длиннее предела.
+            if (filter) {
+                // Длина хвоста без обязательного отступа = путь внутри корпуса.
+                if (maxTail > 0 && p.distance(target) - buffer > maxTail + EPS) {
+                    continue;
+                }
+                LineString tail = line(p, target);
+                if (siblings != null && siblings.intersects(tail)) {
+                    continue;
+                }
+                if (!singleExit(tail, component)) {
+                    continue;
+                }
+            }
             candidates.add(new Candidate(target, p.distance(target)));
         }
         candidates.sort(Comparator.comparingDouble(candidate -> candidate.length));
         return candidates;
+    }
+
+    /**
+     * ADR-0040: внутренние части прочих компонент своего ОКС (эрозия, чтобы
+     * касание границы не считалось). {@code null}, если компонента одна.
+     */
+    private Geometry siblingInterior(Geometry restriction, Polygon component) {
+        List<Geometry> others = new ArrayList<>();
+        for (int i = 0; i < restriction.getNumGeometries(); i++) {
+            Geometry candidate = restriction.getGeometryN(i);
+            if (candidate == component) {
+                continue;
+            }
+            others.add(candidate);
+        }
+        if (others.isEmpty()) {
+            return null;
+        }
+        Geometry union = restriction.getFactory().buildGeometry(others);
+        Geometry eroded = union.buffer(-SIBLING_EROSION_M);
+        return eroded.isEmpty() ? null : eroded;
+    }
+
+    /** ADR-0040: хвост пересекает свой корпус ровно один раз (без возврата). */
+    private boolean singleExit(LineString tail, Polygon component) {
+        return tail.intersection(component).getNumGeometries() <= 1;
     }
 
     /**

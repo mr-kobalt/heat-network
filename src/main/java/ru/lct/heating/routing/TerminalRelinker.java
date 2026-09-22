@@ -40,7 +40,7 @@ public class TerminalRelinker {
         this.appProperties = appProperties;
     }
 
-    public List<ForestTree> relink(List<ForestTree> trees, Map<String, ConnectionExit> exits,
+    public List<ForestTree> relink(List<ForestTree> trees, Map<String, List<ConnectionExit>> exits,
                                    Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                                    Map<String, Set<PreparedGeometry>> ownObstacles) {
         List<ForestTree> result = new ArrayList<>();
@@ -54,7 +54,7 @@ public class TerminalRelinker {
         return result;
     }
 
-    private ForestTree relinkTree(ForestTree tree, Map<String, ConnectionExit> exits,
+    private ForestTree relinkTree(ForestTree tree, Map<String, List<ConnectionExit>> exits,
                                   Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                                   Map<String, Set<PreparedGeometry>> ownObstacles, int iterations,
                                   int idBase) {
@@ -104,17 +104,16 @@ public class TerminalRelinker {
     }
 
     private Best bestFor(String terminalId, String rootId, Map<String, ForestNode> nodes,
-                         List<Edge> edges, double currentScore, Map<String, ConnectionExit> exits,
+                         List<Edge> edges, double currentScore,
+                         Map<String, List<ConnectionExit>> exits,
                          Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                          Map<String, Set<PreparedGeometry>> ownObstacles, int idCounter) {
         ForestNode terminal = nodes.get(terminalId);
-        ConnectionExit exit = exits == null ? null : exits.get(terminalId);
-        if (terminal == null || exit == null || exit.getTarget() == null) {
+        List<ConnectionExit> candidates = exits == null ? null : exits.get(terminalId);
+        if (terminal == null || candidates == null || candidates.isEmpty()) {
             return null;
         }
         Coordinate point = terminal.getCoordinate();
-        Coordinate target = exit.getTarget();
-        List<Coordinate> tail = exit.hasTail() ? exit.getTail() : List.of();
         Edge current = incident(terminalId, edges);
         if (current == null) {
             return null;
@@ -122,51 +121,59 @@ public class TerminalRelinker {
         Set<PreparedGeometry> ignored = ownObstacles == null ? Set.of()
                 : ownObstacles.getOrDefault(terminalId, Set.of());
         Best best = null;
-        // 1. Существующие узлы.
-        for (ForestNode candidate : nodes.values()) {
-            if (candidate.getId().equals(terminalId)
-                    || candidate.getType() == NodeType.CONNECTION_POINT) {
+        // ADR-0039: перебираем все выходы-кандидаты точки, а не только канонический.
+        for (ConnectionExit exit : candidates) {
+            if (exit == null || exit.isBlocked() || exit.getTarget() == null) {
                 continue;
             }
-            Coordinate from = candidate.getCoordinate();
-            if (!validSegment(from, target, tail, point, nodes, edges, obstacleIndex, ignored,
-                    incomingDirection(candidate.getId(), rootId, nodes, edges))) {
-                continue;
-            }
-            List<Edge> candidateEdges = removeEdge(edges, current.id);
-            candidateEdges.add(branch(candidate.getId(), terminalId, from, target, point, tail,
-                    "rj_b_" + idCounter + "_" + candidate.getId()));
-            best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore);
-        }
-        // 2. T-врезки в рёбра.
-        for (Edge edge : edges) {
-            if (edge.id.equals(current.id)) {
-                continue;
-            }
-            for (Coordinate p : tPoints(edge, target)) {
-                if (p.equals2D(edge.coords.get(0))
-                        || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
+            Coordinate target = exit.getTarget();
+            List<Coordinate> tail = exit.hasTail() ? exit.getTail() : List.of();
+            // 1. Существующие узлы.
+            for (ForestNode candidate : nodes.values()) {
+                if (candidate.getId().equals(terminalId)
+                        || candidate.getType() == NodeType.CONNECTION_POINT) {
                     continue;
                 }
-                Coordinate parentEnd = parentEnd(edge, rootId, nodes, edges);
-                Coordinate dirIn = unit(p.x - parentEnd.x, p.y - parentEnd.y);
-                if (!validSegment(p, target, tail, point, nodes, edges, obstacleIndex, ignored,
-                        dirIn)) {
+                Coordinate from = candidate.getCoordinate();
+                if (!validSegment(from, target, tail, point, nodes, edges, obstacleIndex, ignored,
+                        incomingDirection(candidate.getId(), rootId, nodes, edges))) {
                     continue;
                 }
-                String newId = "rj_" + (idCounter++);
                 List<Edge> candidateEdges = removeEdge(edges, current.id);
-                candidateEdges = removeEdge(candidateEdges, edge.id);
-                List<List<Coordinate>> split = splitPolyline(edge.coords, p);
-                candidateEdges.add(new Edge(edge.id + "_a", edge.a, newId, split.get(0)));
-                candidateEdges.add(new Edge(edge.id + "_b", newId, edge.b, split.get(1)));
-                candidateEdges.add(branch(newId, terminalId, p, target, point, tail,
-                        "rj_e_" + idCounter + "_" + edge.id));
-                Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
-                candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
-                        .coordinate(p).existing(false).build());
-                best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
-                        currentScore);
+                candidateEdges.add(branch(candidate.getId(), terminalId, from, target, point, tail,
+                        "rj_b_" + idCounter + "_" + candidate.getId()));
+                best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore);
+            }
+            // 2. T-врезки в рёбра.
+            for (Edge edge : edges) {
+                if (edge.id.equals(current.id)) {
+                    continue;
+                }
+                for (Coordinate p : tPoints(edge, target)) {
+                    if (p.equals2D(edge.coords.get(0))
+                            || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
+                        continue;
+                    }
+                    Coordinate parentEnd = parentEnd(edge, rootId, nodes, edges);
+                    Coordinate dirIn = unit(p.x - parentEnd.x, p.y - parentEnd.y);
+                    if (!validSegment(p, target, tail, point, nodes, edges, obstacleIndex, ignored,
+                            dirIn)) {
+                        continue;
+                    }
+                    String newId = "rj_" + (idCounter++);
+                    List<Edge> candidateEdges = removeEdge(edges, current.id);
+                    candidateEdges = removeEdge(candidateEdges, edge.id);
+                    List<List<Coordinate>> split = splitPolyline(edge.coords, p);
+                    candidateEdges.add(new Edge(edge.id + "_a", edge.a, newId, split.get(0)));
+                    candidateEdges.add(new Edge(edge.id + "_b", newId, edge.b, split.get(1)));
+                    candidateEdges.add(branch(newId, terminalId, p, target, point, tail,
+                            "rj_e_" + idCounter + "_" + edge.id));
+                    Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
+                    candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
+                            .coordinate(p).existing(false).build());
+                    best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
+                            currentScore);
+                }
             }
         }
         return best;

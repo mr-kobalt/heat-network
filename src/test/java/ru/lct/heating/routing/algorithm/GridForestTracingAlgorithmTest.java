@@ -146,7 +146,7 @@ class GridForestTracingAlgorithmTest {
     @Test
     void plan_pointInOks_keepsExitVertex() {
         Polygon building = square(800, 300, 1000, 500);
-        OksConnectionPointObject a = point("a", 900, 400, 10.0);
+        OksConnectionPointObject a = point("a", 805, 400, 10.0);
         RestrictionObject oks = RestrictionObject.builder().id("oks").restrictionType("oks")
                 .geometry(building).build();
         NetworkSegment segment = NetworkSegment.builder().id("seg1").diameterMm(400)
