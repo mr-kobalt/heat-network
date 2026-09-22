@@ -22,7 +22,7 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.getForestRefineLocalPasses()).isEqualTo(2);
         assertThat(properties.isForestExitGridDogleg()).isTrue();
         assertThat(properties.getForestTerminalCellSearch()).isEqualTo("nearest");
-        assertThat(properties.isForestTerminalMultiEntry()).isFalse();
+        assertThat(properties.isForestTerminalMultiEntry()).isTrue();
         assertThat(properties.isForestReattachPass()).isTrue();
         assertThat(properties.getForestReattachIterations()).isEqualTo(2);
         assertThat(properties.isOksOwningIncludeBoundary()).isTrue();

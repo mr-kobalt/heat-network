@@ -83,7 +83,7 @@ heating:
     forest-refine-local-passes: ${HEATING_FOREST_REFINE_LOCAL_PASSES:2}
     forest-exit-grid-dogleg: ${HEATING_FOREST_EXIT_GRID_DOGLEG:true}
     # ADR-0035: присоединение терминалов (выбор клетки входа, мультивход).
-    forest-terminal-multi-entry: ${HEATING_FOREST_TERMINAL_MULTI_ENTRY:false}
+    forest-terminal-multi-entry: ${HEATING_FOREST_TERMINAL_MULTI_ENTRY:true}
     forest-terminal-entry-cells: ${HEATING_FOREST_TERMINAL_ENTRY_CELLS:8}
     forest-terminal-cell-search: ${HEATING_FOREST_TERMINAL_CELL_SEARCH:nearest}
     forest-reattach-pass: ${HEATING_FOREST_REATTACH_PASS:true}

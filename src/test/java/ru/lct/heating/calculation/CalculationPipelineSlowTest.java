@@ -58,11 +58,11 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.069134574591006, within(1e-6));
+        assertThat(outcome.getSummary().getScore()).isCloseTo(12.810426512224796, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1810.5472955303355, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(272767596L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(62000000L);
+                .isCloseTo(1816.7935200749323, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(262858784L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(52000000L);
         // Допустимый >90° остаётся только на стыке вывода (задокументировано).
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())

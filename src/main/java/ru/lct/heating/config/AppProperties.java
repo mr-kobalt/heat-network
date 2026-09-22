@@ -55,7 +55,7 @@ public class AppProperties {
     /** Локальный заход на выход по сетке (8 соседей), чтобы стык был ≤90°. */
     private boolean forestExitGridDogleg = true;
     /** ADR-0035: многоточечный вход терминала (несколько клеток-кандидатов). */
-    private boolean forestTerminalMultiEntry = false;
+    private boolean forestTerminalMultiEntry = true;
     /** ADR-0035: число клеток-кандидатов входа на терминал. */
     private int forestTerminalEntryCells = 8;
     /** ADR-0035: выбор стартовой клетки терминала (raster | nearest | toward-network). */
