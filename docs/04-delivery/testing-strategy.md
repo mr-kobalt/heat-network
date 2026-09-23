@@ -149,12 +149,12 @@
   (fast): каждое конфигурируемое поле имеет ключ в yml, env-имена —
   `HEATING_<ПОЛЕ>`.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0043:
-  `score` ≈ 14.1533, длина ≈ 2054.11 м, `calculatedCost` = 285391150,
+  .producesRun28BaselineWithDefaultParameters` (baseline после bugfix relink:
+  `score` ≈ 14.0520, длина ≈ 2034.21 м, `calculatedCost` = 283905514,
   `chamberConstructionCost` = 56000000, `unconnected` = 0,
   `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок, ребро к точке 6
   < 60 м; гекс-сетка, cell 1 м; relink не проверяет углы маршрута, refine чинит
-  их в узлах).
+  их в узлах; нет тупиковых технических узлов).
 - **Опция `relocation=true`** — отдельный slow-тест
   `CalculationPipelineSlowTest.relinkExitRelocation_consolidatesPoints368`:
   точки 3, 6, 8 сходятся на одной камере (проверка
@@ -195,3 +195,4 @@
 | 2026-09-22 | `AppPropertiesEnvBindingTest` (поле ↔ env); дефолт ячейки 1.0, baseline `S` 13.7065 | команда |
 | 2026-09-22 | `forest-relink-exit-relocation=false` по умолчанию; baseline `S` 14.3207; консолидация 3/6/8 — отдельный slow-тест опции | команда |
 | 2026-09-22 | ADR-0043: relink без углов маршрута, refine чинит углы; baseline `S` 14.1533; 1/2 на одной камере | команда |
+| 2026-09-22 | Bugfix: проверка отсутствия тупиковых узлов в `refine.geojson`; baseline `S` 14.0520 | команда |

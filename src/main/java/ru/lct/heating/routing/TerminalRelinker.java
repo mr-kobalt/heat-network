@@ -333,19 +333,47 @@ public class TerminalRelinker {
         if (!nodes.containsKey(rootId)) {
             return null;
         }
+        // Bugfix: удаляем тупиковые листья, оставшиеся после переприсоединения
+        // (узел степени < 2, кроме корня и точек подключения), — иначе ребро
+        // «висит в воздухе». Работаем на копиях, входные списки не мутируем.
+        Map<String, ForestNode> keptNodes = new LinkedHashMap<>(nodes);
+        List<Edge> keptEdges = new ArrayList<>(edges);
+        boolean pruned = true;
+        while (pruned) {
+            pruned = false;
+            Map<String, Integer> degree = new HashMap<>();
+            for (Edge edge : keptEdges) {
+                degree.merge(edge.a, 1, Integer::sum);
+                degree.merge(edge.b, 1, Integer::sum);
+            }
+            for (String id : new ArrayList<>(keptNodes.keySet())) {
+                if (id.equals(rootId)) {
+                    continue;
+                }
+                ForestNode node = keptNodes.get(id);
+                if (node.getType() == NodeType.CONNECTION_POINT) {
+                    continue;
+                }
+                if (degree.getOrDefault(id, 0) <= 1) {
+                    keptNodes.remove(id);
+                    keptEdges.removeIf(edge -> edge.a.equals(id) || edge.b.equals(id));
+                    pruned = true;
+                }
+            }
+        }
         Map<String, List<Integer>> incident = new HashMap<>();
-        for (String id : nodes.keySet()) {
+        for (String id : keptNodes.keySet()) {
             incident.put(id, new ArrayList<>());
         }
-        for (int i = 0; i < edges.size(); i++) {
-            Edge edge = edges.get(i);
+        for (int i = 0; i < keptEdges.size(); i++) {
+            Edge edge = keptEdges.get(i);
             if (!incident.containsKey(edge.a) || !incident.containsKey(edge.b)) {
                 return null;
             }
             incident.get(edge.a).add(i);
             incident.get(edge.b).add(i);
         }
-        if (edges.size() != nodes.size() - 1) {
+        if (keptEdges.size() != keptNodes.size() - 1) {
             return null;
         }
         // Ориентация от корня.
@@ -360,7 +388,7 @@ public class TerminalRelinker {
             String current = queue.poll();
             order.add(current);
             for (int index : incident.get(current)) {
-                Edge edge = edges.get(index);
+                Edge edge = keptEdges.get(index);
                 String next = edge.a.equals(current) ? edge.b : edge.a;
                 if (visited.add(next)) {
                     parent.put(next, current);
@@ -369,7 +397,7 @@ public class TerminalRelinker {
                 }
             }
         }
-        if (visited.size() != nodes.size()) {
+        if (visited.size() != keptNodes.size()) {
             return null;
         }
         // Потоки: снизу вверх.
@@ -378,7 +406,7 @@ public class TerminalRelinker {
             String node = order.get(i);
             double flow = terminalFlow.getOrDefault(node, 0.0);
             for (int index : incident.get(node)) {
-                Edge edge = edges.get(index);
+                Edge edge = keptEdges.get(index);
                 String child = edge.a.equals(node) ? edge.b : edge.a;
                 if (parent.get(child) != null && parent.get(child).equals(node)) {
                     flow += subtree.getOrDefault(child, 0.0);
@@ -390,7 +418,7 @@ public class TerminalRelinker {
         double length = 0.0;
         Map<String, Integer> maxIncidentDn = new HashMap<>();
         List<ForestEdge> rebuiltEdges = new ArrayList<>();
-        for (Edge edge : edges) {
+        for (Edge edge : keptEdges) {
             String child = parent.get(edge.b) != null && parent.get(edge.b).equals(edge.a)
                     ? edge.b : edge.a;
             double flow = subtree.getOrDefault(child, 0.0);
@@ -406,7 +434,7 @@ public class TerminalRelinker {
                     .build());
         }
         Map<String, ForestNode> rebuiltNodes = new HashMap<>();
-        for (ForestNode node : nodes.values()) {
+        for (ForestNode node : keptNodes.values()) {
             int degree = incident.get(node.getId()).size();
             boolean isTerminal = node.getType() == NodeType.CONNECTION_POINT;
             NodeType type;

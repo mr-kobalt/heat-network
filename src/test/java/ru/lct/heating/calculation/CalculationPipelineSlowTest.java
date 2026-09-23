@@ -60,18 +60,14 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
-        // ADR-0037: буферы по мин. Ду, выход — ближайшая точка на внешнем контуре
-        // буфера всего ОКС (с учётом узких промежутков и достижимости), кандидаты 1 м.
-        // ADR-0038: уточнение геометрии (refine) после переприсоединения.
-        // ADR-0040: фильтрация выходов. ADR-0041: гекс-сетка, ячейка 1 м.
-        // ADR-0039: relocation=false. ADR-0043: relink не проверяет углы маршрута
-        // (только стык вывода), refine чинит углы — baseline пересчитан
-        // (S 14.321 → 14.153, длина 2071.8 → 2054.1 м, стоимость 289.5 → 285.4 млн,
-        // камеры 56 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(14.153267701388808, within(1e-6));
+        // ADR-0037/0038/0040/0041/0039/0043 см. историю; bugfix: relink удаляет
+        // тупиковые листья, оставшиеся после переприсоединения — baseline
+        // пересчитан (S 14.153 → 14.052, длина 2054.1 → 2034.2 м,
+        // стоимость 285.39 → 283.91 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(14.05199619032578, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(2054.1051671296027, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(285391150L);
+                .isCloseTo(2034.21393277526, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(283905514L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(56000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
@@ -139,5 +135,43 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         JsonNode refine = objectMapper.readTree(stagesDir.resolve("refine.geojson").toFile());
         assertThat(refine.path("features").size()).isGreaterThan(0);
         assertThat(Files.exists(stagesDir.resolve("relink.geojson"))).isTrue();
+        assertNoDeadEndNodes(stagesDir.resolve("refine.geojson"), objectMapper);
+    }
+
+    /**
+     * Bugfix ADR-0035: после relink не должно оставаться тупиковых листьев —
+     * узлов степени < 2, кроме корня (CHAMBER) и точек подключения. Иначе ребро
+     * «висит в воздухе» (ссылается на невыпущенный узел).
+     */
+    private void assertNoDeadEndNodes(Path stageFile, ObjectMapper mapper) throws Exception {
+        JsonNode features = mapper.readTree(stageFile.toFile()).path("features");
+        java.util.Map<String, String> types = new java.util.HashMap<>();
+        java.util.Map<String, Integer> degree = new java.util.HashMap<>();
+        for (JsonNode feature : features) {
+            JsonNode properties = feature.path("properties");
+            if ("forest_node".equals(properties.path("object_type").asText())) {
+                types.put(properties.path("id").asText(),
+                        properties.path("node_type").asText());
+            }
+        }
+        for (JsonNode feature : features) {
+            JsonNode properties = feature.path("properties");
+            if (!"forest_edge".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            for (String id : java.util.List.of(properties.path("from").asText(),
+                    properties.path("to").asText())) {
+                degree.merge(id, 1, Integer::sum);
+            }
+        }
+        for (java.util.Map.Entry<String, String> entry : types.entrySet()) {
+            if (!"TECHNICAL_NODE".equals(entry.getValue())) {
+                continue;
+            }
+            int deg = degree.getOrDefault(entry.getKey(), 0);
+            assertThat(deg)
+                    .as("тупиковый технический узел %s", entry.getKey())
+                    .isGreaterThanOrEqualTo(2);
+        }
     }
 }
