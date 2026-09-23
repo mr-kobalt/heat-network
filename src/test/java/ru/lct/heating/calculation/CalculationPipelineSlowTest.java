@@ -60,19 +60,21 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
-        // ADR-0037/0038/0040/0041/0039/0043 см. историю; bugfix: relink удаляет
-        // тупиковые листья; ADR-0044: степень узла ≤4 (FR-26) — baseline
-        // пересчитан (S 14.051996 → 14.051205, длина 2034.214 → 2034.071 м,
-        // стоимость 283.906 → 283.893 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(14.051205495774571, within(1e-6));
+        // ADR-0037/0038/0040/0041/0039/0043+bugfix см. историю; ADR-0044:
+        // перестройка дерева включена по умолчанию — baseline пересчитан
+        // (S 14.051205 → 13.351229, длина 2034.07 → 1893.48 м,
+        // стоимость 283.89 → 273.96 млн, камеры 55 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.351228567316678, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(2034.0705065915238, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(283892642L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(56000000L);
+                .isCloseTo(1893.4833744388927, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(273956373L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(55000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
                 .isLessThanOrEqualTo(6L);
-        assertNoExcessiveVertices(resultFile, new ObjectMapper(), 12);
+        // Порог поднят 12 → 15: после ADR-0044 на одном ребре к точке 3 остаётся
+        // короткий grid-заход (обход по клеткам в стеснении), 13 вершин.
+        assertNoExcessiveVertices(resultFile, new ObjectMapper(), 15);
         // ADR-0035/0037: точка 6 присоединена коротким ребром, а не через ствол.
         assertEdgeAtPointShorterThan(resultFile, new ObjectMapper(), 37.632012226474316,
                 55.700048261255056, 60.0);
@@ -89,6 +91,7 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         AppProperties properties = new AppProperties();
         properties.setForestRelinkExitRelocation(true);
+        properties.setForestRelinkNodes(false);
         Path resultFile = tempDir.resolve("reloc-result.geojson");
         Path summaryFile = tempDir.resolve("reloc-summary.json");
 

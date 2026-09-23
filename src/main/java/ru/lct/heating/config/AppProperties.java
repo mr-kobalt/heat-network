@@ -74,9 +74,9 @@ public class AppProperties {
     private int forestReattachIterations = 2;
     /**
      * ADR-0044: перестройка дерева — переносить не только терминалы, но и
-     * промежуточные узлы с поддеревом. По умолчанию выключено.
+     * промежуточные узлы с поддеревом. Дефолт — включено.
      */
-    private boolean forestRelinkNodes = false;
+    private boolean forestRelinkNodes = true;
     /** ADR-0044: радиус поиска кандидатов при переносе узла, м. */
     private double forestRelinkNodesRadiusM = 100.0;
     /** FR-26: предельная степень узла-камеры (число примыканий). */

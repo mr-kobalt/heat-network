@@ -149,19 +149,20 @@
   (fast): каждое конфигурируемое поле имеет ключ в yml, env-имена —
   `HEATING_<ПОЛЕ>`.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0044:
-  `score` ≈ 14.0512, длина ≈ 2034.07 м, `calculatedCost` = 283892642,
-  `chamberConstructionCost` = 56000000, `unconnected` = 0,
-  `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок, ребро к точке 6
-  < 60 м; гекс-сетка, cell 1 м; relink не проверяет углы маршрута, refine чинит
-  их в узлах; степень узла ≤4 (FR-26); нет тупиковых технических узлов).
+  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0044,
+  `forest-relink-nodes=true`: `score` ≈ 13.3512, длина ≈ 1893.48 м,
+  `calculatedCost` = 273956373, `chamberConstructionCost` = 55000000,
+  `unconnected` = 0, `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 15 вершин на участок,
+  ребро к точке 6 < 60 м; гекс-сетка, cell 1 м; relink не проверяет углы
+  маршрута, refine чинит их в узлах; степень узла ≤4 (FR-26); нет тупиковых
+  технических узлов).
 - **Перестройка дерева** `RelinkNodesExperimentTest` (slow, ADR-0044): сравнение
   `forest-relink-nodes` off/on, отчёт `target/relink-nodes/report.md`
-  (флаг on: `S` ≈ 13.351, длина ≈ 1893.5 м, стоимость ≈ 274.0 млн).
+  (off: `S` ≈ 14.0512; on: `S` ≈ 13.351, длина ≈ 1893.5 м, стоимость ≈ 274.0 млн).
 - **Опция `relocation=true`** — отдельный slow-тест
-  `CalculationPipelineSlowTest.relinkExitRelocation_consolidatesPoints368`:
-  точки 3, 6, 8 сходятся на одной камере (проверка
-  `assertConnectionPointsShareChamber`).
+  `CalculationPipelineSlowTest.relinkExitRelocation_consolidatesPoints368`
+  (при `forest-relink-nodes=false`): точки 3, 6, 8 сходятся на одной камере
+  (проверка `assertConnectionPointsShareChamber`).
 - **A/B формы сетки** `GridShapeExperimentTest` (тег slow, ADR-0041): квадрат
   против гекса на реальном наборе, отчёт `target/grid-shape/report.md` (`S`,
   длина, стоимость, камеры, углы, пересечения, консолидация 3/6/8, время).
@@ -200,3 +201,4 @@
 | 2026-09-22 | ADR-0043: relink без углов маршрута, refine чинит углы; baseline `S` 14.1533; 1/2 на одной камере | команда |
 | 2026-09-22 | Bugfix: проверка отсутствия тупиковых узлов в `refine.geojson`; baseline `S` 14.0520 | команда |
 | 2026-09-22 | ADR-0044: эксперимент `RelinkNodesExperimentTest`; контроль степени FR-26; baseline `S` 14.0512 | команда |
+| 2026-09-22 | ADR-0044 включён по умолчанию (`S` 13.3512); порог вершин 15; сквозная нумерация id | команда |

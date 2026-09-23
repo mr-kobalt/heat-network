@@ -49,7 +49,7 @@ public class TerminalRelinker {
         for (ForestTree tree : trees) {
             result.add(relinkTree(tree, exits, terminalFlow, obstacleIndex, ownObstacles,
                     iterations, idCounter));
-            idCounter += 1000;
+            idCounter += 10_000_000;
         }
         return result;
     }
@@ -64,6 +64,7 @@ public class TerminalRelinker {
             edges.add(new Edge(edge.getId(), edge.getFromNodeId(), edge.getToNodeId(),
                     new ArrayList<>(edge.getCoordinates())));
         }
+        int idCounter = idBase;
         for (int iter = 0; iter < iterations; iter++) {
             Rebuild current = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow);
             if (current == null) {
@@ -71,7 +72,6 @@ public class TerminalRelinker {
             }
             boolean changed = false;
             List<String> movables = new ArrayList<>(nodes.keySet());
-            int idCounter = idBase;
             for (String nodeId : movables) {
                 if (nodeId.equals(tree.getTieInNodeId())) {
                     idCounter += 100;

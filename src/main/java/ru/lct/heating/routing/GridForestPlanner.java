@@ -1110,7 +1110,15 @@ public class GridForestPlanner {
                     List<Coordinate> fixed = repairExitApproach(refined, startPrevious, pass,
                             obstacleIndex, ownObstacles, edge.getToNodeId());
                     if (fixed != null) {
-                        refined = fixed;
+                        // После grid-перетрассировки снова сглаживаем (string pulling),
+                        // иначе остаётся ступенчатая ломаная из клеток.
+                        Coordinate exitPoint = fixed.get(fixed.size() - 1);
+                        List<Coordinate> trunkAgain = new ArrayList<>(
+                                fixed.subList(0, fixed.size() - 1));
+                        List<Coordinate> smoothed = new ArrayList<>(refine(trunkAgain,
+                                obstacleIndex, startPrevious, endNext, true));
+                        smoothed.add(exitPoint);
+                        refined = smoothed;
                     }
                 }
                 if (!turnsWithinLimit(refined, refined.size() - 2 - (isTerminal ? 2 : 0))) {

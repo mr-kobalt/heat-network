@@ -24,7 +24,7 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.isForestExitGridDogleg()).isTrue();
         assertThat(properties.isForestReattachPass()).isTrue();
         assertThat(properties.getForestReattachIterations()).isEqualTo(2);
-        assertThat(properties.isForestRelinkNodes()).isFalse();
+        assertThat(properties.isForestRelinkNodes()).isTrue();
         assertThat(properties.getForestRelinkNodesRadiusM()).isEqualTo(100.0);
         assertThat(properties.getForestMaxChamberDegree()).isEqualTo(4);
         assertThat(properties.isForestRelinkExitRelocation()).isFalse();
