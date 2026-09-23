@@ -109,3 +109,5 @@ pnpm --dir frontend basemap:prepare # локальная карта Москвы
 | 2026-09-22 | ADR-0040: фильтрация выходов-кандидатов ОКС (`oks-exit-filter`, предел глубины 15 м); baseline `S` 13.099 | команда |
 | 2026-09-22 | ADR-0041: гексагональная сетка поиска пути (`forest-grid-shape`, дефолт `hex`); baseline `S` 12.973 | команда |
 | 2026-09-22 | Визуализатор: маска сетки рисуется гексами; оценка клеток для спилла через `GridShape` | команда |
+| 2026-09-22 | Env-привязки новых свойств в `application.yml` (`HEATING_*`), тест `AppPropertiesEnvBindingTest`; флаг `forest-relink-exit-relocation`; дефолт ячейки 1.0; baseline `S` 13.706 | команда |
+| 2026-09-22 | `forest-relink-exit-relocation=false` по умолчанию (relink не меняет выход роста); консолидация 3/6/8 — опция; baseline `S` 14.321 | команда |

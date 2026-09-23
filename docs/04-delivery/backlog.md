@@ -172,7 +172,7 @@
 ## Эпик E18. Relink и выходы ОКС (ADR-0039)
 
 - [x] E18-01 `GridForestPlanner` считает выходы-кандидаты точки один раз и передаёт в relink
-- [x] E18-02 `TerminalRelinker` перебирает выходы-кандидаты; флаг `forest-relink-exit-candidates[-max]`
+- [x] E18-02 `TerminalRelinker` перебирает выходы-кандидаты; флаг `forest-relink-exit-relocation` (+`-candidates-max`)
 - [x] E18-03 Регресс общей камеры точек 3, 6, 8; baseline `S` 12.306; тесты консолидации
 
 ## Эпик E19. Фильтрация выходов ОКС (ADR-0040)
@@ -187,6 +187,12 @@
 - [x] E20-02 `GridForestPlanner` на shape-aware соседях/центрах; флаг `forest-grid-shape` (дефолт `hex`)
 - [x] E20-03 Трасса `gridShape`/`rowSpacing` и гекс-контуры ячеек в визуализаторе
 - [x] E20-04 A/B `GridShapeExperimentTest`; baseline `S` 12.973; возвращена проверка камеры 3/6/8
+
+## Эпик E21. Конфигурация через env (ADR-0040/0041)
+
+- [x] E21-01 Env-привязки новых свойств в `application.yml` (`forest-grid-shape`, `forest-relink-exit-relocation`, `forest-relink-exit-candidates-max`, `oks-exit-filter`, `oks-exit-max-tail-m`)
+- [x] E21-02 Тест-регресс `AppPropertiesEnvBindingTest` (поле ↔ ключ yml, имя `HEATING_<ПОЛЕ>`)
+- [x] E21-03 Дефолт ячейки `forest-grid-cell-m` 2.0 → 1.0; пересчёт baseline slow-теста (`S` 13.706)
 
 ## Правила ведения backlog
 
@@ -210,3 +216,5 @@
 | 2026-09-22 | ADR-0039: relink перебирает выходы-кандидаты точки (эпик E18); консолидация 3/6/8; baseline 12.306 | команда |
 | 2026-09-22 | ADR-0040: фильтрация выходов-кандидатов ОКС (эпик E19); baseline 13.099 | команда |
 | 2026-09-22 | ADR-0041: гексагональная сетка (эпик E20), дефолт `hex`; baseline 12.973 | команда |
+| 2026-09-22 | Эпик E21: env-привязки и тест `AppPropertiesEnvBindingTest`; дефолт ячейки 1.0; baseline 13.706 | команда |
+| 2026-09-22 | `forest-relink-exit-relocation=false` по умолчанию; консолидация 3/6/8 — отдельный slow-тест; baseline 14.321 | команда |

@@ -15,7 +15,7 @@ class AppPropertiesDefaultsTest {
     @Test
     void gridForestDefaultsMatchCalibratedBaseline() {
         assertThat(properties.getRoutingAlgorithm()).isEqualTo("grid-forest");
-        assertThat(properties.getForestGridCellM()).isEqualTo(2.0);
+        assertThat(properties.getForestGridCellM()).isEqualTo(1.0);
         assertThat(properties.getForestGridShape()).isEqualTo("hex");
         assertThat(properties.getForestCostIterations()).isEqualTo(2);
         assertThat(properties.getForestMaxTurnDeg()).isEqualTo(90.0);
@@ -24,7 +24,7 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.isForestExitGridDogleg()).isTrue();
         assertThat(properties.isForestReattachPass()).isTrue();
         assertThat(properties.getForestReattachIterations()).isEqualTo(2);
-        assertThat(properties.isForestRelinkExitCandidates()).isTrue();
+        assertThat(properties.isForestRelinkExitRelocation()).isFalse();
         assertThat(properties.getForestRelinkExitCandidatesMax()).isEqualTo(6);
         assertThat(properties.isOksOwningIncludeBoundary()).isTrue();
         assertThat(properties.isOksExitFilter()).isTrue();

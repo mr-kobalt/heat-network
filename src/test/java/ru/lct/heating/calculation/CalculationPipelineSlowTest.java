@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import ru.lct.heating.config.AppProperties;
 
 /**
  * Полный сквозной прогон на реальном наборе (алгоритм {@code grid-forest}).
@@ -61,16 +62,16 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         // ADR-0037: буферы по мин. Ду, выход — ближайшая точка на внешнем контуре
         // буфера всего ОКС (с учётом узких промежутков и достижимости), кандидаты 1 м.
-        // ADR-0038: уточнение геометрии (refine) выполняется после переприсоединения.
-        // ADR-0040: выходы фильтруются (соседние корпуса, повторный вход, глубина
-        // > 15 м). ADR-0041: сетка поиска — гексагональная (по умолчанию) —
-        // baseline пересчитан (S 13.099 → 12.973, длина 1863.7 → 1836.5 м,
-        // стоимость 268.1 → 266.5 млн, камеры 54 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(12.97263500963936, within(1e-6));
+        // ADR-0038: уточнение геометрии (refine) после переприсоединения.
+        // ADR-0040: фильтрация выходов. ADR-0041: гекс-сетка. Дефолт ячейки — 1 м;
+        // ADR-0039: по умолчанию relink НЕ меняет выход growth —
+        // baseline пересчитан (S 12.973 → 14.321, длина 1836.5 → 2071.8 м,
+        // стоимость 266.5 → 289.5 млн, камеры 58 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(14.320729670783953, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1836.4861965464534, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(266542015L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(54000000L);
+                .isCloseTo(2071.7759542613176, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(289478636L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(58000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
                 .isLessThanOrEqualTo(6L);
@@ -78,7 +79,26 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // ADR-0035/0037: точка 6 присоединена коротким ребром, а не через ствол.
         assertEdgeAtPointShorterThan(resultFile, new ObjectMapper(), 37.632012226474316,
                 55.700048261255056, 60.0);
-        // ADR-0039/0041: точки 3, 6, 8 сходятся на одной камере (гекс-сетка).
+    }
+
+    /**
+     * ADR-0039: при включённом переназначении выхода relink консолидирует точки
+     * 3, 6, 8 на одной камере (опция, не дефолт).
+     */
+    @Test
+    void relinkExitRelocation_consolidatesPoints368() throws Exception {
+        assumeTrue(Files.exists(SAMPLE),
+                "Набор source/Датасет скорректированный.geojson недоступен");
+
+        AppProperties properties = new AppProperties();
+        properties.setForestRelinkExitRelocation(true);
+        Path resultFile = tempDir.resolve("reloc-result.geojson");
+        Path summaryFile = tempDir.resolve("reloc-summary.json");
+
+        CalculationOutcome outcome = service(properties).calculate(SAMPLE, resultFile, summaryFile);
+
+        assertThat(outcome.getSummary()).isNotNull();
+        assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertConnectionPointsShareChamber(resultFile, new ObjectMapper(), "3", "6", "8");
     }
 

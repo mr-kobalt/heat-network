@@ -341,14 +341,14 @@ public class GridForestPlanner {
 
     /**
      * ADR-0039: выходы точки для переприсоединения. По флагу
-     * {@code forest-relink-exit-candidates} — все валидные кандидаты (не более
-     * {@code forest-relink-exit-candidates-max}), иначе — только канонический.
+     * {@code forest-relink-exit-relocation} — все валидные кандидаты (не более
+     * {@code forest-relink-exit-candidates-max}), иначе — только выход growth.
      */
     private List<ConnectionExit> relinkExits(Map<String, List<ConnectionExit>> exitCandidates,
                                              Terminal term) {
         ConnectionExit canonical = ConnectionExit.builder().connectionPointId(term.pointId)
                 .target(term.target).tail(term.tail).blocked(false).build();
-        if (!appProperties.isForestRelinkExitCandidates()) {
+        if (!appProperties.isForestRelinkExitRelocation()) {
             return List.of(canonical);
         }
         int max = Math.max(1, appProperties.getForestRelinkExitCandidatesMax());

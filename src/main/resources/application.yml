@@ -72,7 +72,9 @@ heating:
     # ADR-0027: алгоритм трассировки по умолчанию (см. GET /api/v1/algorithms).
     routing-algorithm: ${HEATING_ROUTING_ALGORITHM:grid-forest}
     # ADR-0034: поиск пути по сетке (ячейка и бюджет клеток).
-    forest-grid-cell-m: ${HEATING_FOREST_GRID_CELL_M:2.0}
+    forest-grid-cell-m: ${HEATING_FOREST_GRID_CELL_M:1.0}
+    # ADR-0041: форма сетки поиска пути (square | hex).
+    forest-grid-shape: ${HEATING_FOREST_GRID_SHAPE:hex}
     forest-grid-max-cells: ${HEATING_FOREST_GRID_MAX_CELLS:16000000}
     forest-cost-iterations: ${HEATING_FOREST_COST_ITERATIONS:2}
     # ADR-0033 (фаза B): хранилище состояния сетки (спилл в PostGIS TEMP).
@@ -88,6 +90,12 @@ heating:
     # ADR-0035: переприсоединение терминалов (T-врезка).
     forest-reattach-pass: ${HEATING_FOREST_REATTACH_PASS:true}
     forest-reattach-iterations: ${HEATING_FOREST_REATTACH_ITERATIONS:2}
+    # ADR-0039: разрешить relink менять выход, выбранный growth (по умолчанию — нет).
+    forest-relink-exit-relocation: ${HEATING_FOREST_RELINK_EXIT_RELOCATION:false}
+    forest-relink-exit-candidates-max: ${HEATING_FOREST_RELINK_EXIT_CANDIDATES_MAX:6}
+    # ADR-0040: фильтрация выходов-кандидатов ОКС (соседние корпуса, возврат, глубина).
+    oks-exit-filter: ${HEATING_OKS_EXIT_FILTER:true}
+    oks-exit-max-tail-m: ${HEATING_OKS_EXIT_MAX_TAIL_M:15.0}
     oks-owning-include-boundary: ${HEATING_OKS_OWNING_INCLUDE_BOUNDARY:true}
     # ADR-0037: границы сетки включают bbox всех входных объектов.
     forest-grid-include-input-bounds: ${HEATING_FOREST_GRID_INCLUDE_INPUT_BOUNDS:true}

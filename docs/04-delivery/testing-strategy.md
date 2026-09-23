@@ -142,15 +142,22 @@
   при переиспользовании соединения из пула (второй стор не видит страницы
   первого).
 - **Дефолты трассировки** фиксируются `AppPropertiesDefaultsTest` (fast):
-  `grid-forest`, cell 2.0, cost-iterations 2, turn 90, `storage=auto`,
-  `terminal-cell-search=nearest`, мультивход, переприсоединение, граница ОКС.
+  `grid-forest`, cell 1.0, shape `hex`, cost-iterations 2, turn 90,
+  `storage=auto`, переприсоединение, `forest-relink-exit-relocation=false`
+  (relink не меняет выход growth), `oks-exit-filter=true`, граница ОКС.
+  Привязка настроек к `application.yml`/env — `AppPropertiesEnvBindingTest`
+  (fast): каждое конфигурируемое поле имеет ключ в yml, env-имена —
+  `HEATING_<ПОЛЕ>`.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0040/0041:
-  `score` ≈ 12.9730, длина ≈ 1836.49 м, `calculatedCost` = 266542015,
-  `chamberConstructionCost` = 54000000, `unconnected` = 0,
-  `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок, ребро к точке 6
-  < 60 м — геометрический регресс присоединения; точки 3, 6, 8 сходятся на
-  одной камере; дефолт — гекс-сетка `forest-grid-shape=hex`).
+  .producesRun28BaselineWithDefaultParameters` (baseline после дефолта
+  `relocation=false`, cell=1.0: `score` ≈ 14.3207, длина ≈ 2071.78 м,
+  `calculatedCost` = 289478636, `chamberConstructionCost` = 58000000,
+  `unconnected` = 0, `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок,
+  ребро к точке 6 < 60 м; гекс-сетка).
+- **Опция `relocation=true`** — отдельный slow-тест
+  `CalculationPipelineSlowTest.relinkExitRelocation_consolidatesPoints368`:
+  точки 3, 6, 8 сходятся на одной камере (проверка
+  `assertConnectionPointsShareChamber`).
 - **A/B формы сетки** `GridShapeExperimentTest` (тег slow, ADR-0041): квадрат
   против гекса на реальном наборе, отчёт `target/grid-shape/report.md` (`S`,
   длина, стоимость, камеры, углы, пересечения, консолидация 3/6/8, время).
@@ -184,3 +191,5 @@
 | 2026-09-22 | ADR-0039: baseline relink с выходами-кандидатами (`S` 12.3063, длина 1730.80 м); регресс общей камеры 3/6/8 | команда |
 | 2026-09-22 | ADR-0040: baseline с фильтром выходов (`S` 13.0990, длина 1863.73 м); `permissiveExitProperties` для fast-фикстур | команда |
 | 2026-09-22 | ADR-0041: baseline на гекс-сетке (`S` 12.9730, длина 1836.49 м); A/B `GridShapeExperimentTest` | команда |
+| 2026-09-22 | `AppPropertiesEnvBindingTest` (поле ↔ env); дефолт ячейки 1.0, baseline `S` 13.7065 | команда |
+| 2026-09-22 | `forest-relink-exit-relocation=false` по умолчанию; baseline `S` 14.3207; консолидация 3/6/8 — отдельный slow-тест опции | команда |
