@@ -101,9 +101,26 @@ heating:
     # ADR-0040: фильтрация выходов-кандидатов ОКС (соседние корпуса, возврат, глубина).
     oks-exit-filter: ${HEATING_OKS_EXIT_FILTER:true}
     oks-exit-max-tail-m: ${HEATING_OKS_EXIT_MAX_TAIL_M:15.0}
+    # E36: сдвиг выхода ОКС при широком зазоре (0 — выключено; +1 м даёт место, но
+    # на плотных наборах вносит пересечения FR-29).
+    oks-exit-extra-buffer-m: ${HEATING_OKS_EXIT_EXTRA_BUFFER_M:0.0}
     oks-owning-include-boundary: ${HEATING_OKS_OWNING_INCLUDE_BOUNDARY:true}
     # ADR-0037: границы сетки включают bbox всех входных объектов.
     forest-grid-include-input-bounds: ${HEATING_FOREST_GRID_INCLUDE_INPUT_BOUNDS:true}
+    # E25/ADR-0045: строгий обход спецпроходов (полоса непроходима, пересечение
+    # через «ворота» перпендикулярно оси). По умолчанию выключено.
+    forest-special-strict: ${HEATING_FOREST_SPECIAL_STRICT:true}
+    special-gate-step-m: ${HEATING_SPECIAL_GATE_STEP_M:5.0}
+    special-gate-thickness-m: ${HEATING_SPECIAL_GATE_THICKNESS_M:1.0}
+    # E25-07: адаптивное уменьшение шага «ворот» при неподключённых точках.
+    forest-gate-retries: ${HEATING_FOREST_GATE_RETRIES:2}
+    # E35: оптимизация точки врезки корня (перпендикулярная проекция на сеть).
+    forest-root-optimization: ${HEATING_FOREST_ROOT_OPTIMIZATION:true}
+    # E25-05b: буферы по фактическому Ду (пересборка индекса и повтор расчёта).
+    forest-diameter-aware-buffers: ${HEATING_FOREST_DIAMETER_AWARE_BUFFERS:false}
+    forest-diameter-aware-iterations: ${HEATING_FOREST_DIAMETER_AWARE_ITERATIONS:2}
+    # E26/ADR-0046: правило 10 м и учёт существующих примыканий (степень ≤4).
+    forest-chamber-tie-in-rules: ${HEATING_FOREST_CHAMBER_TIE_IN_RULES:true}
     # ADR-0036: предел пикселей растровой диагностики сетки (прореживание).
     trace-grid-max-pixels: ${HEATING_TRACE_GRID_MAX_PIXELS:4194304}
     allowed-origins:

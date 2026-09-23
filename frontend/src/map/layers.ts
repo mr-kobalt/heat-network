@@ -13,6 +13,7 @@ import {
   hoverRadius,
   hoverWidth,
   linePaint,
+  RESTRICTION_FILL_FILTER,
   restrictionFillColor,
 } from './paint';
 import { markOksTargets } from './geometry';
@@ -141,6 +142,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     'in-restrictions',
     restrictionFillColor(),
     0.25,
+    RESTRICTION_FILL_FILTER,
     visibility.restrictions,
     0.45,
   );
@@ -230,6 +232,7 @@ function ensureFill(
   source: string,
   color: unknown,
   opacity: number,
+  filter: unknown,
   visible: boolean,
   hoverOpacityValue?: number,
 ): void {
@@ -239,13 +242,14 @@ function ensureFill(
         id,
         type: 'fill',
         source,
+        ...(filter !== undefined ? { filter } : {}),
         paint: {
           'fill-color': color as never,
           'fill-opacity': (hoverOpacityValue === undefined
             ? opacity
             : hoverOpacity(opacity, hoverOpacityValue)) as never,
-        } as never,
-      });
+        },
+      } as never);
     } catch (error) {
       console.error(`[map] не удалось добавить слой ${id}`, error);
     }

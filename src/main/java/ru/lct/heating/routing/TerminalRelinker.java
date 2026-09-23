@@ -14,6 +14,7 @@ import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.cost.CostModel;
 import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.geometry.ObstacleIndex;
+import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.hydraulics.DiameterCatalog;
 import ru.lct.heating.hydraulics.DiameterRow;
 
@@ -32,12 +33,19 @@ public class TerminalRelinker {
     private final CostModel costModel;
     private final DiameterCatalog diameters;
     private final AppProperties appProperties;
+    private final ExistingNetworkGraph graph;
 
     public TerminalRelinker(CostModel costModel, DiameterCatalog diameters,
                             AppProperties appProperties) {
+        this(costModel, diameters, appProperties, null);
+    }
+
+    public TerminalRelinker(CostModel costModel, DiameterCatalog diameters,
+                            AppProperties appProperties, ExistingNetworkGraph graph) {
         this.costModel = costModel;
         this.diameters = diameters;
         this.appProperties = appProperties;
+        this.graph = graph;
     }
 
     public List<ForestTree> relink(List<ForestTree> trees, Map<String, List<ConnectionExit>> exits,
@@ -180,7 +188,7 @@ public class TerminalRelinker {
 
     private Best evaluate(Best best, Map<String, ForestNode> nodes, List<Edge> edges, String rootId,
                           Map<String, Double> terminalFlow, double currentScore) {
-        if (!degreeWithinLimit(edges)) {
+        if (!degreeWithinLimit(edges, nodes)) {
             return best;
         }
         Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow);
@@ -193,16 +201,29 @@ public class TerminalRelinker {
         return best;
     }
 
-    /** FR-26: степень узла не выше {@code forest-max-chamber-degree}. */
-    private boolean degreeWithinLimit(List<Edge> edges) {
+    /**
+     * FR-26: степень узла не выше {@code forest-max-chamber-degree}. Для
+     * существующих камер (E26-02) добавляются их существующие примыкания
+     * (проходная линия = 2).
+     */
+    private boolean degreeWithinLimit(List<Edge> edges, Map<String, ForestNode> nodes) {
         int max = appProperties.getForestMaxChamberDegree();
         if (max <= 0) {
             return true;
         }
         Map<String, Integer> degree = new HashMap<>();
         for (Edge edge : edges) {
-            if (degree.merge(edge.a, 1, Integer::sum) > max
-                    || degree.merge(edge.b, 1, Integer::sum) > max) {
+            degree.merge(edge.a, 1, Integer::sum);
+            degree.merge(edge.b, 1, Integer::sum);
+        }
+        for (Map.Entry<String, Integer> entry : degree.entrySet()) {
+            int total = entry.getValue();
+            ForestNode node = nodes == null ? null : nodes.get(entry.getKey());
+            if (node != null && node.isExisting() && graph != null
+                    && appProperties.isForestChamberTieInRules()) {
+                total += graph.chamberAttachments(entry.getKey());
+            }
+            if (total > max) {
                 return false;
             }
         }

@@ -84,13 +84,22 @@ export function DetailsPanel({
   const objectType = String(properties.object_type ?? '');
   const ordered = PREFERRED_ORDER.filter((key) => key in properties);
   const rest = Object.keys(properties).filter((key) => !ordered.includes(key));
+  const special = properties.laying_method === 'special';
+  const cost = typeof properties.cost === 'number' ? properties.cost : null;
 
   return (
     <Stack gap="xs" h={compact ? undefined : '100%'} w={compact ? 300 : undefined}>
       <Group justify="space-between" wrap="nowrap">
-        <Badge size="lg" variant="light">
-          {OBJECT_LABELS[objectType] ?? objectType}
-        </Badge>
+        <Group gap={4} wrap="nowrap">
+          <Badge size="lg" variant="light">
+            {OBJECT_LABELS[objectType] ?? objectType}
+          </Badge>
+          {special && (
+            <Badge size="lg" color="orange" variant="filled">
+              спецпроход{cost !== null ? ` · ${formatMoney(cost)}` : ''}
+            </Badge>
+          )}
+        </Group>
         <Text
           size="xs"
           c="dimmed"
@@ -117,12 +126,20 @@ export function DetailsPanel({
   );
 }
 
+/** Стоимость с разделением разрядов и руб. */
+function formatMoney(value: number): string {
+  return `${value.toLocaleString('ru-RU')} руб.`;
+}
+
 function formatValue(key: string, value: unknown): string {
   if (value === null || value === undefined) {
     return '—';
   }
   if (key === 'laying_method') {
     return value === 'special' ? 'специальный проход' : 'обычная прокладка';
+  }
+  if ((key === 'cost' || key.endsWith('_cost')) && typeof value === 'number') {
+    return formatMoney(value);
   }
   if (Array.isArray(value)) {
     return value.length > 0 ? value.join(', ') : '—';

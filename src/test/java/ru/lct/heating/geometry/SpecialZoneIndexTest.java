@@ -54,11 +54,18 @@ class SpecialZoneIndexTest {
     void spans_shallowCrossing_angleWarning() {
         SpecialZoneIndex index = index(zone(horizontalLine(), 5.0, 1.6, 45.0));
         List<String> warnings = new ArrayList<>();
-        double dx = 40 * Math.cos(Math.toRadians(30));
-        double dy = 40 * Math.sin(Math.toRadians(30));
+        double dx = 80 * Math.cos(Math.toRadians(30));
+        double dy = 80 * Math.sin(Math.toRadians(30));
         index.spans(line(-20, -20, -20 + dx, -20 + dy), warnings);
         assertThat(warnings).hasSize(1);
         assertThat(warnings.get(0)).contains("CROSSING_ANGLE_TOO_SHALLOW");
+    }
+
+    @Test
+    void spans_parallelInsideZone_noSpan() {
+        // E32: движение вдоль препятствия (без пересечения оси) не спецпроход.
+        SpecialZoneIndex index = index(zone(horizontalLine(), 5.0, 1.6, null));
+        assertThat(index.spans(line(0, 2, 100, 2), new ArrayList<>())).isEmpty();
     }
 
     private SpecialZone zone(Geometry restriction, double buffer, double kSpecial, Double angleMin) {
@@ -66,6 +73,7 @@ class SpecialZoneIndexTest {
                 .restrictionType("road")
                 .kSpecial(kSpecial)
                 .angleMinDeg(angleMin)
+                .bufferM(buffer)
                 .axis(axisBuilder.axis(restriction))
                 .zone(restriction.buffer(buffer))
                 .build();

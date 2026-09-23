@@ -7,6 +7,7 @@ import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
 import org.locationtech.jts.linearref.LengthIndexedLine;
 import org.locationtech.jts.index.strtree.STRtree;
@@ -42,52 +43,101 @@ public class SpecialZoneIndex {
 
     /**
      * Непрерывные специальные участки вдоль трассы (в метрах от начала).
+     *
+     * <p>E32: специальный проход — фактическое <b>пересечение</b> трассы с осью
+     * (линейное ограничение) или границей (полигональное) препятствия,
+     * продлённое на радиус зоны {@code bufferM} в обе стороны. Движение вдоль
+     * препятствия (без пересечения) специальным проходом не считается.</p>
      */
     public List<SpecialSpan> spans(LineString route, List<String> warnings) {
         List<SpecialSpan> raw = new ArrayList<>();
-        Coordinate[] coordinates = route.getCoordinates();
-        double offset = 0.0;
-        for (int i = 0; i < coordinates.length - 1; i++) {
-            LineString segment = route.getFactory()
-                    .createLineString(new Coordinate[]{coordinates[i], coordinates[i + 1]});
-            double segmentLength = segment.getLength();
-            if (segmentLength > EPS) {
-                collectSegmentSpans(segment, offset, raw, warnings);
+        if (zones.isEmpty()) {
+            return raw;
+        }
+        double length = route.getLength();
+        LengthIndexedLine indexed = new LengthIndexedLine(route);
+        for (SpecialZone zone : zones) {
+            Geometry axis = zone.getAxis();
+            if (axis == null || axis.isEmpty()) {
+                continue;
             }
-            offset += segmentLength;
+            @SuppressWarnings("unchecked")
+            boolean nearby = !tree.query(route.getEnvelopeInternal()).isEmpty();
+            if (!nearby) {
+                continue;
+            }
+            Geometry intersection = route.intersection(axis);
+            if (intersection.isEmpty()) {
+                // Параллельное движение вдоль препятствия — не спецпроход.
+                continue;
+            }
+            for (Coordinate crossing : crossingPoints(intersection)) {
+                LineString local = localSegment(route, crossing);
+                if (local != null) {
+                    checkAngle(local, crossing, zone, warnings);
+                }
+            }
+            // E38: спецпроход — участок трассы внутри спецзоны (при фактическом
+            // пересечении); при заблокированной зоне это проход через «ворота»,
+            // т.е. прямой отрезок.
+            double[] inZone = interval(indexed, route.intersection(zone.getZone()), length);
+            if (inZone == null) {
+                for (Coordinate crossing : crossingPoints(intersection)) {
+                    double distance = indexed.project(crossing);
+                    inZone = new double[]{Math.max(0.0, distance - zone.getBufferM()),
+                            Math.min(length, distance + zone.getBufferM())};
+                    break;
+                }
+            }
+            if (inZone != null) {
+                raw.add(SpecialSpan.builder()
+                        .startDistanceM(inZone[0])
+                        .endDistanceM(inZone[1])
+                        .kSpecial(zone.getKSpecial())
+                        .build());
+            }
         }
         return merge(raw);
     }
 
-    private void collectSegmentSpans(LineString segment, double offset,
-                                     List<SpecialSpan> raw, List<String> warnings) {
+    /**
+     * E41: допустим ли отрезок по минимальному углу пересечения — все спецзоны
+     * с {@code angleMinDeg}, пересекаемые отрезком, должны иметь угол не меньше
+     * заданного. Используется как жёсткое ограничение в поиске пути.
+     */
+    public boolean angleOk(LineString segment) {
+        if (zones.isEmpty() || segment == null || segment.getNumPoints() < 2) {
+            return true;
+        }
         @SuppressWarnings("unchecked")
         List<Integer> candidates = tree.query(segment.getEnvelopeInternal());
-        LengthIndexedLine indexed = new LengthIndexedLine(segment);
-        double segmentLength = segment.getLength();
-        for (Integer candidate : candidates) {
-            SpecialZone zone = zones.get(candidate);
-            Geometry intersection = zone.getZone().intersection(segment);
+        for (Integer index : candidates) {
+            SpecialZone zone = zones.get(index);
+            if (zone.getAngleMinDeg() == null || zone.getAxis() == null) {
+                continue;
+            }
+            Geometry intersection = segment.intersection(zone.getAxis());
             if (intersection.isEmpty()) {
                 continue;
             }
-            double[] interval = interval(indexed, intersection, segmentLength);
-            if (interval == null) {
-                continue;
+            for (Coordinate crossing : crossingPoints(intersection)) {
+                double angle = crossingAngle(segment, crossing, zone.getAxis());
+                if (angle + EPS < zone.getAngleMinDeg()) {
+                    return false;
+                }
             }
-            raw.add(SpecialSpan.builder()
-                    .startDistanceM(offset + interval[0])
-                    .endDistanceM(offset + interval[1])
-                    .kSpecial(zone.getKSpecial())
-                    .build());
-            checkAngle(segment, intersection, zone, warnings);
         }
+        return true;
     }
 
-    private double[] interval(LengthIndexedLine indexed, Geometry intersection, double segmentLength) {
-        Coordinate[] coordinates = intersection.getCoordinates();
+    /** Интервал трассы (по расстоянию) внутри геометрии; {@code null}, если пусто. */
+    private double[] interval(LengthIndexedLine indexed, Geometry geometry, double length) {
+        if (geometry == null || geometry.isEmpty()) {
+            return null;
+        }
+        Coordinate[] coordinates = geometry.getCoordinates();
         if (coordinates.length == 0) {
-            return new double[]{0.0, segmentLength};
+            return null;
         }
         double min = Double.POSITIVE_INFINITY;
         double max = Double.NEGATIVE_INFINITY;
@@ -97,17 +147,43 @@ public class SpecialZoneIndex {
             max = Math.max(max, projection);
         }
         min = Math.max(0.0, min);
-        max = Math.min(segmentLength, max);
+        max = Math.min(length, max);
         return max <= min + EPS ? null : new double[]{min, max};
     }
 
-    private void checkAngle(LineString segment, Geometry intersection, SpecialZone zone,
+    /** Точечные пересечения (фактические пересечения/касания), без перекрытий. */
+    private List<Coordinate> crossingPoints(Geometry intersection) {
+        List<Coordinate> points = new ArrayList<>();
+        for (int i = 0; i < intersection.getNumGeometries(); i++) {
+            Geometry component = intersection.getGeometryN(i);
+            if (component.getDimension() == 0) {
+                for (Coordinate coordinate : component.getCoordinates()) {
+                    points.add(coordinate);
+                }
+            }
+        }
+        return points;
+    }
+
+    /** Сегмент трассы, содержащий точку пересечения (для расчёта угла). */
+    private LineString localSegment(LineString route, Coordinate crossing) {
+        Coordinate[] coordinates = route.getCoordinates();
+        Point point = route.getFactory().createPoint(crossing);
+        for (int i = 0; i < coordinates.length - 1; i++) {
+            LineString segment = route.getFactory()
+                    .createLineString(new Coordinate[]{coordinates[i], coordinates[i + 1]});
+            if (segment.distance(point) < 1e-6) {
+                return segment;
+            }
+        }
+        return null;
+    }
+
+    private void checkAngle(LineString segment, Coordinate crossing, SpecialZone zone,
                             List<String> warnings) {
-        if (zone.getAngleMinDeg() == null || zone.getAxis() == null
-                || intersection.getCoordinates().length == 0) {
+        if (zone.getAngleMinDeg() == null || zone.getAxis() == null) {
             return;
         }
-        Coordinate crossing = intersection.getCoordinates()[0];
         double angle = crossingAngle(segment, crossing, zone.getAxis());
         if (angle + EPS < zone.getAngleMinDeg()) {
             warnings.add("CROSSING_ANGLE_TOO_SHALLOW: " + zone.getRestrictionType()

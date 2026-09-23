@@ -13,13 +13,18 @@ import java.util.Map;
 import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
+import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.Point;
+import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.cost.CostModel;
 import ru.lct.heating.domain.GeometrySupport;
+import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.domain.OksConnectionPointObject;
 import ru.lct.heating.geometry.LineStringSimplifier;
@@ -28,6 +33,9 @@ import ru.lct.heating.geometry.ObstacleMask;
 import ru.lct.heating.geometry.ObstacleMaskBuilder;
 import ru.lct.heating.geometry.GridShape;
 import ru.lct.heating.geometry.HexGridShape;
+import ru.lct.heating.geometry.SpecialSpan;
+import ru.lct.heating.geometry.SpecialZone;
+import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.geometry.SquareGridShape;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.hydraulics.DiameterCatalog;
@@ -103,16 +111,27 @@ public class GridForestPlanner {
     public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
                                            ObstacleIndex obstacleIndex, List<String> warnings,
                                            Map<String, ConnectionExit> exits) {
-        return plan(dataset, graph, obstacleIndex, warnings, exits, StageTrace.disabled());
+        return plan(dataset, graph, obstacleIndex, new SpecialZoneIndex(List.of()), warnings, exits,
+                StageTrace.disabled());
+    }
+
+    public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                           ObstacleIndex obstacleIndex, List<String> warnings,
+                                           Map<String, ConnectionExit> exits, StageTrace trace) {
+        return plan(dataset, graph, obstacleIndex, new SpecialZoneIndex(List.of()), warnings, exits,
+                trace);
     }
 
     /**
+     * @param specialZones спецзоны для учёта {@code Kспец} в целевой функции
+     *                     поиска (E25-04).
      * @return до {@link #MAX_PLANS} содержательно различающихся планов — по одному
      *         на выполненный проход поиска (ADR-0037): каждый лес прогоняется
      *         дальше по конвейеру как отдельный вариант.
      */
     public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
-                                           ObstacleIndex obstacleIndex, List<String> warnings,
+                                           ObstacleIndex obstacleIndex,
+                                           SpecialZoneIndex specialZones, List<String> warnings,
                                            Map<String, ConnectionExit> exits, StageTrace trace) {
         List<Terminal> terminals = terminals(dataset, exits, warnings);
         List<String> baseUnconnected = new ArrayList<>();
@@ -128,7 +147,7 @@ public class GridForestPlanner {
         if (terminals.isEmpty()) {
             return List.of(result(List.of(), baseUnconnected));
         }
-        List<TieInCandidate> ties = tieCandidates(dataset, terminals);
+        List<TieInCandidate> ties = tieCandidates(dataset, terminals, graph);
         if (ties.isEmpty()) {
             warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
             baseUnconnected.addAll(terminalIds);
@@ -175,13 +194,22 @@ public class GridForestPlanner {
         }
         // Клетки выхода ОКС принудительно проходимы (цель — на границе буфера ОКС).
         Map<Integer, Terminal> terminalCells = new LinkedHashMap<>();
-        List<Integer> exitCells = new ArrayList<>();
+        List<Integer> openCells = new ArrayList<>();
         for (Terminal terminal : terminals) {
             int terminalCell = pass.cellAt(terminal.target.x, terminal.target.y);
             terminalCells.putIfAbsent(terminalCell, terminal);
-            exitCells.add(terminalCell);
+            openCells.add(terminalCell);
+            // E23-04: финальный коридор ОКС (target→point) принудительно проходим,
+            // иначе gridPath не может подойти к выходу (клетки в буфере ОКС закрыты).
+            List<Coordinate> tail = terminal.tail;
+            for (int i = 0; i + 1 < tail.size(); i++) {
+                addCorridorCells(openCells, pass, tail.get(i), tail.get(i + 1));
+            }
         }
-        pass = pass.withClearedCells(exitCells);
+        // E25-07: клетки источников врезки тоже открываем, иначе источник,
+        // попавший в строгую спецполосу, не может «выйти» из неё.
+        openCells.addAll(sources.keySet());
+        pass = pass.withClearedCells(openCells);
         if (trace.isEnabled()) {
             reachable = reachableCells(pass, sources.keySet());
             captureGrid(trace, pass, sources, terminalCells, reachable);
@@ -196,6 +224,8 @@ public class GridForestPlanner {
         int iterations = Math.max(1, appProperties.getForestCostIterations());
         int[] dnEstimate = new int[pass.width() * pass.height()];
         Arrays.fill(dnEstimate, selectDiameter(totalFlow));
+        // E25-04: Kспец по клеткам (max при наложении) для целевой функции.
+        double[] specialK = specialKRaster(specialZones, pass);
         List<GridBuild> builds = new ArrayList<>();
         List<GridReport.Pass> passStats = new ArrayList<>();
         double bestScore = Double.POSITIVE_INFINITY;
@@ -203,8 +233,9 @@ public class GridForestPlanner {
         GridBuild bestBuild = null;
         for (int passIndex = 0; passIndex < iterations; passIndex++) {
             long passStart = System.nanoTime();
-            GridBuild build = buildTrees(pass, sources, terminalCells, obstacleIndex, warnings,
-                    passIndex > 0, dnEstimate, terminalFlow, exitCandidates, trace, passIndex + 1);
+            GridBuild build = buildTrees(pass, dataset, sources, terminalCells, obstacleIndex,
+                    specialZones, specialK, graph, warnings, passIndex > 0, dnEstimate, terminalFlow,
+                    exitCandidates, trace, passIndex + 1);
             long passMs = elapsedMs(passStart);
             builds.add(build);
             passStats.add(GridReport.Pass.builder().index(passIndex + 1).score(build.score)
@@ -368,12 +399,62 @@ public class GridForestPlanner {
         return result;
     }
 
-    private List<TieInCandidate> tieCandidates(NetworkDataset dataset, List<Terminal> terminals) {
+    private List<TieInCandidate> tieCandidates(NetworkDataset dataset, List<Terminal> terminals,
+                                               ExistingNetworkGraph graph) {
         List<TieInCandidate> all = new ArrayList<>(candidateProvider.candidates(dataset));
         for (Terminal terminal : terminals) {
             all.addAll(candidateProvider.projections(dataset, terminal.target));
         }
-        return candidateProvider.distinct(candidateProvider.excludeNearChambers(dataset, all));
+        all = candidateProvider.distinct(candidateProvider.excludeNearChambers(dataset, all));
+        return preferExistingChambers(dataset, graph, all);
+    }
+
+    /**
+     * E26-01/FR-22: если точка врезки на участке сети находится в пределах
+     * {@code chamber-tie-in-radius-m} (10 м) от существующей камеры с запасом
+     * примыканий — врезаемся в камеру: сетевые кандидаты рядом с такой камерой
+     * исключаются (камера остаётся кандидатом сама).
+     */
+    private List<TieInCandidate> preferExistingChambers(NetworkDataset dataset,
+                                                        ExistingNetworkGraph graph,
+                                                        List<TieInCandidate> candidates) {
+        double radius = appProperties.getChamberTieInRadiusM();
+        if (!appProperties.isForestChamberTieInRules() || radius <= 0.0
+                || dataset.getHeatChambers() == null || dataset.getHeatChambers().isEmpty()) {
+            return candidates;
+        }
+        int maxDegree = appProperties.getForestMaxChamberDegree();
+        List<Coordinate> eligible = new ArrayList<>();
+        for (HeatChamberObject chamber : dataset.getHeatChambers()) {
+            if (chamber.getGeometry() == null) {
+                continue;
+            }
+            int used = graph == null ? 0 : graph.chamberAttachments(chamber.getId());
+            if (maxDegree <= 0 || used < maxDegree) {
+                eligible.add(chamber.getGeometry().getCoordinate());
+            }
+        }
+        if (eligible.isEmpty()) {
+            return candidates;
+        }
+        List<TieInCandidate> result = new ArrayList<>(candidates.size());
+        for (TieInCandidate candidate : candidates) {
+            if (!"heat_chamber".equals(candidate.getExistingObjectType())
+                    && nearAny(candidate.getCoordinate(), eligible, radius)) {
+                continue;
+            }
+            result.add(candidate);
+        }
+        return result;
+    }
+
+    private boolean nearAny(Coordinate coordinate, List<Coordinate> points, double radius) {
+        for (Coordinate point : points) {
+            if (coordinate.distance(point) <= radius) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -414,6 +495,16 @@ public class GridForestPlanner {
             }
         }
         return sources;
+    }
+
+    /** Клетки вдоль отрезка (для принудительно открытого коридора выхода). */
+    private void addCorridorCells(List<Integer> cells, ObstacleMask pass, Coordinate a, Coordinate b) {
+        double length = a.distance(b);
+        int steps = Math.max(1, (int) Math.ceil(length / Math.max(0.25, pass.cellM() * 0.5)));
+        for (int i = 0; i <= steps; i++) {
+            double t = (double) i / steps;
+            cells.add(pass.cellAt(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+        }
     }
 
     private int distinctTerminals(Map<Integer, Terminal> terminalCells) {
@@ -576,9 +667,12 @@ public class GridForestPlanner {
         return reachable;
     }
 
-    private GridBuild buildTrees(ObstacleMask pass, Map<Integer, TiePoint> sources,
+    private GridBuild buildTrees(ObstacleMask pass, NetworkDataset dataset,
+                                 Map<Integer, TiePoint> sources,
                                  Map<Integer, Terminal> terminalCells, ObstacleIndex obstacleIndex,
-                                 List<String> warnings, boolean costWeighted, int[] dnEstimate,
+                                 SpecialZoneIndex specialZones, double[] specialK,
+                                 ExistingNetworkGraph graph, List<String> warnings,
+                                 boolean costWeighted, int[] dnEstimate,
                                  Map<String, Double> terminalFlow,
                                  Map<String, List<ConnectionExit>> exitCandidates,
                                  StageTrace trace, int passNumber) {
@@ -669,11 +763,17 @@ public class GridForestPlanner {
                                     center(pass, next)) > maxTurnDeg() + ANGLE_EPS) {
                         continue;
                     }
+                    // E41: жёсткий контроль минимального угла пересечения спецзон.
+                    if (specialZones != null && !specialZones.angleOk(
+                            line(center(pass, current), center(pass, next)))) {
+                        continue;
+                    }
                     double length = pass.stepLength(step[0], step[1]);
                     double weight = length;
                     if (costWeighted) {
                         int dn = Math.max(dnEstimate[current], dnEstimate[next]);
-                        weight = costModel.score(Math.round(length * diameters.newCostPerM(dn)),
+                        double k = Math.max(specialK[current], specialK[next]);
+                        weight = costModel.score(Math.round(length * diameters.newCostPerM(dn) * k),
                                 length);
                     }
                     double candidate = store.dist(current) + weight;
@@ -792,13 +892,17 @@ public class GridForestPlanner {
                         exits.put(term.pointId, relinkExits(exitCandidates, term));
                     }
                 }
-                trees = new TerminalRelinker(costModel, diameters, appProperties)
+                trees = new TerminalRelinker(costModel, diameters, appProperties, graph)
                         .relink(trees, exits, terminalFlow, obstacleIndex, own);
             }
             long relinkMs = elapsedMs(relinkStart);
             List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineStart = System.nanoTime();
-            trees = refineTrees(trees, pass, obstacleIndex, terminalCells, own, warnings);
+            trees = refineTrees(trees, pass, obstacleIndex, specialZones, terminalCells, own, graph,
+                    warnings);
+            if (appProperties.isForestRootOptimization()) {
+                trees = optimizeRoots(trees, dataset, pass, obstacleIndex, warnings);
+            }
             long refineMs = elapsedMs(refineStart);
             List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             log.info("Grid pass {}: relink={}ms refine={}ms", passNumber, relinkMs, refineMs);
@@ -812,7 +916,7 @@ public class GridForestPlanner {
                     unconnected.add(term.pointId);
                 }
             }
-            double score = estimateScore(trees, unconnected, terminalFlow);
+            double score = estimateScore(trees, unconnected, terminalFlow, specialZones);
             return new GridBuild(trees, score, connected, rawFeatures, refinedTrees, relinkedTrees);
         } finally {
             store.close();
@@ -914,15 +1018,17 @@ public class GridForestPlanner {
     }
 
     private double estimateScore(List<ForestTree> trees, List<String> unconnected,
-                                 Map<String, Double> terminalFlow) {
+                                 Map<String, Double> terminalFlow, SpecialZoneIndex specialZones) {
         long cost = 0L;
         double length = 0.0;
+        List<String> ignoredWarnings = new ArrayList<>();
         for (ForestTree tree : trees) {
             Map<String, Integer> maxIncident = new HashMap<>();
             Map<String, Integer> outgoing = new HashMap<>();
             for (ForestEdge edge : tree.getEdges()) {
                 double edgeLength = edge.lengthM();
-                cost += costModel.segmentCost(edgeLength, edge.getDiameterMm(), 1.0, 1.0);
+                cost += costModel.segmentCost(edgeLength, edge.getDiameterMm(), 1.0,
+                        maxKSpecial(edge, specialZones, ignoredWarnings));
                 length += edgeLength;
                 maxIncident.merge(edge.getFromNodeId(), edge.getDiameterMm(), Math::max);
                 maxIncident.merge(edge.getToNodeId(), edge.getDiameterMm(), Math::max);
@@ -944,6 +1050,291 @@ public class GridForestPlanner {
             cost += costModel.unconnectedPenalty(terminalFlow.getOrDefault(id, 0.0));
         }
         return costModel.score(cost, length);
+    }
+
+    /**
+     * FR-28: жадное упрощение рёбер — удаление «лишних» внутренних вершин
+     * (ступени/зигзаги), если объединяющий отрезок не заблокирован и углы на
+     * соседях остаются допустимыми. Последняя внутренняя вершина (target вывода)
+     * сохраняется.
+     */
+    private List<ForestEdge> simplifyEdges(List<ForestEdge> edges, ObstacleIndex obstacleIndex,
+                                           SpecialZoneIndex specialZones,
+                                           Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                   ownObstacles) {
+        List<ForestEdge> result = new ArrayList<>(edges.size());
+        for (ForestEdge edge : edges) {
+            List<Coordinate> coords = new ArrayList<>(edge.getCoordinates());
+            Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = ownObstacles == null
+                    ? Set.of()
+                    : union(ownObstacles.get(edge.getFromNodeId()),
+                            ownObstacles.get(edge.getToNodeId()));
+            boolean changed = true;
+            int guard = 0;
+            while (changed && guard++ <= coords.size()) {
+                changed = false;
+                for (int i = 1; i < coords.size() - 2; i++) {
+                    // E41: не срезать вершину, если отрезок пойдёт под острым углом
+                    // к спецобъекту.
+                    if (specialZones != null
+                            && !specialZones.angleOk(line(coords.get(i - 1), coords.get(i + 1)))) {
+                        continue;
+                    }
+                    if (canDropVertex(coords, i, obstacleIndex, ignored)) {
+                        coords.remove(i);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            result.add(ForestEdge.builder().id(edge.getId()).fromNodeId(edge.getFromNodeId())
+                    .toNodeId(edge.getToNodeId()).coordinates(coords)
+                    .flowTph(edge.getFlowTph()).diameterMm(edge.getDiameterMm()).build());
+        }
+        return result;
+    }
+
+    /**
+     * E27/ADR-0047: разрешение самопересечений нового леса средствами сетки.
+     * Пересекающаяся пара рёбер (без общих узлов) — «жертва» (меньшее по длине)
+     * перепрокладывается через {@code gridPath}, остальные рёбра дерева добавляются
+     * временными препятствиями с вырезами вокруг узлов. При неудаче — диагностика
+     * {@code FOREST_CROSSING_UNRESOLVED}.
+     */
+    private List<ForestEdge> repairCrossings(List<ForestEdge> edges, Map<String, ForestNode> nodes,
+                                             ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                             Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                     ownObstacles,
+                                             List<String> warnings) {
+        List<ForestEdge> current = new ArrayList<>(edges);
+        Set<String> reported = new HashSet<>();
+        int maxPasses = Math.max(4, localPasses() * 2);
+        for (int passIndex = 0; passIndex < maxPasses; passIndex++) {
+            boolean changed = false;
+            for (int i = 0; i < current.size(); i++) {
+                for (int j = i + 1; j < current.size(); j++) {
+                    ForestEdge first = current.get(i);
+                    ForestEdge second = current.get(j);
+                    if (sharesNode(first, second) || !crosses(first, second)) {
+                        continue;
+                    }
+                    // Пробуем оба ребра «жертвой»: короткое, затем длинное.
+                    ForestEdge shorter = line(first).getLength() <= line(second).getLength()
+                            ? first : second;
+                    ForestEdge longer = shorter == first ? second : first;
+                    ForestEdge rebuilt = rebuildCrossing(shorter, current, longer, nodes, pass,
+                            obstacleIndex, ignoredFor(shorter, ownObstacles));
+                    if (rebuilt != null) {
+                        current.set(current.indexOf(shorter), rebuilt);
+                        changed = true;
+                    } else {
+                        rebuilt = rebuildCrossing(longer, current, shorter, nodes, pass, obstacleIndex,
+                                ignoredFor(longer, ownObstacles));
+                        if (rebuilt != null) {
+                            current.set(current.indexOf(longer), rebuilt);
+                            changed = true;
+                        } else if (reported.add(first.getId() + "|" + second.getId())) {
+                            warnings.add("FOREST_CROSSING_UNRESOLVED: участки " + first.getId()
+                                    + " и " + second.getId());
+                        }
+                    }
+                    break;
+                }
+                if (changed) {
+                    break;
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+        return current;
+    }
+
+    /**
+     * E44: финальный ремонт стыка вывода терминальных рёбер — если поворот на
+     * target превышает предел, перестраиваем подход, не меняя target и point.
+     */
+    private List<ForestEdge> repairExitJoints(List<ForestEdge> edges, Set<String> terminalNodes,
+                                              ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                              Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                      ownObstacles) {
+        List<ForestEdge> result = new ArrayList<>(edges.size());
+        for (ForestEdge edge : edges) {
+            boolean terminal = terminalNodes.contains(edge.getToNodeId());
+            List<Coordinate> coords = new ArrayList<>(edge.getCoordinates());
+            if (terminal && coords.size() >= 3
+                    && !turnAllowed(coords.get(coords.size() - 3), coords.get(coords.size() - 2),
+                            coords.get(coords.size() - 1))) {
+                List<Coordinate> fixed = repairExitApproach(coords, null, pass, obstacleIndex,
+                        ownObstacles, edge.getToNodeId());
+                if (fixed != null) {
+                    coords = fixed;
+                }
+            }
+            result.add(ForestEdge.builder().id(edge.getId()).fromNodeId(edge.getFromNodeId())
+                    .toNodeId(edge.getToNodeId()).coordinates(coords).flowTph(edge.getFlowTph())
+                    .diameterMm(edge.getDiameterMm()).build());
+        }
+        return result;
+    }
+
+    private Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignoredFor(ForestEdge edge,
+            Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>> ownObstacles) {
+        return ownObstacles == null ? Set.of()
+                : union(ownObstacles.get(edge.getFromNodeId()), ownObstacles.get(edge.getToNodeId()));
+    }
+
+    private ForestEdge rebuildCrossing(ForestEdge victim, List<ForestEdge> all, ForestEdge avoid,
+                                       Map<String, ForestNode> nodes, ObstacleMask pass,
+                                       ObstacleIndex obstacleIndex,
+                                       Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        ForestNode from = nodes.get(victim.getFromNodeId());
+        ForestNode to = nodes.get(victim.getToNodeId());
+        if (from == null || to == null) {
+            return null;
+        }
+        Coordinate start = from.getCoordinate();
+        Coordinate goal = to.getCoordinate();
+        List<Geometry> extras = new ArrayList<>();
+        List<Geometry> clearance = new ArrayList<>();
+        for (ForestNode node : nodes.values()) {
+            clearance.add(GeometrySupport.GEOMETRY_FACTORY.createPoint(node.getCoordinate())
+                    .buffer(3.0));
+        }
+        for (ForestEdge edge : all) {
+            if (edge.getId().equals(victim.getId())) {
+                continue;
+            }
+            Geometry buffer = line(edge).buffer(1.0);
+            for (Geometry disk : clearance) {
+                if (buffer.intersects(disk)) {
+                    buffer = buffer.difference(disk);
+                }
+            }
+            if (!buffer.isEmpty()) {
+                extras.add(buffer);
+            }
+        }
+        Coordinate incoming = incomingDirection(victim, all);
+        List<Coordinate> path = gridPath(pass, obstacleIndex.withAdditional(extras), start, incoming,
+                goal, null, ignored == null ? Set.of() : ignored, 40000);
+        if (path == null && avoid != null) {
+            // Fallback: обходим только пересекаемое ребро (без остальных).
+            List<Geometry> onlyAvoid = new ArrayList<>();
+            Geometry buffer = line(avoid).buffer(1.0);
+            for (Geometry disk : clearance) {
+                if (buffer.intersects(disk)) {
+                    buffer = buffer.difference(disk);
+                }
+            }
+            if (!buffer.isEmpty()) {
+                onlyAvoid.add(buffer);
+            }
+            path = gridPath(pass, obstacleIndex.withAdditional(onlyAvoid), start, incoming, goal, null,
+                    ignored == null ? Set.of() : ignored, 40000);
+        }
+        if (path == null || path.size() < 2) {
+            return null;
+        }
+        return ForestEdge.builder()
+                .id(victim.getId())
+                .fromNodeId(victim.getFromNodeId())
+                .toNodeId(victim.getToNodeId())
+                .coordinates(path)
+                .flowTph(victim.getFlowTph())
+                .diameterMm(victim.getDiameterMm())
+                .build();
+    }
+
+    /** Направление подхода к началу ребра по другому инцидентному ребру. */
+    private Coordinate incomingDirection(ForestEdge victim, List<ForestEdge> all) {
+        for (ForestEdge edge : all) {
+            if (edge.getId().equals(victim.getId())) {
+                continue;
+            }
+            if (edge.getToNodeId().equals(victim.getFromNodeId())
+                    && edge.getCoordinates().size() >= 2) {
+                return edge.getCoordinates().get(edge.getCoordinates().size() - 2);
+            }
+            if (edge.getFromNodeId().equals(victim.getFromNodeId())
+                    && edge.getCoordinates().size() >= 2) {
+                return edge.getCoordinates().get(1);
+            }
+        }
+        return null;
+    }
+
+    private boolean sharesNode(ForestEdge first, ForestEdge second) {
+        return first.getFromNodeId().equals(second.getFromNodeId())
+                || first.getFromNodeId().equals(second.getToNodeId())
+                || first.getToNodeId().equals(second.getFromNodeId())
+                || first.getToNodeId().equals(second.getToNodeId());
+    }
+
+    private boolean crosses(ForestEdge first, ForestEdge second) {
+        return !line(first).intersection(line(second)).isEmpty();
+    }
+
+    private LineString line(ForestEdge edge) {
+        return GeometrySupport.GEOMETRY_FACTORY.createLineString(
+                edge.getCoordinates().toArray(new Coordinate[0]));
+    }
+
+    /**
+     * E25-04: растор {@code Kспец} по клеткам (максимум при наложении зон).
+     * Клетки вне спецзон имеют коэффициент 1.0.
+     */
+    private double[] specialKRaster(SpecialZoneIndex specialZones, ObstacleMask pass) {
+        int width = pass.width();
+        int height = pass.height();
+        double[] k = new double[width * height];
+        Arrays.fill(k, 1.0);
+        if (specialZones == null || specialZones.size() == 0) {
+            return k;
+        }
+        double cell = pass.cellM();
+        for (SpecialZone zone : specialZones.zones()) {
+            Geometry geometry = zone.getZone();
+            if (geometry == null || geometry.isEmpty()) {
+                continue;
+            }
+            Envelope envelope = geometry.getEnvelopeInternal();
+            int c0 = Math.max(0, (int) Math.floor((envelope.getMinX() - pass.originX()) / cell));
+            int c1 = Math.min(width - 1, (int) Math.floor((envelope.getMaxX() - pass.originX()) / cell));
+            int r0 = Math.max(0, (int) Math.floor((envelope.getMinY() - pass.originY()) / cell));
+            int r1 = Math.min(height - 1, (int) Math.floor((envelope.getMaxY() - pass.originY()) / cell));
+            PreparedGeometry prepared = PreparedGeometryFactory.prepare(geometry);
+            for (int row = r0; row <= r1; row++) {
+                for (int col = c0; col <= c1; col++) {
+                    Point point = GeometrySupport.GEOMETRY_FACTORY.createPoint(
+                            new Coordinate(pass.centerX(col, row), pass.centerY(col, row)));
+                    if (prepared.covers(point)) {
+                        int index = row * width + col;
+                        if (zone.getKSpecial() > k[index]) {
+                            k[index] = zone.getKSpecial();
+                        }
+                    }
+                }
+            }
+        }
+        return k;
+    }
+
+    /** E25-04: максимальный {@code Kспец} зон, накрывающих ребро (иначе 1.0). */
+    private double maxKSpecial(ForestEdge edge, SpecialZoneIndex specialZones,
+                               List<String> ignoredWarnings) {
+        if (specialZones == null || specialZones.size() == 0
+                || edge.getCoordinates().size() < 2) {
+            return 1.0;
+        }
+        LineString line = GeometrySupport.GEOMETRY_FACTORY.createLineString(
+                edge.getCoordinates().toArray(new Coordinate[0]));
+        double k = 1.0;
+        for (SpecialSpan span : specialZones.spans(line, ignoredWarnings)) {
+            k = Math.max(k, span.getKSpecial());
+        }
+        return k;
     }
 
     private boolean isTopology(int cell, Map<Integer, Integer> parent,
@@ -1061,11 +1452,11 @@ public class GridForestPlanner {
      * Предельная длина проверяется здесь же, по уже уточнённым путям.
      */
     private List<ForestTree> refineTrees(List<ForestTree> trees, ObstacleMask pass,
-                                         ObstacleIndex obstacleIndex,
+                                         ObstacleIndex obstacleIndex, SpecialZoneIndex specialZones,
                                          Map<Integer, Terminal> terminalCells,
                                          Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
                                                  ownObstacles,
-                                         List<String> warnings) {
+                                         ExistingNetworkGraph graph, List<String> warnings) {
         Map<String, Terminal> terminalsById = new HashMap<>();
         for (Terminal terminal : new LinkedHashSet<>(terminalCells.values())) {
             terminalsById.put(terminal.pointId, terminal);
@@ -1094,11 +1485,11 @@ public class GridForestPlanner {
                     Coordinate point = coordinates.get(coordinates.size() - 1);
                     List<Coordinate> trunk = new ArrayList<>(
                             coordinates.subList(0, coordinates.size() - 1));
-                    refined = new ArrayList<>(refine(trunk, obstacleIndex, startPrevious,
+                    refined = new ArrayList<>(refine(trunk, obstacleIndex, specialZones, startPrevious,
                             endNext, true));
                     refined.add(point);
                 } else {
-                    refined = new ArrayList<>(refine(coordinates, obstacleIndex, startPrevious,
+                    refined = new ArrayList<>(refine(coordinates, obstacleIndex, specialZones, startPrevious,
                             endNext, isTerminal));
                 }
                 if (isTerminal && exitGridDogleg()) {
@@ -1110,15 +1501,9 @@ public class GridForestPlanner {
                     List<Coordinate> fixed = repairExitApproach(refined, startPrevious, pass,
                             obstacleIndex, ownObstacles, edge.getToNodeId());
                     if (fixed != null) {
-                        // После grid-перетрассировки снова сглаживаем (string pulling),
-                        // иначе остаётся ступенчатая ломаная из клеток.
-                        Coordinate exitPoint = fixed.get(fixed.size() - 1);
-                        List<Coordinate> trunkAgain = new ArrayList<>(
-                                fixed.subList(0, fixed.size() - 1));
-                        List<Coordinate> smoothed = new ArrayList<>(refine(trunkAgain,
-                                obstacleIndex, startPrevious, endNext, true));
-                        smoothed.add(exitPoint);
-                        refined = smoothed;
+                        // E43/E44: repairExitApproach уже turn-aware; повторный
+                        // refine удалял бы вставленную «пятку» и возвращал излом.
+                        refined = fixed;
                     }
                 }
                 if (!turnsWithinLimit(refined, refined.size() - 2 - (isTerminal ? 2 : 0))) {
@@ -1136,15 +1521,283 @@ public class GridForestPlanner {
             // ADR-0043: refine — владелец углов; чиним повороты во всех узлах
             // (включая пары «ветка↔ветка»), relink углы не проверяет.
             edges = repairNodeTurns(edges, nodes, pass, obstacleIndex, ownObstacles, warnings);
+            // E23-04: недопустимые повороты не только в узлах, но и во внутренних
+            // вершинах рёбер (после relink стыки геометрий дают изломы/шипы).
+            Set<String> terminalNodes = new HashSet<>(terminalsById.keySet());
+            edges = repairInteriorTurns(edges, pass, obstacleIndex, ownObstacles, terminalNodes,
+                    warnings);
+            // FR-28: убрать ступенчатые фрагменты (лишние вершины), не создавая
+            // нарушений углов и не задевая запреты.
+            edges = simplifyEdges(edges, obstacleIndex, specialZones, ownObstacles);
+            // E27/ADR-0047: пересечения рёбер вне общих узлов (FR-29) —
+            // перепроложение «жертвы» средствами сетки.
+            edges = repairCrossings(edges, nodes, pass, obstacleIndex, ownObstacles, warnings);
+            // E44: финальный ремонт стыка вывода (после правок ствола) — target
+            // сохраняется, подход перестраивается turn-aware.
+            edges = repairExitJoints(edges, new HashSet<>(terminalsById.keySet()), pass,
+                    obstacleIndex, ownObstacles);
             try {
                 edges = maxLengthEnforcer.enforce(edges, tree.getTieInNodeId());
             } catch (IllegalArgumentException noDiameter) {
                 warnings.add("FOREST_MAX_LENGTH_UNRESOLVED: " + noDiameter.getMessage());
             }
+            warnChamberDegree(edges, nodes, graph, warnings);
             result.add(ForestTree.builder().tieInNodeId(tree.getTieInNodeId())
                     .nodes(nodes).edges(edges).build());
         }
+        // E27-05: меж-древесные пересечения (резолвер внутри дерева их не видит).
+        result = repairGlobalCrossings(result, pass, obstacleIndex, warnings);
         return result;
+    }
+
+    /**
+     * E35: оптимизация точки врезки корня (только для новых камер) — перпендикулярная
+     * проекция на существующую сеть, если корневое ребро становится короче и при
+     * этом не нарушаются запреты, углы на ветвлении и самопересечения.
+     */
+    private List<ForestTree> optimizeRoots(List<ForestTree> trees, NetworkDataset dataset,
+                                           ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                           List<String> warnings) {
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            ForestNode root = tree.getNodes().get(tree.getTieInNodeId());
+            if (root == null || root.isExisting()) {
+                result.add(tree);
+                continue;
+            }
+            List<ForestEdge> rootEdges = new ArrayList<>();
+            for (ForestEdge edge : tree.getEdges()) {
+                if (edge.getFromNodeId().equals(root.getId())) {
+                    rootEdges.add(edge);
+                }
+            }
+            if (rootEdges.size() != 1) {
+                result.add(tree);
+                continue;
+            }
+            ForestEdge rootEdge = rootEdges.get(0);
+            ForestNode branch = tree.getNodes().get(rootEdge.getToNodeId());
+            List<Coordinate> edgeCoords = rootEdge.getCoordinates();
+            if (branch == null || edgeCoords.size() < 2) {
+                result.add(tree);
+                continue;
+            }
+            boolean terminal = branch.getType() == NodeType.CONNECTION_POINT;
+            // E45: у терминального ребра двигаем только корневую (первую) вершину,
+            // сохраняя выход и остальную геометрию.
+            Coordinate anchor = terminal ? edgeCoords.get(1) : branch.getCoordinate();
+            double currentLen = root.getCoordinate().distance(anchor);
+            Coordinate best = null;
+            double bestLen = currentLen;
+            List<Coordinate> bestConnector = null;
+            for (TieInCandidate candidate : candidateProvider.projections(dataset, anchor)) {
+                Coordinate q = candidate.getCoordinate();
+                double len = q.distance(anchor);
+                if (len >= bestLen - 0.5) {
+                    continue;
+                }
+                boolean blocked = obstacleIndex != null
+                        && obstacleIndex.isInteriorBlocked(line(q, anchor));
+                if (!blocked && terminal && edgeCoords.size() >= 3
+                        && !turnAllowed(q, anchor, edgeCoords.get(2))) {
+                    blocked = true;
+                }
+                if (!blocked && !terminal && !rootConnectorTurnsOk(q, branch, tree)) {
+                    blocked = true;
+                }
+                if (!blocked && rootConnectorCrosses(q, anchor, tree, rootEdge)) {
+                    blocked = true;
+                }
+                List<Coordinate> connector = null;
+                if (blocked && terminal) {
+                    // Fallback: коннектор по сетке в обход запретов.
+                    Coordinate nextAfter = edgeCoords.size() >= 3 ? edgeCoords.get(2) : null;
+                    List<Coordinate> path = gridPath(pass, obstacleIndex, q, null, anchor, nextAfter,
+                            Set.of(), 20000);
+                    if (path != null && path.size() >= 2) {
+                        double pathLen = 0.0;
+                        for (int k = 0; k + 1 < path.size(); k++) {
+                            pathLen += path.get(k).distance(path.get(k + 1));
+                        }
+                        if (pathLen < bestLen - 0.5 && !rootConnectorCrosses(q, anchor, tree,
+                                rootEdge)) {
+                            connector = path;
+                            len = pathLen;
+                        }
+                    }
+                }
+                if (blocked && connector == null) {
+                    continue;
+                }
+                if (len < bestLen - 0.5) {
+                    best = q;
+                    bestLen = len;
+                    bestConnector = connector;
+                }
+            }
+            if (best == null) {
+                result.add(tree);
+                continue;
+            }
+            Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
+            nodes.put(root.getId(), root.toBuilder().coordinate(best).build());
+            List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
+            for (int i = 0; i < edges.size(); i++) {
+                ForestEdge edge = edges.get(i);
+                if (edge.getId().equals(rootEdge.getId())) {
+                    List<Coordinate> coordinates;
+                    if (terminal && bestConnector != null) {
+                        coordinates = new ArrayList<>(bestConnector);
+                        if (edgeCoords.size() > 2) {
+                            coordinates.addAll(edgeCoords.subList(2, edgeCoords.size()));
+                        }
+                    } else if (terminal) {
+                        coordinates = new ArrayList<>(edgeCoords);
+                        coordinates.set(0, new Coordinate(best));
+                    } else {
+                        coordinates = List.of(new Coordinate(best),
+                                new Coordinate(branch.getCoordinate()));
+                    }
+                    edges.set(i, ForestEdge.builder().id(edge.getId())
+                            .fromNodeId(root.getId()).toNodeId(branch.getId())
+                            .coordinates(coordinates)
+                            .flowTph(edge.getFlowTph()).diameterMm(edge.getDiameterMm()).build());
+                }
+            }
+            result.add(ForestTree.builder().tieInNodeId(tree.getTieInNodeId()).nodes(nodes)
+                    .edges(edges).build());
+            warnings.add("FOREST_ROOT_OPTIMIZED: " + root.getId() + " короче на "
+                    + Math.round(currentLen - bestLen) + " м");
+        }
+        return result;
+    }
+
+    private boolean rootConnectorTurnsOk(Coordinate q, ForestNode branch, ForestTree tree) {
+        for (ForestEdge edge : tree.getEdges()) {
+            if (!edge.getFromNodeId().equals(branch.getId()) || edge.getCoordinates().size() < 2) {
+                continue;
+            }
+            if (!turnAllowed(q, branch.getCoordinate(), edge.getCoordinates().get(1))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean rootConnectorCrosses(Coordinate q, Coordinate anchor, ForestTree tree,
+                                         ForestEdge rootEdge) {
+        LineString connector = GeometrySupport.GEOMETRY_FACTORY.createLineString(
+                new Coordinate[]{q, anchor});
+        for (ForestEdge edge : tree.getEdges()) {
+            if (edge.getId().equals(rootEdge.getId())) {
+                continue;
+            }
+            List<Coordinate> coords = edge.getCoordinates();
+            if ((!coords.isEmpty() && coords.get(0).distance(anchor) < 1e-6)
+                    || (!coords.isEmpty()
+                            && coords.get(coords.size() - 1).distance(anchor) < 1e-6)) {
+                continue;
+            }
+            if (!connector.intersection(line(edge)).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * E27-05: разрешение пересечений рёбер разных деревьев (FR-29). Пересекающаяся
+     * пара (без общих узлов) — «жертва» (меньшее по длине) перепрокладывается через
+     * {@code gridPath}, где препятствиями служат рёбра **всех** деревьев, а вокруг
+     * всех узлов делаются вырезы (чтобы сохранить стыки).
+     */
+    private List<ForestTree> repairGlobalCrossings(List<ForestTree> trees, ObstacleMask pass,
+                                                   ObstacleIndex obstacleIndex,
+                                                   List<String> warnings) {
+        if (trees.size() < 2) {
+            return trees;
+        }
+        List<List<ForestEdge>> treeEdges = new ArrayList<>();
+        Map<String, ForestNode> allNodes = new LinkedHashMap<>();
+        for (ForestTree tree : trees) {
+            treeEdges.add(new ArrayList<>(tree.getEdges()));
+            allNodes.putAll(tree.getNodes());
+        }
+        List<ForestEdge> allEdges = new ArrayList<>();
+        for (List<ForestEdge> edges : treeEdges) {
+            allEdges.addAll(edges);
+        }
+        Set<String> reported = new HashSet<>();
+        int maxPasses = Math.max(4, localPasses() * 2);
+        for (int passIndex = 0; passIndex < maxPasses; passIndex++) {
+            boolean changed = false;
+            for (int a = 0; a < treeEdges.size() && !changed; a++) {
+                for (int b = a + 1; b < treeEdges.size() && !changed; b++) {
+                    for (ForestEdge first : treeEdges.get(a)) {
+                        for (ForestEdge second : treeEdges.get(b)) {
+                            if (sharesNode(first, second) || !crosses(first, second)) {
+                                continue;
+                            }
+                            int treeIndex = line(first).getLength() <= line(second).getLength() ? a : b;
+                            ForestEdge victim = treeIndex == a ? first : second;
+                            ForestEdge counterpart = victim == first ? second : first;
+                            ForestEdge rebuilt = rebuildCrossing(victim, allEdges, counterpart,
+                                    allNodes, pass, obstacleIndex, Set.of());
+                            if (rebuilt != null) {
+                                List<ForestEdge> edges = treeEdges.get(treeIndex);
+                                edges.set(edges.indexOf(victim), rebuilt);
+                                allEdges.remove(victim);
+                                allEdges.add(rebuilt);
+                                changed = true;
+                                break;
+                            }
+                            if (reported.add(first.getId() + "|" + second.getId())) {
+                                warnings.add("FOREST_CROSSING_UNRESOLVED: участки " + first.getId()
+                                        + " и " + second.getId());
+                            }
+                        }
+                    }
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (int i = 0; i < trees.size(); i++) {
+            result.add(ForestTree.builder().tieInNodeId(trees.get(i).getTieInNodeId())
+                    .nodes(trees.get(i).getNodes()).edges(treeEdges.get(i)).build());
+        }
+        return result;
+    }
+
+    /**
+     * E26-02/FR-26: диагностика превышения степени камеры с учётом существующих
+     * примыканий (проходная линия = 2). Существующая камера без смены Ду занимает
+     * два примыкания.
+     */
+    private void warnChamberDegree(List<ForestEdge> edges, Map<String, ForestNode> nodes,
+                                   ExistingNetworkGraph graph, List<String> warnings) {
+        int max = appProperties.getForestMaxChamberDegree();
+        if (max <= 0 || graph == null) {
+            return;
+        }
+        Map<String, Integer> degree = new HashMap<>();
+        for (ForestEdge edge : edges) {
+            degree.merge(edge.getFromNodeId(), 1, Integer::sum);
+            degree.merge(edge.getToNodeId(), 1, Integer::sum);
+        }
+        for (Map.Entry<String, Integer> entry : degree.entrySet()) {
+            ForestNode node = nodes.get(entry.getKey());
+            if (node == null || !node.isExisting()) {
+                continue;
+            }
+            int total = entry.getValue() + graph.chamberAttachments(entry.getKey());
+            if (total > max) {
+                warnings.add("FOREST_CHAMBER_DEGREE_EXCEEDED: узел " + entry.getKey()
+                        + ", примыканий " + total + " > " + max);
+            }
+        }
     }
 
     /** Ориентация рёбер дерева от корня: узел → родительский узел. */
@@ -1280,6 +1933,227 @@ public class GridForestPlanner {
         return incident;
     }
 
+    /**
+     * E23-04: устранить недопустимые повороты во внутренних вершинах рёбер
+     * (после relink/refine): сначала удаляем вершину-шип, затем вставляем
+     * промежуточную вершину по сетке, разбивая поворот на два допустимых.
+     */
+    private List<ForestEdge> repairInteriorTurns(List<ForestEdge> edges, ObstacleMask pass,
+                                                 ObstacleIndex obstacleIndex,
+                                                 Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                         ownObstacles,
+                                                 Set<String> terminalNodes, List<String> warnings) {
+        List<MutableEdge> work = new ArrayList<>();
+        for (ForestEdge edge : edges) {
+            work.add(new MutableEdge(edge.getId(), edge.getFromNodeId(), edge.getToNodeId(),
+                    new ArrayList<>(edge.getCoordinates())));
+        }
+        int passes = Math.max(4, localPasses() * 2);
+        for (int p = 0; p < passes; p++) {
+            boolean changed = false;
+            for (MutableEdge edge : work) {
+                boolean terminal = terminalNodes != null
+                        && (terminalNodes.contains(edge.to) || terminalNodes.contains(edge.from));
+                if (repairEdgeTurns(edge, pass, obstacleIndex, ownObstacles, terminal)) {
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+        List<ForestEdge> result = new ArrayList<>();
+        for (int i = 0; i < work.size(); i++) {
+            MutableEdge edge = work.get(i);
+            result.add(ForestEdge.builder().id(edge.id).fromNodeId(edge.from)
+                    .toNodeId(edge.to).coordinates(edge.coords)
+                    .flowTph(edges.get(i).getFlowTph()).diameterMm(edges.get(i).getDiameterMm())
+                    .build());
+        }
+        return result;
+    }
+
+    private boolean repairEdgeTurns(MutableEdge edge, ObstacleMask pass,
+                                    ObstacleIndex obstacleIndex,
+                                    Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                            ownObstacles,
+                                    boolean terminal) {
+        List<Coordinate> coords = edge.coords;
+        if (coords.size() < 3) {
+            return false;
+        }
+        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = ownObstacles == null
+                ? Set.of()
+                : union(ownObstacles.get(edge.from), ownObstacles.get(edge.to));
+        if (removeMicroVertices(edge, pass, obstacleIndex, ignored, terminal)) {
+            return true;
+        }
+        // i идёт до предпоследней (исключая point). Для терминального ребра
+        // последняя внутренняя вершина (target) не удаляется, но может получать
+        // вставленную перед ней вершину (E43/E44).
+        int lastInterior = terminal ? coords.size() - 2 : -1;
+        for (int i = 1; i < coords.size() - 1; i++) {
+            if (turnAllowed(coords.get(i - 1), coords.get(i), coords.get(i + 1))) {
+                continue;
+            }
+            if (i != lastInterior && canDropVertex(coords, i, obstacleIndex, ignored)) {
+                coords.remove(i);
+                return true;
+            }
+            Coordinate via = gridViaInterior(coords, i, pass, obstacleIndex, ignored);
+            if (via != null) {
+                coords.add(i, via);
+                return true;
+            }
+            // E23-04 (продолжение): перепроложить окно вокруг вершины по сетке.
+            List<Coordinate> window = rerouteInteriorWindow(coords, i, pass, obstacleIndex, ignored);
+            if (window != null) {
+                coords.clear();
+                coords.addAll(window);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Перепроложить окно {@code [i-2, i+2]} через {@code gridPath}: сохраняет
+     * направления на входе/выходе, устраняя недопустимый поворот в стеснении
+     * (когда удаление вершины и вставка соседа невозможны).
+     */
+    private List<Coordinate> rerouteInteriorWindow(List<Coordinate> coords, int i, ObstacleMask pass,
+                                                   ObstacleIndex obstacleIndex,
+                                                   Set<org.locationtech.jts.geom.prep.PreparedGeometry>
+                                                           ignored) {
+        if (i < 2 || i + 3 > coords.size()) {
+            return null;
+        }
+        Coordinate start = coords.get(i - 2);
+        Coordinate goal = coords.get(i + 2);
+        Coordinate incoming = i - 3 >= 0
+                ? new Coordinate(start.x - coords.get(i - 3).x, start.y - coords.get(i - 3).y)
+                : null;
+        Coordinate nextAfter = i + 3 < coords.size() ? coords.get(i + 3) : null;
+        List<Coordinate> path = gridPath(pass, obstacleIndex, start, incoming, goal, nextAfter,
+                ignored);
+        if (path == null || path.size() < 2) {
+            return null;
+        }
+        List<Coordinate> rebuilt = new ArrayList<>(coords.subList(0, i - 2));
+        rebuilt.addAll(path);
+        if (i + 3 < coords.size()) {
+            rebuilt.addAll(coords.subList(i + 3, coords.size()));
+        }
+        return turnsWithinLimit(rebuilt, rebuilt.size() - 2) ? rebuilt : null;
+    }
+
+    /**
+     * Удаляет внутренние вершины, образующие микро-отрезки (артефакты grid-
+     * захода), если объединяющий отрезок не пересекает запрет. Устраняет
+     * «шипы» и почти развороты (FR-34).
+     */
+    private boolean removeMicroVertices(MutableEdge edge, ObstacleMask pass,
+                                        ObstacleIndex obstacleIndex,
+                                        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored,
+                                        boolean terminal) {
+        double microLen = Math.max(0.1, pass.cellM() * 0.5);
+        List<Coordinate> coords = edge.coords;
+        int limit = terminal ? coords.size() - 2 : coords.size() - 1;
+        for (int i = 1; i < limit; i++) {
+            double toPrevious = coords.get(i).distance(coords.get(i - 1));
+            double toNext = coords.get(i).distance(coords.get(i + 1));
+            if (Math.min(toPrevious, toNext) >= microLen) {
+                continue;
+            }
+            // Удаляем микро-вершину, если объединённый отрезок не заблокирован;
+            // углы на соседях чинит последующий проход ремонта поворотов.
+            if (canMergeVertex(coords, i, obstacleIndex, ignored)) {
+                coords.remove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean canMergeVertex(List<Coordinate> coords, int i, ObstacleIndex obstacleIndex,
+                                   Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        Coordinate previous = coords.get(i - 1);
+        Coordinate next = coords.get(i + 1);
+        return previous.equals2D(next) || obstacleIndex == null
+                || !obstacleIndex.isInteriorBlocked(line(previous, next), ignored);
+    }
+
+    private boolean canDropVertex(List<Coordinate> coords, int i, ObstacleIndex obstacleIndex,
+                                  Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        Coordinate previous = coords.get(i - 1);
+        Coordinate next = coords.get(i + 1);
+        if (!previous.equals2D(next) && obstacleIndex != null
+                && obstacleIndex.isInteriorBlocked(line(previous, next), ignored)) {
+            return false;
+        }
+        if (i - 2 >= 0 && !turnAllowed(coords.get(i - 2), previous, next)) {
+            return false;
+        }
+        return i + 2 >= coords.size() || turnAllowed(previous, next, coords.get(i + 2));
+    }
+
+    private Coordinate gridViaInterior(List<Coordinate> coords, int i, ObstacleMask pass,
+                                       ObstacleIndex obstacleIndex,
+                                       Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        Coordinate before = coords.get(i - 1);
+        Coordinate vertex = coords.get(i);
+        Coordinate after = coords.get(i + 1);
+        Coordinate beforeBefore = i - 2 >= 0 ? coords.get(i - 2) : null;
+        Coordinate afterAfter = i + 2 < coords.size() ? coords.get(i + 2) : null;
+        Coordinate best = null;
+        double bestExtra = Double.POSITIVE_INFINITY;
+        for (Coordinate base : new Coordinate[]{before, vertex}) {
+            int baseCell = pass.cellAt(base.x, base.y);
+            int baseCol = baseCell % pass.width();
+            int baseRow = baseCell / pass.width();
+            for (int[] step : pass.neighbors(baseCol, baseRow)) {
+                int nc = baseCol + step[0];
+                int nr = baseRow + step[1];
+                if (nc < 0 || nr < 0 || nc >= pass.width() || nr >= pass.height()) {
+                    continue;
+                }
+                Coordinate q = new Coordinate(pass.centerX(nc, nr), pass.centerY(nc, nr));
+                if (q.equals2D(before) || q.equals2D(vertex) || q.equals2D(after)) {
+                    continue;
+                }
+                if (!turnAllowed(beforeBefore, before, q)
+                        || !turnAllowed(before, q, vertex)
+                        || !turnAllowed(q, vertex, after)
+                        || !turnAllowed(vertex, after, afterAfter)) {
+                    continue;
+                }
+                if (obstacleIndex != null && (obstacleIndex.isInteriorBlocked(line(before, q), ignored)
+                        || obstacleIndex.isInteriorBlocked(line(q, vertex), ignored))) {
+                    continue;
+                }
+                double extra = q.distance(before) + q.distance(vertex) - before.distance(vertex);
+                if (extra < bestExtra) {
+                    bestExtra = extra;
+                    best = q;
+                }
+            }
+        }
+        return best;
+    }
+
+    private Set<org.locationtech.jts.geom.prep.PreparedGeometry> union(
+            Set<org.locationtech.jts.geom.prep.PreparedGeometry> first,
+            Set<org.locationtech.jts.geom.prep.PreparedGeometry> second) {
+        Set<org.locationtech.jts.geom.prep.PreparedGeometry> union = new HashSet<>();
+        if (first != null) {
+            union.addAll(first);
+        }
+        if (second != null) {
+            union.addAll(second);
+        }
+        return union;
+    }
+
     private Coordinate neighborAt(MutableEdge edge, String node) {
         if (edge.from.equals(node) && edge.coords.size() >= 2) {
             return edge.coords.get(1);
@@ -1351,21 +2225,73 @@ public class GridForestPlanner {
         int n = coords.size();
         Coordinate point = coords.get(n - 1);
         Coordinate target = coords.get(n - 2);
-        Coordinate prev = coords.get(n - 3);
-        Coordinate beforePrev = n >= 4 ? coords.get(n - 4) : startPrevious;
-        Coordinate incoming = beforePrev == null ? null
-                : new Coordinate(prev.x - beforePrev.x, prev.y - beforePrev.y);
         Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored =
                 ownObstacles == null ? Set.of()
                         : ownObstacles.getOrDefault(terminalId, Set.of());
-        List<Coordinate> path = gridPath(pass, obstacleIndex, prev, incoming, target, point, ignored);
-        if (path == null || path.size() < 2) {
+        // E23-04: если локальный ремонт у target невозможен, перепрокладываем
+        // подход от более дальней вершины (до 5 назад), чтобы найти допустимый
+        // заход на target (углы ≤90° на стыке target→point).
+        int earliest = Math.max(1, n - 10);
+        for (int s = n - 3; s >= earliest; s--) {
+            Coordinate start = coords.get(s);
+            Coordinate beforeStart = s - 1 >= 0 ? coords.get(s - 1) : startPrevious;
+            Coordinate incoming = beforeStart == null ? null
+                    : new Coordinate(start.x - beforeStart.x, start.y - beforeStart.y);
+            List<Coordinate> path = gridPath(pass, obstacleIndex, start, incoming, target, point,
+                    ignored);
+            if (path != null && path.size() >= 2) {
+                List<Coordinate> rebuilt = new ArrayList<>(coords.subList(0, s));
+                rebuilt.addAll(path);
+                rebuilt.add(point);
+                if (turnsWithinLimit(rebuilt, rebuilt.size() - 3)) {
+                    return rebuilt;
+                }
+            }
+            // Непрерывный «доводчик»: точка на продолжении вывода за target, при
+            // которой стык q→target→point прямой, а подход prev→q допустим.
+            Coordinate via = continuousExitVia(coords, s, target, point, obstacleIndex, ignored);
+            if (via != null) {
+                List<Coordinate> rebuilt = new ArrayList<>(coords.subList(0, s));
+                rebuilt.add(via);
+                rebuilt.add(target);
+                rebuilt.add(point);
+                if (turnsWithinLimit(rebuilt, rebuilt.size() - 3)) {
+                    return rebuilt;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Coordinate continuousExitVia(List<Coordinate> coords, int s, Coordinate target,
+                                         Coordinate point, ObstacleIndex obstacleIndex,
+                                         Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        double dx = target.x - point.x;
+        double dy = target.y - point.y;
+        double norm = Math.hypot(dx, dy);
+        if (norm < EPS) {
             return null;
         }
-        List<Coordinate> rebuilt = new ArrayList<>(coords.subList(0, n - 3));
-        rebuilt.addAll(path);
-        rebuilt.add(point);
-        return rebuilt;
+        // rebuilt = coords[0..s-1] + via + target + point, предшественник — coords[s-1].
+        int prevIndex = s - 1;
+        if (prevIndex < 0) {
+            return null;
+        }
+        Coordinate prev = coords.get(prevIndex);
+        Coordinate before = prevIndex - 1 >= 0 ? coords.get(prevIndex - 1) : null;
+        for (double distance : new double[]{1.0, 2.0, 3.0, 5.0}) {
+            Coordinate via = new Coordinate(target.x + dx / norm * distance,
+                    target.y + dy / norm * distance);
+            if (obstacleIndex != null && (obstacleIndex.isInteriorBlocked(line(prev, via), ignored)
+                    || obstacleIndex.isInteriorBlocked(line(via, target), ignored))) {
+                continue;
+            }
+            if (!turnAllowed(before, prev, via) || !turnAllowed(prev, via, target)) {
+                continue;
+            }
+            return via;
+        }
+        return null;
     }
 
     /** Допустимо ли завершение в цели: не тривиальный старт и стык ≤90°. */
@@ -1402,6 +2328,14 @@ public class GridForestPlanner {
                                       Coordinate start, Coordinate incoming, Coordinate goal,
                                       Coordinate nextAfter,
                                       Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        return gridPath(pass, obstacleIndex, start, incoming, goal, nextAfter, ignored, 8000);
+    }
+
+    private List<Coordinate> gridPath(ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                      Coordinate start, Coordinate incoming, Coordinate goal,
+                                      Coordinate nextAfter,
+                                      Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored,
+                                      int maxExpansions) {
         int width = pass.width();
         int startCell = pass.cellAt(start.x, start.y);
         int goalCell = pass.cellAt(goal.x, goal.y);
@@ -1414,7 +2348,7 @@ public class GridForestPlanner {
         queue.add(new Node(startKey, 0.0));
         long goalKey = -1;
         int expansions = 0;
-        while (!queue.isEmpty() && expansions < 8000) {
+        while (!queue.isEmpty() && expansions < maxExpansions) {
             Node node = queue.poll();
             if (node.dist > dist.getOrDefault(node.key, Double.POSITIVE_INFINITY) + ANGLE_EPS) {
                 continue;
@@ -1540,15 +2474,20 @@ public class GridForestPlanner {
      * финального вывода, чтобы угол на стыке тоже был ≤ {@code maxTurnDeg}.
      */
     private List<Coordinate> refine(List<Coordinate> coordinates, ObstacleIndex index,
-                                    Coordinate startPrevious, Coordinate endNext,
-                                    boolean terminal) {
+                                    SpecialZoneIndex specialZones, Coordinate startPrevious,
+                                    Coordinate endNext, boolean terminal) {
         List<Coordinate> unique;
-        if (endNext != null && coordinates.size() >= 2) {
-            // Финальный вывод (target) не упрощаем, чтобы не потерять направление.
+        if (endNext != null && coordinates.size() >= 3) {
+            // E43: канонический выход (target, n-2) и точка (n-1) — обязательные
+            // вершины; упрощаем только ствол [0..n-3], чтобы не потерять выход.
+            Coordinate target = coordinates.get(coordinates.size() - 2);
             Coordinate end = coordinates.get(coordinates.size() - 1);
             unique = simplifier.simplify(
-                    new ArrayList<>(coordinates.subList(0, coordinates.size() - 1)));
+                    new ArrayList<>(coordinates.subList(0, coordinates.size() - 2)));
+            unique.add(target);
             unique.add(end);
+        } else if (endNext != null) {
+            unique = new ArrayList<>(coordinates);
         } else {
             unique = simplifier.simplify(coordinates);
         }
@@ -1564,6 +2503,10 @@ public class GridForestPlanner {
                 Coordinate vertex = unique.get(current);
                 Coordinate target = unique.get(candidate);
                 if (index != null && index.isInteriorBlocked(line(vertex, target))) {
+                    continue;
+                }
+                // E41: не срезать углом через спецзону (угол ≥45°).
+                if (specialZones != null && !specialZones.angleOk(line(vertex, target))) {
                     continue;
                 }
                 Coordinate previous = result.size() >= 2

@@ -43,6 +43,7 @@ public class SpecialZoneIndexBuilder {
                     .restrictionType(restriction.getRestrictionType())
                     .kSpecial(rule.getKSpecial())
                     .angleMinDeg(rule.getAngleMinDeg())
+                    .bufferM(buffer)
                     .axis(axisBuilder.axis(restriction.getGeometry()))
                     .zone(restriction.getGeometry().buffer(buffer))
                     .build());

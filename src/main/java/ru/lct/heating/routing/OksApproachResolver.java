@@ -271,6 +271,16 @@ public class OksApproachResolver {
             Coordinate next = nextBufferCrossing(ray, p, target, prohibited);
             if (next != null && target.distance(next) < maxPairWidth) {
                 target = new Coordinate((target.x + next.x) / 2.0, (target.y + next.y) / 2.0);
+            } else {
+                // E36: широкий зазор или препятствий впереди нет — сдвигаем выход
+                // вдоль луча на extra, давая маршруту место (если хвост допустим).
+                double extra = appProperties.getOksExitExtraBufferM();
+                if (extra > 0) {
+                    Coordinate pushed = pushAlongRay(p, target, extra);
+                    if (tailAllowed(p, pushed, own, prohibited)) {
+                        target = pushed;
+                    }
+                }
             }
             if (!tailAllowed(p, target, own, prohibited)) {
                 continue;
@@ -386,6 +396,17 @@ public class OksApproachResolver {
     }
 
     /** Хвост не должен нарушать буферы прочих ограничений (кроме своего ОКС). */
+    /** E36: сдвиг точки вдоль луча p→target ещё на {@code extra} метров. */
+    private Coordinate pushAlongRay(Coordinate p, Coordinate target, double extra) {
+        double dx = target.x - p.x;
+        double dy = target.y - p.y;
+        double norm = Math.hypot(dx, dy);
+        if (norm < EPS) {
+            return target;
+        }
+        return new Coordinate(target.x + dx / norm * extra, target.y + dy / norm * extra);
+    }
+
     private boolean tailAllowed(Coordinate p, Coordinate target, RestrictionObject own,
                                 List<Prohibited> prohibited) {
         LineString tail = line(p, target);

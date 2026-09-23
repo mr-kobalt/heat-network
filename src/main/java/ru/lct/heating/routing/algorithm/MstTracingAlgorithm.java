@@ -43,7 +43,12 @@ public class MstTracingAlgorithm implements TracingAlgorithm {
 
     @Override
     public String description() {
-        return "Классический лес: MST по точкам, три радиуса кластеризации";
+        return "Устаревший (deprecated): классический лес MST по точкам";
+    }
+
+    @Override
+    public boolean deprecated() {
+        return true;
     }
 
     @Override

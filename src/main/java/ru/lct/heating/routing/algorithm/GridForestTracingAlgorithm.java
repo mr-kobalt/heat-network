@@ -5,6 +5,7 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.geometry.ObstacleIndex;
+import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.routing.ConnectionExit;
 import ru.lct.heating.routing.ForestPlanningResult;
@@ -46,8 +47,10 @@ public class GridForestTracingAlgorithm implements TracingAlgorithm {
 
     @Override
     public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
-                                           ObstacleIndex obstacleIndex, List<String> warnings,
+                                           ObstacleIndex obstacleIndex,
+                                           SpecialZoneIndex specialZones, List<String> warnings,
                                            Map<String, ConnectionExit> exits, StageTrace trace) {
-        return forestPlanner.plan(dataset, graph, obstacleIndex, warnings, exits, trace);
+        return forestPlanner.plan(dataset, graph, obstacleIndex, specialZones, warnings, exits,
+                trace);
     }
 }

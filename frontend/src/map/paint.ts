@@ -166,6 +166,30 @@ export function restrictionFillColor(): unknown {
   ];
 }
 
+/**
+ * Фильтр MapLibre: только полигональные геометрии. Нужен для fill-слоя
+ * ограничений, чтобы линейные объекты (road/tram/railway) не заливались
+ * (иначе fill замыкает LineString и заливает «по хорде»).
+ */
+export const POLYGON_GEOMETRY_FILTER: unknown = [
+  'match',
+  ['geometry-type'],
+  ['Polygon', 'MultiPolygon'],
+  true,
+  false,
+];
+
+/**
+ * Фильтр заливки ограничений: только запретные площадные объекты. Линейные
+ * спецобъекты (`road`, `tram_tracks`) — даже если представлены полигонами —
+ * не заливаются (иначе карта «заливается» цветом дорог); они рисуются контуром.
+ */
+export const RESTRICTION_FILL_FILTER: unknown = [
+  'all',
+  POLYGON_GEOMETRY_FILTER,
+  ['match', ['get', 'restriction_type'], ['road', 'tram_tracks'], false, true],
+];
+
 /** Цвет точки подключения по состоянию (подключена / нет / нет результата). */
 export function connectionPointColor(): unknown {
   return [

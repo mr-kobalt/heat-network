@@ -2,6 +2,7 @@ package ru.lct.heating.calculation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,6 +58,9 @@ abstract class AbstractCalculationPipelineTest {
     @TempDir
     protected Path tempDir;
 
+    /** Проекция для проверки углов поворота в расчётной СК (ТП v2, EPSG:32637). */
+    protected final CrsTransformer crsTransformer = new CrsTransformer();
+
     protected CalculationService service() {
         return service(new AppProperties());
     }
@@ -98,7 +102,9 @@ abstract class AbstractCalculationPipelineTest {
                 new ForestResultBuilder(crs, costModel, new SpecialSpanSplitter(), appProperties));
 
         return new CalculationService(ingest, new NetworkGraphBuilder(),
-                new ObstacleIndexBuilder(resolver, envelopes, catalog),
+                new ObstacleIndexBuilder(resolver, envelopes, catalog, appProperties,
+                        new ru.lct.heating.geometry.SpecialGateCarver(
+                                new RestrictionAxisBuilder())),
                 new SpecialZoneIndexBuilder(resolver, new RestrictionAxisBuilder(), envelopes),
                 variantGenerator, new GeoJsonResultWriter(objectMapper), objectMapper,
                 appProperties, registry, approachResolver,
@@ -230,6 +236,293 @@ abstract class AbstractCalculationPipelineTest {
                             .isEqualTo(1);
                 }
             }
+        }
+    }
+
+    /** Инвариант FR-29: рёбра лучшего варианта не пересекаются вне общих узлов. */
+    protected int countSelfIntersections(Path result, ObjectMapper mapper) throws Exception {
+        String best = bestVariantId(result, mapper);
+        List<OutputEdgeRef> edges = outputEdges(result, mapper, best);
+        int violations = 0;
+        for (int i = 0; i < edges.size(); i++) {
+            for (int j = i + 1; j < edges.size(); j++) {
+                OutputEdgeRef a = edges.get(i);
+                OutputEdgeRef b = edges.get(j);
+                if (shareNode(a, b)) {
+                    continue;
+                }
+                Geometry intersection = a.line().intersection(b.line());
+                if (!intersection.isEmpty()) {
+                    violations++;
+                }
+            }
+        }
+        return violations;
+    }
+
+    /** Инвариант FR-34: в лучшем варианте нет поворотов более 90° (кроме стыка вывода). */
+    protected int countTurnViolations(Path result, ObjectMapper mapper) throws Exception {
+        return countTurnViolations(result, mapper, 90.0);
+    }
+
+    /**
+     * Повороты более {@code maxDeg}. Для проверочных наборов допускается
+     * квантизационный допуск (дискретность «ворот»/сетки).
+     */
+    protected int countTurnViolations(Path result, ObjectMapper mapper, double maxDeg)
+            throws Exception {
+        String best = bestVariantId(result, mapper);
+        int violations = 0;
+        for (OutputEdgeRef edge : outputEdges(result, mapper, best)) {
+            org.locationtech.jts.geom.LineString projected = (org.locationtech.jts.geom.LineString)
+                    crsTransformer.toUtm(edge.line());
+            Coordinate[] coordinates = projected.getCoordinates();
+            for (int i = 1; i < coordinates.length - 1; i++) {
+                // Допуск 0.05° — погрешность round-trip WGS84↔UTM при измерении.
+                if (turnAngle(coordinates[i - 1], coordinates[i], coordinates[i + 1])
+                        > maxDeg + 0.05) {
+                    violations++;
+                }
+            }
+        }
+        return violations;
+    }
+
+    /** Инвариант FR-26: к камере примыкает не более 4 участков. */
+    protected int countChamberDegreeViolations(Path result, ObjectMapper mapper) throws Exception {
+        String best = bestVariantId(result, mapper);
+        Set<String> chambers = new HashSet<>();
+        Map<String, Integer> degree = new HashMap<>();
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!best.equals(properties.path("variant_id").asText())) {
+                continue;
+            }
+            if ("heat_chamber".equals(properties.path("object_type").asText())) {
+                chambers.add(properties.path("id").asText());
+            }
+            if ("heat_network".equals(properties.path("object_type").asText())) {
+                degree.merge(properties.path("start_node_id").asText(), 1, Integer::sum);
+                degree.merge(properties.path("end_node_id").asText(), 1, Integer::sum);
+            }
+        }
+        int violations = 0;
+        for (String chamber : chambers) {
+            if (degree.getOrDefault(chamber, 0) > 4) {
+                violations++;
+            }
+        }
+        return violations;
+    }
+
+    /** Инвариант FR-52: специальный проход — один прямой участок (≤2 точек). */
+    protected int countSpecialBends(Path result, ObjectMapper mapper) throws Exception {
+        String best = bestVariantId(result, mapper);
+        int bends = 0;
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            if (best != null && !best.equals(properties.path("variant_id").asText())) {
+                continue;
+            }
+            if ("special".equals(properties.path("laying_method").asText())
+                    && feature.path("geometry").path("coordinates").size() > 2) {
+                bends++;
+            }
+        }
+        return bends;
+    }
+
+    /**
+     * E43: канонический выход точки (резолвер) должен присутствовать вершиной в
+     * терминальном ребре каждого варианта, идущем к этой точке.
+     */
+    protected int countMissingCanonicalExits(Path input, Path result, ObjectMapper mapper)
+            throws Exception {
+        Map<String, double[]> canonical = canonicalExits(input);
+        Map<String, double[]> points = new HashMap<>();
+        for (JsonNode feature : mapper.readTree(input.toFile()).path("features")) {
+            if ("oks_connection_point".equals(
+                    feature.path("properties").path("object_type").asText())) {
+                JsonNode c = feature.path("geometry").path("coordinates");
+                points.put(feature.path("properties").path("id").asText(),
+                        new double[]{c.get(0).asDouble(), c.get(1).asDouble()});
+            }
+        }
+        Map<String, Boolean> found = new HashMap<>();
+        for (String pointId : canonical.keySet()) {
+            found.put(pointId, false);
+        }
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            JsonNode coords = feature.path("geometry").path("coordinates");
+            if (coords.size() < 2) {
+                continue;
+            }
+            double[] last = {coords.get(coords.size() - 1).get(0).asDouble(),
+                    coords.get(coords.size() - 1).get(1).asDouble()};
+            for (Map.Entry<String, double[]> point : points.entrySet()) {
+                if (Math.hypot(point.getValue()[0] - last[0], point.getValue()[1] - last[1])
+                        > 1e-9) {
+                    continue;
+                }
+                double[] target = canonical.get(point.getKey());
+                if (target == null) {
+                    continue;
+                }
+                for (JsonNode coordinate : coords) {
+                    if (Math.hypot(coordinate.get(0).asDouble() - target[0],
+                            coordinate.get(1).asDouble() - target[1]) < 1e-7) {
+                        found.put(point.getKey(), true);
+                    }
+                }
+            }
+        }
+        int missing = 0;
+        for (Boolean value : found.values()) {
+            if (!value) {
+                missing++;
+            }
+        }
+        return missing;
+    }
+
+    /** E42: все ссылки start_node_id/end_node_id должны разрешаться в узлы. */
+    protected int countDanglingNodeReferences(Path input, Path result, ObjectMapper mapper)
+            throws Exception {
+        Set<String> known = new HashSet<>();
+        for (JsonNode feature : mapper.readTree(input.toFile()).path("features")) {
+            String type = feature.path("properties").path("object_type").asText();
+            if ("heat_chamber".equals(type) || "oks_connection_point".equals(type)) {
+                known.add(feature.path("properties").path("id").asText());
+            }
+        }
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            String type = feature.path("properties").path("object_type").asText();
+            if ("heat_chamber".equals(type) || "technical_node".equals(type)) {
+                known.add(feature.path("properties").path("id").asText());
+            }
+        }
+        int dangling = 0;
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            for (String key : List.of("start_node_id", "end_node_id")) {
+                String id = properties.path(key).asText();
+                if (!id.isEmpty() && !known.contains(id)) {
+                    dangling++;
+                }
+            }
+        }
+        return dangling;
+    }
+
+    /** Канонические выходы (WGS84) по резолверу сервиса. */
+    protected Map<String, double[]> canonicalExits(Path input) throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        CrsTransformer crs = new CrsTransformer();
+        IngestService ingest = new IngestService(new GeoJsonStreamReader(objectMapper),
+                new FeatureParser(crs));
+        HeatingTablesProperties tables = diameters();
+        DiameterCatalog catalog = new DiameterCatalog(tables);
+        ru.lct.heating.routing.OksApproachResolver resolver =
+                new ru.lct.heating.routing.OksApproachResolver(
+                        new RestrictionRuleResolver(rules()), new EnvelopeCatalog(tables), catalog,
+                        new AppProperties());
+        ru.lct.heating.ingest.IngestResult ingested;
+        try (var stream = Files.newInputStream(input)) {
+            ingested = ingest.ingest(stream);
+        }
+        Map<String, double[]> result = new HashMap<>();
+        resolver.resolveExits(ingested.getDataset()).forEach((id, exit) -> {
+            if (!exit.isBlocked() && exit.getTarget() != null) {
+                var point = (org.locationtech.jts.geom.Point) crs.toWgs84(
+                        ru.lct.heating.domain.GeometrySupport.GEOMETRY_FACTORY
+                                .createPoint(exit.getTarget()));
+                result.put(id, new double[]{point.getX(), point.getY()});
+            }
+        });
+        return result;
+    }
+
+    protected String bestVariantId(Path result, ObjectMapper mapper) throws Exception {
+        String best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if ("variant_summary".equals(properties.path("object_type").asText())
+                    && properties.path("score").asDouble() < bestScore) {
+                bestScore = properties.path("score").asDouble();
+                best = properties.path("variant_id").asText();
+            }
+        }
+        return best;
+    }
+
+    protected List<OutputEdgeRef> outputEdges(Path result, ObjectMapper mapper, String variant)
+            throws Exception {
+        List<OutputEdgeRef> edges = new ArrayList<>();
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            if (variant != null && !variant.equals(properties.path("variant_id").asText())) {
+                continue;
+            }
+            edges.add(new OutputEdgeRef(properties.path("id").asText(),
+                    properties.path("start_node_id").asText(),
+                    properties.path("end_node_id").asText(),
+                    (org.locationtech.jts.geom.LineString) GeoJsonGeometryParser.parse(
+                            feature.path("geometry"))));
+        }
+        return edges;
+    }
+
+    private boolean shareNode(OutputEdgeRef a, OutputEdgeRef b) {
+        return a.startNode().equals(b.startNode()) || a.startNode().equals(b.endNode())
+                || a.endNode().equals(b.startNode()) || a.endNode().equals(b.endNode());
+    }
+
+    private double turnAngle(Coordinate previous, Coordinate vertex, Coordinate next) {
+        double inX = vertex.x - previous.x;
+        double inY = vertex.y - previous.y;
+        double outX = next.x - vertex.x;
+        double outY = next.y - vertex.y;
+        return Math.toDegrees(Math.atan2(Math.abs(inX * outY - inY * outX), inX * outX + inY * outY));
+    }
+
+    /** Ссылка на ребро вывода для геометрических инвариантов. */
+    protected static final class OutputEdgeRef {
+        private final String id;
+        private final String startNode;
+        private final String endNode;
+        private final org.locationtech.jts.geom.LineString line;
+        OutputEdgeRef(String id, String startNode, String endNode,
+                      org.locationtech.jts.geom.LineString line) {
+            this.id = id;
+            this.startNode = startNode;
+            this.endNode = endNode;
+            this.line = line;
+        }
+        String id() {
+            return id;
+        }
+        String startNode() {
+            return startNode;
+        }
+        String endNode() {
+            return endNode;
+        }
+        org.locationtech.jts.geom.LineString line() {
+            return line;
         }
     }
 
@@ -434,13 +727,21 @@ abstract class AbstractCalculationPipelineTest {
         return row;
     }
 
+    /** Правила — как в реальном {@code application.yml} (E39). */
     protected RestrictionRulesProperties rules() {
         RestrictionRulesProperties properties = new RestrictionRulesProperties();
         Map<String, RestrictionRule> rules = new LinkedHashMap<>();
         rules.put("oks", prohibitedWithOksBands());
+        rules.put("park", prohibited(1.0));
+        rules.put("social_area", prohibited(1.0));
+        rules.put("prohibited_site", prohibited(1.0));
         rules.put("water", prohibited(1.0));
         rules.put("railway", prohibited(1.0));
-        rules.put("road", special(1.5, 45.0, 1.60));
+        rules.put("road", special(1.5, 45.0, 1.60, 3.0));
+        rules.put("tram_tracks", special(1.5, 45.0, 1.75, 3.0));
+        rules.put("gas_pipeline", special(2.0, null, 1.25, null));
+        rules.put("power_cable", special(2.0, null, 1.15, null));
+        rules.put("heat_network", special(1.0, null, 1.05, null));
         properties.setRules(rules);
         properties.setFallback(prohibited(1.0));
         return properties;
@@ -470,12 +771,13 @@ abstract class AbstractCalculationPipelineTest {
         return rule;
     }
 
-    private RestrictionRule special(double distance, double angle, double k) {
+    private RestrictionRule special(double distance, Double angle, double k, Double zoneBuffer) {
         RestrictionRule rule = new RestrictionRule();
         rule.setMode(RestrictionMode.SPECIAL);
         rule.setMinDistanceM(distance);
         rule.setAngleMinDeg(angle);
         rule.setKSpecial(k);
+        rule.setSpecialZoneBufferM(zoneBuffer);
         return rule;
     }
 }

@@ -35,10 +35,16 @@ public class TracingAlgorithmRegistry {
         }
     }
 
-    /** Список алгоритмов с признаком алгоритма по умолчанию, отсортирован по id. */
+    /**
+     * Список алгоритмов с признаком алгоритма по умолчанию, отсортирован по id.
+     * Устаревшие (E25-09) не показываются.
+     */
     public List<AlgorithmInfo> available() {
         List<AlgorithmInfo> result = new ArrayList<>(algorithms.size());
         for (TracingAlgorithm algorithm : algorithms.values()) {
+            if (algorithm.deprecated()) {
+                continue;
+            }
             result.add(AlgorithmInfo.builder()
                     .id(algorithm.id())
                     .description(algorithm.description())
@@ -56,10 +62,12 @@ public class TracingAlgorithmRegistry {
     public TracingAlgorithm require(String id) {
         String resolved = (id == null || id.isBlank()) ? defaultId : id;
         TracingAlgorithm algorithm = algorithms.get(resolved);
-        if (algorithm == null) {
+        if (algorithm == null || algorithm.deprecated()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Неизвестный алгоритм трассировки: " + id
-                            + "; доступные: " + algorithms.keySet());
+                            + "; доступные: " + available().stream()
+                                    .map(AlgorithmInfo::getId)
+                                    .collect(java.util.stream.Collectors.toList()));
         }
         return algorithm;
     }

@@ -40,6 +40,13 @@ public class AppProperties {
     private boolean oksExitFilter = true;
     /** ADR-0040: предельная длина хвоста выхода из ОКС, м. */
     private double oksExitMaxTailM = 15.0;
+    /**
+     * E36: насколько сдвинуть точку выхода ОКС вдоль перпендикуляра за буфер,
+     * когда впереди широкий зазор (>{@code maxPairWidth}) или препятствий нет, м.
+     * По умолчанию 0: сдвиг даёт место маршруту, но на плотных наборах вносит
+     * пересечения (FR-29) — включается опционально.
+     */
+    private double oksExitExtraBufferM = 0.0;
     /** Алгоритм трассировки по умолчанию (ADR-0027/0034). */
     private String routingAlgorithm = "grid-forest";
     /** Ячейка сетки поиска пути, м (ADR-0034). */
@@ -95,6 +102,41 @@ public class AppProperties {
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */
     private boolean forestGridIncludeInputBounds = true;
+    /**
+     * E25/ADR-0045: строгий обход спецпроходов — полоса минимального расстояния
+     * вокруг спецобъекта непроходима, пересечение только через «ворота»
+     * (перпендикулярно оси). Включено по умолчанию (обязательная часть ТП v2 §4;
+     * A/B на наборе E29 — без неподключённых).
+     */
+    private boolean forestSpecialStrict = true;
+    /** E25: шаг «ворот» строгого обхода вдоль оси спецобъекта, м. */
+    private double specialGateStepM = 5.0;
+    /** E25: ширина «ворот» (коридора пересечения) строгого обхода, м. */
+    private double specialGateThicknessM = 1.0;
+    /**
+     * E25-07: число повторных прогонов со вдвое меньшим шагом «ворот» при
+     * неподключённых точках (адаптив достижимости, ТП §2.5).
+     */
+    private int forestGateRetries = 2;
+    /**
+     * E35: оптимизация точки врезки корня нового дерева — перпендикулярная
+     * проекция на сеть (короче/дешевле). Включено по умолчанию.
+     */
+    private boolean forestRootOptimization = true;
+    /**
+     * E25-05b: учитывать фактический Ду — пересобирать запретный индекс по
+     * максимальному Ду варианта и повторять расчёт (итеративно). По умолчанию
+     * выключено (дороже); включает точное соблюдение отступов по Ду (FR-59).
+     */
+    private boolean forestDiameterAwareBuffers = false;
+    /** E25-05b: предел итераций пересборки индекса по фактическому Ду. */
+    private int forestDiameterAwareIterations = 2;
+    /**
+     * E26/ADR-0046: правило 10 м (использовать существующую камеру в радиусе
+     * {@code chamber-tie-in-radius-m}) и учёт существующих примыканий в контроле
+     * степени ≤4. Включено по умолчанию (обязательная часть ТП v2 §2.4).
+     */
+    private boolean forestChamberTieInRules = true;
     /** ADR-0036: предел пикселей растровой диагностики сетки при трассировке. */
     private int traceGridMaxPixels = 2048 * 2048;
     private int maxRunHistory = 50;

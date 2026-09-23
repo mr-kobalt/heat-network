@@ -14,6 +14,8 @@ public class SpecialZone {
     String restrictionType;
     double kSpecial;
     Double angleMinDeg;
+    /** Радиус зоны вокруг оси: {@code zoneBufferM + halfPairWidth}, м (E32). */
+    double bufferM;
     Geometry axis;
     Geometry zone;
 }

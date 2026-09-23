@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.geometry.ObstacleIndex;
+import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.routing.ConnectionExit;
 import ru.lct.heating.routing.ForestPlanningResult;
@@ -23,6 +24,14 @@ public interface TracingAlgorithm {
     String description();
 
     /**
+     * Устаревший алгоритм: скрывается из {@code GET /api/v1/algorithms} и
+     * отклоняется при явном выборе (E25-09). По умолчанию — нет.
+     */
+    default boolean deprecated() {
+        return false;
+    }
+
+    /**
      * План(ы) трассировки. Возвращается до трёх содержательно отличающихся
      * вариантов; порядок не важен — ранжирование выполняется позже по S.
      *
@@ -36,10 +45,12 @@ public interface TracingAlgorithm {
     /**
      * План(ы) трассировки с записью промежуточных этапов (ADR-0036). По умолчанию
      * трассировка не поддерживается — вызов без неё; алгоритмы, поддерживающие
-     * визуализацию этапов, переопределяют этот метод.
+     * визуализацию этапов, переопределяют этот метод. {@code specialZones}
+     * передаётся для учёта {@code Kспец} в целевой функции поиска (E25-04).
      */
     default List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
-                                            ObstacleIndex obstacleIndex, List<String> warnings,
+                                            ObstacleIndex obstacleIndex,
+                                            SpecialZoneIndex specialZones, List<String> warnings,
                                             Map<String, ConnectionExit> exits, StageTrace trace) {
         return plan(dataset, graph, obstacleIndex, warnings, exits);
     }

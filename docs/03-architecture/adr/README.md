@@ -50,6 +50,9 @@
 | [0041](0041-hex-grid.md) | Гексагональная сетка поиска пути | accepted |
 | [0043](0043-relink-topology-refine-angles.md) | relink — топология, refine — углы маршрута | accepted |
 | [0044](0044-relink-tree-restructuring.md) | Перестройка дерева в relink (перенос узлов с поддеревом) | accepted |
+| [0045](0045-special-passages-strict-routing.md) | Строгий обход спецпроходов: полосы и «ворота» (флаг) | accepted (дефолт off) |
+| [0046](0046-grid-forest-chamber-attachment.md) | Присоединение и примыкания в `grid-forest` (10 м, степень ≤4) | accepted |
+| [0047](0047-grid-forest-crossing-resolution.md) | Разрешение самопересечений `grid-forest` средствами сетки | accepted |
 
 ## Шаблон
 
@@ -107,3 +110,4 @@
 | 2026-09-22 | Добавлен ADR-0041 (гексагональная сетка `forest-grid-shape`, дефолт `hex`; baseline `S` 12.973) | команда |
 | 2026-09-22 | Добавлен ADR-0043 (relink — топология без углов маршрута, refine чинит углы; baseline `S` 14.153); ADR-0042 (слияние узлов) отклонён | команда |
 | 2026-09-22 | Добавлен ADR-0044 (перестройка дерева в relink за флагом; степень ≤4, FR-26) | команда |
+| 2026-09-23 | Добавлены ADR-0045 (строгий обход спецпроходов, «ворота»; E25), ADR-0046 (10 м/степень в grid-forest; E26), ADR-0047 (самопересечения grid-native; E27) | команда |

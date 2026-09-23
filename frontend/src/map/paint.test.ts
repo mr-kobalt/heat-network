@@ -7,6 +7,8 @@ import {
   EXISTING_DIAMETER_WIDTH,
   PIPE_WIDTH,
   PIPE_WIDTH_HOVER,
+  POLYGON_GEOMETRY_FILTER,
+  RESTRICTION_FILL_FILTER,
   connectionPointColor,
   linePaint,
   restrictionFillColor,
@@ -59,5 +61,27 @@ describe('linePaint', () => {
   it('restriction and connection point colors use match/case expressions', () => {
     expect((restrictionFillColor() as unknown[])[0]).toBe('case');
     expect((connectionPointColor() as unknown[])[0]).toBe('match');
+  });
+
+  it('polygon geometry filter allows only Polygon/MultiPolygon', () => {
+    const filter = POLYGON_GEOMETRY_FILTER as unknown[];
+    expect(filter[0]).toBe('match');
+    expect(filter[1]).toEqual(['geometry-type']);
+    expect(filter[2]).toEqual(['Polygon', 'MultiPolygon']);
+    expect(filter[3]).toBe(true);
+    expect(filter[4]).toBe(false);
+  });
+
+  it('restriction fill filter excludes linear special polygons', () => {
+    const filter = RESTRICTION_FILL_FILTER as unknown[];
+    expect(filter[0]).toBe('all');
+    expect(filter[1]).toEqual(POLYGON_GEOMETRY_FILTER);
+    expect(filter[2]).toEqual([
+      'match',
+      ['get', 'restriction_type'],
+      ['road', 'tram_tracks'],
+      false,
+      true,
+    ]);
   });
 });

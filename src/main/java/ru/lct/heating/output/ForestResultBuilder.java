@@ -15,6 +15,7 @@ import ru.lct.heating.cost.CostModel;
 import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.domain.OksConnectionPointObject;
+import ru.lct.heating.geometry.ObstacleIndex;
 import ru.lct.heating.geometry.RouteChunk;
 import ru.lct.heating.geometry.SpecialSpan;
 import ru.lct.heating.geometry.SpecialSpanSplitter;
@@ -51,13 +52,14 @@ public class ForestResultBuilder {
     }
 
     public VariantResult build(ForestPlanningResult planning, NetworkDataset dataset,
-                               SpecialZoneIndex specialZones, List<String> warnings) {
-        return build(planning, dataset, specialZones, warnings, DEFAULT_VARIANT_ID, 1);
+                               SpecialZoneIndex specialZones, ObstacleIndex obstacleIndex,
+                               List<String> warnings) {
+        return build(planning, dataset, specialZones, obstacleIndex, warnings, DEFAULT_VARIANT_ID, 1);
     }
 
     public VariantResult build(ForestPlanningResult planning, NetworkDataset dataset,
-                               SpecialZoneIndex specialZones, List<String> warnings,
-                               String variantId, int rank) {
+                               SpecialZoneIndex specialZones, ObstacleIndex obstacleIndex,
+                               List<String> warnings, String variantId, int rank) {
         List<OutputSegment> segments = new ArrayList<>();
         List<OutputChamber> chambers = new ArrayList<>();
         List<OutputTechnicalNode> technicalNodes = new ArrayList<>();
@@ -67,6 +69,16 @@ public class ForestResultBuilder {
         long existingTieInCost = 0L;
         int existingTieInCount = 0;
         double newLength = 0.0;
+
+        // E27-06: все рёбра нового леса — чтобы не выпрямлять спецучасток хордой,
+        // пересекающей другое ребро.
+        List<LineString> treeLines = new ArrayList<>();
+        for (ForestTree tree : planning.getTrees()) {
+            for (ForestEdge edge : tree.getEdges()) {
+                treeLines.add(GeometrySupport.GEOMETRY_FACTORY.createLineString(
+                        edge.getCoordinates().toArray(new Coordinate[0])));
+            }
+        }
 
         for (ForestTree tree : planning.getTrees()) {
             ForestNode connectionNode = tree.requireNode(tree.getTieInNodeId());
@@ -81,7 +93,7 @@ public class ForestResultBuilder {
             Map<String, String> nodeIds = outputNodeIds(variantId, tree);
             int connectionDiameter = chamberDiameter.getOrDefault(connectionNode.getId(), 0);
             if (connectionNode.isExisting()) {
-                int tieIns = countOutgoing(connectionNode.getId(), tree.getEdges());
+                int tieIns = tieInCount(connectionNode.getId(), tree.getEdges());
                 existingTieInCount += tieIns;
                 existingTieInCost += (long) tieIns * costModel.existingChamberTieInCost();
             } else {
@@ -93,6 +105,17 @@ public class ForestResultBuilder {
                         .cost(chamberCost)
                         .geometryWgs84(toWgs84Point(connectionNode.getCoordinate()))
                         .build());
+            }
+
+            // E42: планировочные технические узлы (границы смены параметров, в т.ч.
+            // base↔special) должны быть выпущены — иначе ссылки висят.
+            for (ForestNode node : tree.getNodes().values()) {
+                if (node.getType() == NodeType.TECHNICAL_NODE && !node.isExisting()) {
+                    technicalNodes.add(OutputTechnicalNode.builder()
+                            .id(nodeIds.get(node.getId()))
+                            .geometryWgs84(toWgs84Point(node.getCoordinate()))
+                            .build());
+                }
             }
 
             for (ForestNode node : tree.getNodes().values()) {
@@ -115,7 +138,8 @@ public class ForestResultBuilder {
                         edge.getCoordinates().toArray(new Coordinate[0]));
                 checkTurns(line, edge.getId(), warnings);
                 List<SpecialSpan> spans = specialZones.spans(line, warnings);
-                List<RouteChunk> chunks = spanSplitter.split(line, spans);
+                List<RouteChunk> chunks = spanSplitter.split(line, spans, obstacleIndex, warnings,
+                        treeLines, line);
                 double distance = 0.0;
                 int chunkIndex = 0;
                 for (RouteChunk chunk : chunks) {
@@ -206,10 +230,18 @@ public class ForestResultBuilder {
         }
     }
 
-    private int countOutgoing(String nodeId, List<ForestEdge> edges) {
+    /**
+     * FR-73: врезка = каждый новый линейный участок, заканчивающийся в
+     * существующей камере. Считаем все инцидентные рёбра (независимо от
+     * ориентации) — единообразно с {@code TerminalRelinker}.
+     */
+    private int tieInCount(String nodeId, List<ForestEdge> edges) {
         int count = 0;
         for (ForestEdge edge : edges) {
-            if (edge.getFromNodeId().equals(nodeId) && !edge.getToNodeId().equals(nodeId)) {
+            if (edge.getFromNodeId().equals(nodeId) && edge.getToNodeId().equals(nodeId)) {
+                continue;
+            }
+            if (edge.getFromNodeId().equals(nodeId) || edge.getToNodeId().equals(nodeId)) {
                 count++;
             }
         }

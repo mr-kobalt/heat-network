@@ -32,6 +32,7 @@ import ru.lct.heating.graph.NetworkGraphBuilder;
 import ru.lct.heating.ingest.IngestResult;
 import ru.lct.heating.ingest.IngestService;
 import ru.lct.heating.output.GeoJsonResultWriter;
+import ru.lct.heating.output.OutputSegment;
 import ru.lct.heating.output.VariantResult;
 import ru.lct.heating.output.VariantSummary;
 import ru.lct.heating.routing.ConnectionExit;
@@ -155,8 +156,8 @@ public class CalculationService {
         traceExits(trace, exits);
 
         stage = System.nanoTime();
-        List<VariantResult> variants = variantGenerator.generate(
-                dataset, obstacleIndex, graph, specialZones, warnings, exits, algorithm, trace);
+        List<VariantResult> variants = generateVariants(dataset, obstacleIndex, graph, specialZones,
+                warnings, exits, algorithm, trace);
         log.info("Stage generate: {} ms; algorithm={} variants={}", elapsedMs(stage),
                 algorithm.id(), variants.size());
 
@@ -201,6 +202,90 @@ public class CalculationService {
                 .summary(best)
                 .warnings(warnings)
                 .build();
+    }
+
+    /**
+     * E25-05b: при включённом флаге пересобирает запретный индекс по
+     * максимальному фактическому Ду варианта и повторяет расчёт, пока буферы
+     * достаточны для итоговых Ду (иначе отступы по Ду были бы занижены).
+     */
+    private List<VariantResult> generateVariants(NetworkDataset dataset, ObstacleIndex obstacleIndex,
+                                                 ExistingNetworkGraph graph,
+                                                 SpecialZoneIndex specialZones,
+                                                 List<String> warnings,
+                                                 Map<String, ConnectionExit> exits,
+                                                 TracingAlgorithm algorithm, StageTrace trace) {
+        List<VariantResult> variants = variantGenerator.generate(dataset, obstacleIndex, graph,
+                specialZones, warnings, exits, algorithm, trace);
+        int appliedDn = 0;
+        if (appProperties.isForestDiameterAwareBuffers()) {
+            int usedDn = maxDiameterMm(variants);
+            int iterations = Math.max(1, appProperties.getForestDiameterAwareIterations());
+            for (int i = 0; i < iterations && usedDn > 0; i++) {
+                ObstacleIndex index = obstacleIndexBuilder.buildAtDiameter(dataset, usedDn, warnings);
+                List<VariantResult> candidate = variantGenerator.generate(dataset, index, graph,
+                        specialZones, warnings, exits, algorithm, trace);
+                int candidateDn = maxDiameterMm(candidate);
+                variants = candidate;
+                appliedDn = usedDn;
+                log.info("Stage generate (diameter-aware {}/{}): usedDn={} candidateDn={}",
+                        i + 1, iterations, usedDn, candidateDn);
+                if (candidateDn <= usedDn) {
+                    break;
+                }
+                usedDn = candidateDn;
+            }
+        }
+        // E25-07: адаптив достижимости — при неподключённых точках уменьшаем шаг
+        // «ворот» вдвое и повторяем (ТП §2.5: неподключение только при отсутствии
+        // допустимого маршрута).
+        if (appProperties.isForestSpecialStrict() && appProperties.getForestGateRetries() > 0) {
+            variants = retryWithFinerGates(dataset, graph, specialZones, warnings, exits, algorithm,
+                    trace, variants, appliedDn);
+        }
+        return variants;
+    }
+
+    private List<VariantResult> retryWithFinerGates(NetworkDataset dataset, ExistingNetworkGraph graph,
+                                                    SpecialZoneIndex specialZones,
+                                                    List<String> warnings,
+                                                    Map<String, ConnectionExit> exits,
+                                                    TracingAlgorithm algorithm, StageTrace trace,
+                                                    List<VariantResult> best, int appliedDn) {
+        int bestUnconnected = unconnectedCount(best);
+        double step = appProperties.getSpecialGateStepM();
+        int retries = appProperties.getForestGateRetries();
+        for (int attempt = 0; attempt < retries && bestUnconnected > 0 && step > 0.5; attempt++) {
+            step = step / 2.0;
+            ObstacleIndex index = obstacleIndexBuilder.buildWithGateStep(dataset,
+                    appliedDn > 0 ? appliedDn : null, step, warnings);
+            List<VariantResult> candidate = variantGenerator.generate(dataset, index, graph,
+                    specialZones, warnings, exits, algorithm, trace);
+            int unconnected = unconnectedCount(candidate);
+            log.info("Stage generate (gate {}/{}): step={} unconnected={}", attempt + 1, retries,
+                    step, unconnected);
+            if (unconnected < bestUnconnected) {
+                best = candidate;
+                bestUnconnected = unconnected;
+            }
+        }
+        return best;
+    }
+
+    private int unconnectedCount(List<VariantResult> variants) {
+        return variants.isEmpty() ? 0
+                : variants.get(0).getSummary().getUnconnectedOksIds().size();
+    }
+
+    private int maxDiameterMm(List<VariantResult> variants) {
+        if (variants.isEmpty()) {
+            return 0;
+        }
+        int max = 0;
+        for (OutputSegment segment : variants.get(0).getSegments()) {
+            max = Math.max(max, segment.getDiameterMm());
+        }
+        return max;
     }
 
     private void traceNetwork(StageTrace trace, ExistingNetworkGraph graph) {

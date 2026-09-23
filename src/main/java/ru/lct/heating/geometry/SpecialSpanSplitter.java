@@ -18,6 +18,23 @@ public class SpecialSpanSplitter {
     private static final double EPS = 1e-6;
 
     public List<RouteChunk> split(LineString route, List<SpecialSpan> spans) {
+        return split(route, spans, null, null, List.of(), null);
+    }
+
+    public List<RouteChunk> split(LineString route, List<SpecialSpan> spans, ObstacleIndex index,
+                                  List<String> warnings) {
+        return split(route, spans, index, warnings, List.of(), null);
+    }
+
+    /**
+     * @param index    запретный индекс для перепроверки выпрямленного
+     *                 спецучастка (E25-06); может быть {@code null}
+     * @param warnings приёмник диагностики о невозможности выпрямления
+     * @param avoid    рёбра нового леса: хорда не должна их пересекать (E27-06)
+     * @param self     текущее ребро (исключается из {@code avoid})
+     */
+    public List<RouteChunk> split(LineString route, List<SpecialSpan> spans, ObstacleIndex index,
+                                  List<String> warnings, List<LineString> avoid, LineString self) {
         TreeSet<Double> boundaries = new TreeSet<>();
         double length = route.getLength();
         boundaries.add(0.0);
@@ -39,6 +56,8 @@ public class SpecialSpanSplitter {
             LineString geometry = (LineString) indexed.extractLine(start, end);
             SpecialSpan containing = spanAt(spans, (start + end) / 2.0);
             if (containing != null) {
+                // ТП v2 §4: специальный проход — один прямой участок; внутри
+                // разрешённого спецпересечения минимальное расстояние не проверяется.
                 geometry = straight(geometry);
             }
             chunks.add(RouteChunk.builder()

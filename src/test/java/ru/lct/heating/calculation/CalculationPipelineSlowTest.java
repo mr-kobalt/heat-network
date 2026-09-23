@@ -61,17 +61,17 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         // ADR-0037/0038/0040/0041/0039/0043+bugfix см. историю; ADR-0044:
-        // перестройка дерева включена по умолчанию — baseline пересчитан
-        // (S 14.051205 → 13.351229, длина 2034.07 → 1893.48 м,
-        // стоимость 283.89 → 273.96 млн, камеры 55 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.351228567316678, within(1e-6));
+        // перестройка дерева включена; E23-04 закрыт (FR-34: 0); ADR-0045
+        // (строгий обход) и E26 (правило 10 м) включены по умолчанию, добавлено
+        // упрощение рёбер (FR-28) — baseline пересчитан.
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.580152442677246, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1893.4833744388927, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(273956373L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(55000000L);
+                .isCloseTo(1913.4793848924153, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279989796L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(60000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
-                .isLessThanOrEqualTo(6L);
+                .isZero();
         // Порог поднят 12 → 15: после ADR-0044 на одном ребре к точке 3 остаётся
         // короткий grid-заход (обход по клеткам в стеснении), 13 вершин.
         assertNoExcessiveVertices(resultFile, new ObjectMapper(), 15);

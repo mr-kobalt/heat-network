@@ -45,13 +45,13 @@ public class VariantGenerator {
                                         List<String> warnings, Map<String, ConnectionExit> exits,
                                         TracingAlgorithm algorithm, StageTrace trace) {
         List<VariantResult> variants = new ArrayList<>();
-        for (ForestPlanningResult planning : algorithm.plan(dataset, graph, obstacleIndex, warnings,
-                exits, trace)) {
+        for (ForestPlanningResult planning : algorithm.plan(dataset, graph, obstacleIndex,
+                specialZones, warnings, exits, trace)) {
             if (variants.size() >= MAX_VARIANTS) {
                 break;
             }
-            variants.add(resultBuilder.build(planning, dataset, specialZones, warnings,
-                    "v" + (variants.size() + 1), 0));
+            variants.add(resultBuilder.build(planning, dataset, specialZones, obstacleIndex,
+                    warnings, "v" + (variants.size() + 1), 0));
         }
         variants.sort(Comparator.comparingDouble(variant -> variant.getSummary().getScore()));
         List<VariantResult> ranked = new ArrayList<>();

@@ -117,7 +117,8 @@ class OksApproachResolverTest {
         assertThat(exit.isBlocked()).isFalse();
         assertThat(exit.getDesignDiameterMm()).isEqualTo(DN);
         assertThat(exit.hasTail()).isTrue();
-        // ADR-0037: цель на границе буфера ОКС (minDistance + halfPairWidth).
+        // ADR-0037: цель на границе буфера ОКС (minDistance + halfPairWidth);
+        // E36-сдвиг по умолчанию выключен.
         assertThat(exit.getTarget().x)
                 .isCloseTo(-(5.0 + 0.255), org.assertj.core.data.Offset.offset(1e-3));
         assertThat(exit.getTarget().y)
