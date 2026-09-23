@@ -775,26 +775,33 @@ public class GridForestPlanner {
                 treeIndex++;
             }
 
+            long relinkStart = System.nanoTime();
+            Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>> own = new HashMap<>();
+            if (obstacleIndex != null && !trees.isEmpty()) {
+                for (Terminal term : new LinkedHashSet<>(terminalCells.values())) {
+                    if (term.connected) {
+                        own.put(term.pointId, obstacleIndex.obstaclesContaining(
+                                GeometrySupport.GEOMETRY_FACTORY.createPoint(term.point)));
+                    }
+                }
+            }
             if (appProperties.isForestReattachPass() && !trees.isEmpty()) {
                 Map<String, List<ConnectionExit>> exits = new HashMap<>();
-                Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>> own =
-                        new HashMap<>();
                 for (Terminal term : new LinkedHashSet<>(terminalCells.values())) {
                     if (term.connected) {
                         exits.put(term.pointId, relinkExits(exitCandidates, term));
-                        if (obstacleIndex != null) {
-                            own.put(term.pointId, obstacleIndex.obstaclesContaining(
-                                    GeometrySupport.GEOMETRY_FACTORY
-                                            .createPoint(term.point)));
-                        }
                     }
                 }
                 trees = new TerminalRelinker(costModel, diameters, appProperties)
                         .relink(trees, exits, terminalFlow, obstacleIndex, own);
             }
+            long relinkMs = elapsedMs(relinkStart);
             List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
-            trees = refineTrees(trees, pass, obstacleIndex, terminalCells, warnings);
+            long refineStart = System.nanoTime();
+            trees = refineTrees(trees, pass, obstacleIndex, terminalCells, own, warnings);
+            long refineMs = elapsedMs(refineStart);
             List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
+            log.info("Grid pass {}: relink={}ms refine={}ms", passNumber, relinkMs, refineMs);
 
             Set<String> connected = new HashSet<>();
             List<String> unconnected = new ArrayList<>();
@@ -1056,6 +1063,8 @@ public class GridForestPlanner {
     private List<ForestTree> refineTrees(List<ForestTree> trees, ObstacleMask pass,
                                          ObstacleIndex obstacleIndex,
                                          Map<Integer, Terminal> terminalCells,
+                                         Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                 ownObstacles,
                                          List<String> warnings) {
         Map<String, Terminal> terminalsById = new HashMap<>();
         for (Terminal terminal : new LinkedHashSet<>(terminalCells.values())) {
@@ -1095,6 +1104,15 @@ public class GridForestPlanner {
                 if (isTerminal && exitGridDogleg()) {
                     refined = rebuildExitJoint(refined, pass, obstacleIndex);
                 }
+                if (isTerminal && !terminal.tail.isEmpty() && refined.size() >= 3
+                        && !turnAllowed(refined.get(refined.size() - 3),
+                                refined.get(refined.size() - 2), refined.get(refined.size() - 1))) {
+                    List<Coordinate> fixed = repairExitApproach(refined, startPrevious, pass,
+                            obstacleIndex, ownObstacles, edge.getToNodeId());
+                    if (fixed != null) {
+                        refined = fixed;
+                    }
+                }
                 if (!turnsWithinLimit(refined, refined.size() - 2 - (isTerminal ? 2 : 0))) {
                     warnings.add("FOREST_TURN_UNRESOLVED: участок " + edge.getId());
                 }
@@ -1107,6 +1125,9 @@ public class GridForestPlanner {
                         .diameterMm(edge.getDiameterMm())
                         .build());
             }
+            // ADR-0043: refine — владелец углов; чиним повороты во всех узлах
+            // (включая пары «ветка↔ветка»), relink углы не проверяет.
+            edges = repairNodeTurns(edges, nodes, pass, obstacleIndex, ownObstacles, warnings);
             try {
                 edges = maxLengthEnforcer.enforce(edges, tree.getTieInNodeId());
             } catch (IllegalArgumentException noDiameter) {
@@ -1145,6 +1166,348 @@ public class GridForestPlanner {
             }
         }
         return parent;
+    }
+
+    /**
+     * ADR-0043: ремонт поворотов во всех узлах дерева. Для каждой пары
+     * инцидентных рёбер угол на узле должен быть ≤ {@code forest-max-turn-deg};
+     * иначе в одно из рёбер рядом с узлом вставляется вершина-via по соседям
+     * сетки, разбивающая поворот на два допустимых. Если починить не удалось —
+     * предупреждение {@code FOREST_TURN_UNRESOLVED}.
+     */
+    private List<ForestEdge> repairNodeTurns(List<ForestEdge> edges, Map<String, ForestNode> nodes,
+                                             ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                             Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                     ownObstacles,
+                                             List<String> warnings) {
+        List<MutableEdge> work = new ArrayList<>();
+        for (ForestEdge edge : edges) {
+            work.add(new MutableEdge(edge.getId(), edge.getFromNodeId(), edge.getToNodeId(),
+                    new ArrayList<>(edge.getCoordinates())));
+        }
+        int passes = Math.max(4, localPasses() * 2);
+        for (int p = 0; p < passes; p++) {
+            Map<String, List<Integer>> incident = new HashMap<>();
+            for (int i = 0; i < work.size(); i++) {
+                MutableEdge edge = work.get(i);
+                incident.computeIfAbsent(edge.from, key -> new ArrayList<>()).add(i);
+                incident.computeIfAbsent(edge.to, key -> new ArrayList<>()).add(i);
+            }
+            boolean repaired = false;
+            for (Map.Entry<String, List<Integer>> entry : incident.entrySet()) {
+                String node = entry.getKey();
+                List<Integer> ids = entry.getValue();
+                ForestNode forestNode = nodes.get(node);
+                if (forestNode == null || ids.size() < 2) {
+                    continue;
+                }
+                Coordinate vertex = forestNode.getCoordinate();
+                for (int a = 0; a < ids.size() && !repaired; a++) {
+                    for (int b = a + 1; b < ids.size() && !repaired; b++) {
+                        MutableEdge first = work.get(ids.get(a));
+                        MutableEdge second = work.get(ids.get(b));
+                        Coordinate incoming = neighborAt(first, node);
+                        Coordinate outgoing = neighborAt(second, node);
+                        if (incoming == null || outgoing == null) {
+                            continue;
+                        }
+                        if (turnAllowed(incoming, vertex, outgoing)) {
+                            continue;
+                        }
+                        if (rerouteAtNode(work, ids.get(b), node, incoming, vertex, outgoing, pass,
+                                obstacleIndex, ownObstacles)) {
+                            repaired = true;
+                            break;
+                        }
+                        if (rerouteAtNode(work, ids.get(a), node, outgoing, vertex, incoming, pass,
+                                obstacleIndex, ownObstacles)) {
+                            repaired = true;
+                        }
+                    }
+                }
+            }
+            if (!repaired) {
+                break;
+            }
+        }
+        List<ForestEdge> result = new ArrayList<>();
+        for (int i = 0; i < work.size(); i++) {
+            MutableEdge edge = work.get(i);
+            result.add(ForestEdge.builder().id(edge.id).fromNodeId(edge.from)
+                    .toNodeId(edge.to).coordinates(edge.coords)
+                    .flowTph(edges.get(i).getFlowTph()).diameterMm(edges.get(i).getDiameterMm())
+                    .build());
+        }
+        for (Map.Entry<String, List<Integer>> entry : incident(work).entrySet()) {
+            List<Integer> ids = entry.getValue();
+            if (ids.size() < 2) {
+                continue;
+            }
+            ForestNode forestNode = nodes.get(entry.getKey());
+            if (forestNode == null) {
+                continue;
+            }
+            Coordinate vertex = forestNode.getCoordinate();
+            for (int a = 0; a < ids.size(); a++) {
+                for (int b = a + 1; b < ids.size(); b++) {
+                    Coordinate incoming = neighborAt(work.get(ids.get(a)), entry.getKey());
+                    Coordinate outgoing = neighborAt(work.get(ids.get(b)), entry.getKey());
+                    if (incoming != null && outgoing != null
+                            && !turnAllowed(incoming, vertex, outgoing)) {
+                        warnings.add("FOREST_TURN_UNRESOLVED: узел " + entry.getKey());
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    private Map<String, List<Integer>> incident(List<MutableEdge> edges) {
+        Map<String, List<Integer>> incident = new HashMap<>();
+        for (int i = 0; i < edges.size(); i++) {
+            MutableEdge edge = edges.get(i);
+            incident.computeIfAbsent(edge.from, key -> new ArrayList<>()).add(i);
+            incident.computeIfAbsent(edge.to, key -> new ArrayList<>()).add(i);
+        }
+        return incident;
+    }
+
+    private Coordinate neighborAt(MutableEdge edge, String node) {
+        if (edge.from.equals(node) && edge.coords.size() >= 2) {
+            return edge.coords.get(1);
+        }
+        if (edge.to.equals(node) && edge.coords.size() >= 2) {
+            return edge.coords.get(edge.coords.size() - 2);
+        }
+        return null;
+    }
+
+    /**
+     * ADR-0043: заменить прямой отрезок «узел→сосед» на локальный turn-aware
+     * путь по сетке (≤ {@code forest-max-turn-deg} на каждом повороте, обход
+     * запретов), чтобы снять недопустимый поворот в узле. Возвращает {@code true},
+     * если путь найден и вставлен.
+     */
+    private boolean rerouteAtNode(List<MutableEdge> edges, int edgeIndex, String node,
+                                  Coordinate incoming, Coordinate vertex, Coordinate outgoing,
+                                  ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                  Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                          ownObstacles) {
+        MutableEdge edge = edges.get(edgeIndex);
+        Coordinate nextAfter = nextAfter(edge, node);
+        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = new HashSet<>();
+        if (ownObstacles != null) {
+            Set<org.locationtech.jts.geom.prep.PreparedGeometry> first = ownObstacles.get(edge.from);
+            Set<org.locationtech.jts.geom.prep.PreparedGeometry> second = ownObstacles.get(edge.to);
+            if (first != null) {
+                ignored.addAll(first);
+            }
+            if (second != null) {
+                ignored.addAll(second);
+            }
+        }
+        List<Coordinate> path = gridPath(pass, obstacleIndex, vertex, incoming, outgoing, nextAfter,
+                ignored);
+        if (path == null || path.size() < 2) {
+            return false;
+        }
+        List<Coordinate> coords = edge.coords;
+        List<Coordinate> rebuilt = new ArrayList<>();
+        if (edge.from.equals(node)) {
+            rebuilt.addAll(path);
+            rebuilt.addAll(coords.subList(2, coords.size()));
+        } else if (edge.to.equals(node)) {
+            rebuilt.addAll(coords.subList(0, coords.size() - 2));
+            List<Coordinate> reversed = new ArrayList<>(path);
+            Collections.reverse(reversed);
+            reversed.remove(0);
+            rebuilt.addAll(reversed);
+        } else {
+            return false;
+        }
+        coords.clear();
+        coords.addAll(rebuilt);
+        return true;
+    }
+
+    /**
+     * ADR-0043: перетрассировать подход к точке выхода (сегмент
+     * {@code prev→target}), чтобы стык {@code target→point} стал ≤90°.
+     * Возвращает новую геометрию ребра или {@code null}.
+     */
+    private List<Coordinate> repairExitApproach(List<Coordinate> coords, Coordinate startPrevious,
+                                                ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                                Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
+                                                        ownObstacles,
+                                                String terminalId) {
+        int n = coords.size();
+        Coordinate point = coords.get(n - 1);
+        Coordinate target = coords.get(n - 2);
+        Coordinate prev = coords.get(n - 3);
+        Coordinate beforePrev = n >= 4 ? coords.get(n - 4) : startPrevious;
+        Coordinate incoming = beforePrev == null ? null
+                : new Coordinate(prev.x - beforePrev.x, prev.y - beforePrev.y);
+        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored =
+                ownObstacles == null ? Set.of()
+                        : ownObstacles.getOrDefault(terminalId, Set.of());
+        List<Coordinate> path = gridPath(pass, obstacleIndex, prev, incoming, target, point, ignored);
+        if (path == null || path.size() < 2) {
+            return null;
+        }
+        List<Coordinate> rebuilt = new ArrayList<>(coords.subList(0, n - 3));
+        rebuilt.addAll(path);
+        rebuilt.add(point);
+        return rebuilt;
+    }
+
+    /** Допустимо ли завершение в цели: не тривиальный старт и стык ≤90°. */
+    private boolean acceptableGoal(Map<Long, Long> parent, Node node, ObstacleMask pass,
+                                   Coordinate goal, Coordinate nextAfter) {
+        int dir = (int) (node.key % 9);
+        if (dir == 8) {
+            return false;
+        }
+        Long parentKey = parent.get(node.key);
+        if (parentKey == null) {
+            return false;
+        }
+        Coordinate previous = center(pass, (int) (parentKey / 9));
+        return nextAfter == null || turnAllowed(previous, goal, nextAfter);
+    }
+
+    private Coordinate nextAfter(MutableEdge edge, String node) {
+        if (edge.from.equals(node)) {
+            return edge.coords.size() > 2 ? edge.coords.get(2) : null;
+        }
+        if (edge.to.equals(node)) {
+            return edge.coords.size() > 2 ? edge.coords.get(edge.coords.size() - 3) : null;
+        }
+        return null;
+    }
+
+    /**
+     * Turn-aware поиск пути по сетке от {@code start} к {@code goal}: состояние
+     * «клетка + входящее направление», поворот ≤ {@code forest-max-turn-deg},
+     * запретные клетки/сегменты обходятся.
+     */
+    private List<Coordinate> gridPath(ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                      Coordinate start, Coordinate incoming, Coordinate goal,
+                                      Coordinate nextAfter,
+                                      Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
+        int width = pass.width();
+        int startCell = pass.cellAt(start.x, start.y);
+        int goalCell = pass.cellAt(goal.x, goal.y);
+        Map<Long, Double> dist = new HashMap<>();
+        Map<Long, Long> parent = new HashMap<>();
+        java.util.PriorityQueue<Node> queue =
+                new java.util.PriorityQueue<>(Comparator.comparingDouble(n -> n.dist));
+        long startKey = (long) startCell * 9 + 8;
+        dist.put(startKey, 0.0);
+        queue.add(new Node(startKey, 0.0));
+        long goalKey = -1;
+        int expansions = 0;
+        while (!queue.isEmpty() && expansions < 8000) {
+            Node node = queue.poll();
+            if (node.dist > dist.getOrDefault(node.key, Double.POSITIVE_INFINITY) + ANGLE_EPS) {
+                continue;
+            }
+            expansions++;
+            int cell = (int) (node.key / 9);
+            int dir = (int) (node.key % 9);
+            if (cell == goalCell && acceptableGoal(parent, node, pass, goal, nextAfter)) {
+                goalKey = node.key;
+                break;
+            }
+            int col = cell % width;
+            int row = cell / width;
+            List<int[]> neighbors = pass.neighbors(col, row);
+            Coordinate c0 = center(pass, cell);
+            for (int idx = 0; idx < neighbors.size(); idx++) {
+                int[] step = neighbors.get(idx);
+                int nc = col + step[0];
+                int nr = row + step[1];
+                if (nc < 0 || nr < 0 || nc >= width || nr >= pass.height()) {
+                    continue;
+                }
+                Coordinate c1 = center(pass, nr * width + nc);
+                if (dir == 8) {
+                    if (incoming != null
+                            && turnDegrees(incoming.x, incoming.y, c1.x - c0.x, c1.y - c0.y)
+                                    > maxTurnDeg() + ANGLE_EPS) {
+                        continue;
+                    }
+                } else {
+                    Long parentKey = parent.get(node.key);
+                    int prevCell = parentKey == null ? cell : (int) (parentKey / 9);
+                    if (!turnAllowed(center(pass, prevCell), c0, c1)) {
+                        continue;
+                    }
+                }
+                if (obstacleIndex != null && obstacleIndex.isInteriorBlocked(line(c0, c1), ignored)) {
+                    continue;
+                }
+                long nextKey = (long) (nr * width + nc) * 9 + idx;
+                double nd = node.dist + c0.distance(c1);
+                if (nd < dist.getOrDefault(nextKey, Double.POSITIVE_INFINITY) - ANGLE_EPS) {
+                    dist.put(nextKey, nd);
+                    parent.put(nextKey, node.key);
+                    queue.add(new Node(nextKey, nd));
+                }
+            }
+        }
+        if (goalKey < 0) {
+            return null;
+        }
+        List<Integer> cells = new ArrayList<>();
+        long current = goalKey;
+        while (current != startKey) {
+            cells.add((int) (current / 9));
+            Long p = parent.get(current);
+            if (p == null) {
+                return null;
+            }
+            current = p;
+        }
+        cells.add(startCell);
+        Collections.reverse(cells);
+        List<Coordinate> path = new ArrayList<>();
+        for (int cell : cells) {
+            path.add(center(pass, cell));
+        }
+        path.set(0, start);
+        if (path.size() >= 2 && incoming != null
+                && turnDegrees(incoming.x, incoming.y,
+                        path.get(1).x - start.x, path.get(1).y - start.y)
+                        > maxTurnDeg() + ANGLE_EPS) {
+            return null;
+        }
+        Coordinate last = path.get(path.size() - 1);
+        if (!last.equals2D(goal)) {
+            if (path.size() >= 2 && !turnAllowed(path.get(path.size() - 2), last, goal)) {
+                return null;
+            }
+            if (obstacleIndex != null && obstacleIndex.isInteriorBlocked(line(last, goal), ignored)) {
+                return null;
+            }
+            path.add(goal);
+        }
+        if (nextAfter != null) {
+            Coordinate beforeGoal = path.get(path.size() - 2);
+            if (!turnAllowed(beforeGoal, goal, nextAfter)) {
+                return null;
+            }
+        }
+        return path;
+    }
+
+    private static final class Node {
+        private final long key;
+        private final double dist;
+
+        private Node(long key, double dist) {
+            this.key = key;
+            this.dist = dist;
+        }
     }
 
     private Chain walkChain(int child, Map<Integer, Integer> parent,
@@ -1400,6 +1763,21 @@ public class GridForestPlanner {
             this.end = end;
             this.intermediate = intermediate;
             this.terminal = terminal;
+        }
+    }
+
+    /** Изменяемое ребро для ремонта углов в узлах (ADR-0043). */
+    private static final class MutableEdge {
+        private final String id;
+        private final String from;
+        private final String to;
+        private final List<Coordinate> coords;
+
+        private MutableEdge(String id, String from, String to, List<Coordinate> coords) {
+            this.id = id;
+            this.from = from;
+            this.to = to;
+            this.coords = coords;
         }
     }
 

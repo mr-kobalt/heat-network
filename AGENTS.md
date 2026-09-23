@@ -111,3 +111,4 @@ pnpm --dir frontend basemap:prepare # локальная карта Москвы
 | 2026-09-22 | Визуализатор: маска сетки рисуется гексами; оценка клеток для спилла через `GridShape` | команда |
 | 2026-09-22 | Env-привязки новых свойств в `application.yml` (`HEATING_*`), тест `AppPropertiesEnvBindingTest`; флаг `forest-relink-exit-relocation`; дефолт ячейки 1.0; baseline `S` 13.706 | команда |
 | 2026-09-22 | `forest-relink-exit-relocation=false` по умолчанию (relink не меняет выход роста); консолидация 3/6/8 — опция; baseline `S` 14.321 | команда |
+| 2026-09-22 | ADR-0043: relink — топология (без углов маршрута, кроме стыка вывода), refine чинит углы в узлах; baseline `S` 14.153 | команда |

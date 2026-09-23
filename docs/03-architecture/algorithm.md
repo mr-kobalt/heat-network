@@ -288,7 +288,8 @@ List<ForestPlanningResult>`.
   (`forest-relink-exit-relocation`, ADR-0039; **по умолчанию выключено** — relink
   не меняет выход growth), точки на границе ОКС — `covers`
   (`oks-owning-include-boundary`); выполняется **до** финального уточнения
-  геометрии (ADR-0038);
+  геометрии (ADR-0038); угол стыка вывода (`target→point`) проверяется в relink
+  (ход хвоста задан резолвером), а повороты маршрута — в `refine` (ADR-0043);
 - границы сетки включают `bbox` всех входных объектов
   (`forest-grid-include-input-bounds`);
 - расходы снизу вверх, Ду по расходу, предельная длина по непрерывным путям;
@@ -392,3 +393,4 @@ no-op при выключенном флаге, результат и baseline �
 | 2026-09-22 | ADR-0041: гексагональная сетка поиска пути (`forest-grid-shape`, дефолт `hex`); baseline `S` 12.973 | команда |
 | 2026-09-22 | Дефолт ячейки `forest-grid-cell-m` 2.0 → 1.0; флаг relink переименован в `forest-relink-exit-relocation`; env-привязки в `application.yml`; baseline `S` 13.706 | команда |
 | 2026-09-22 | `forest-relink-exit-relocation` по умолчанию `false` (relink не меняет выход роста); baseline `S` 14.321 | команда |
+| 2026-09-22 | ADR-0043: relink — топология (без углов маршрута, кроме стыка вывода), refine чинит углы в узлах; baseline `S` 14.153 | команда |

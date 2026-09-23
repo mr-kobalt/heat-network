@@ -63,15 +63,16 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // ADR-0037: буферы по мин. Ду, выход — ближайшая точка на внешнем контуре
         // буфера всего ОКС (с учётом узких промежутков и достижимости), кандидаты 1 м.
         // ADR-0038: уточнение геометрии (refine) после переприсоединения.
-        // ADR-0040: фильтрация выходов. ADR-0041: гекс-сетка. Дефолт ячейки — 1 м;
-        // ADR-0039: по умолчанию relink НЕ меняет выход growth —
-        // baseline пересчитан (S 12.973 → 14.321, длина 1836.5 → 2071.8 м,
-        // стоимость 266.5 → 289.5 млн, камеры 58 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(14.320729670783953, within(1e-6));
+        // ADR-0040: фильтрация выходов. ADR-0041: гекс-сетка, ячейка 1 м.
+        // ADR-0039: relocation=false. ADR-0043: relink не проверяет углы маршрута
+        // (только стык вывода), refine чинит углы — baseline пересчитан
+        // (S 14.321 → 14.153, длина 2071.8 → 2054.1 м, стоимость 289.5 → 285.4 млн,
+        // камеры 56 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(14.153267701388808, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(2071.7759542613176, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(289478636L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(58000000L);
+                .isCloseTo(2054.1051671296027, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(285391150L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(56000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
                 .isLessThanOrEqualTo(6L);

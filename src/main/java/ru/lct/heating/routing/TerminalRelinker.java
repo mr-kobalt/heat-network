@@ -135,8 +135,7 @@ public class TerminalRelinker {
                     continue;
                 }
                 Coordinate from = candidate.getCoordinate();
-                if (!validSegment(from, target, tail, point, nodes, edges, obstacleIndex, ignored,
-                        incomingDirection(candidate.getId(), rootId, nodes, edges))) {
+                if (!validSegment(from, target, tail, point, edges, obstacleIndex, ignored)) {
                     continue;
                 }
                 List<Edge> candidateEdges = removeEdge(edges, current.id);
@@ -154,10 +153,7 @@ public class TerminalRelinker {
                             || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
                         continue;
                     }
-                    Coordinate parentEnd = parentEnd(edge, rootId, nodes, edges);
-                    Coordinate dirIn = unit(p.x - parentEnd.x, p.y - parentEnd.y);
-                    if (!validSegment(p, target, tail, point, nodes, edges, obstacleIndex, ignored,
-                            dirIn)) {
+                    if (!validSegment(p, target, tail, point, edges, obstacleIndex, ignored)) {
                         continue;
                     }
                     String newId = "rj_" + (idCounter++);
@@ -191,26 +187,27 @@ public class TerminalRelinker {
         return best;
     }
 
+    /**
+     * ADR-0043: relink решает топологию — углы поворота маршрута проверяет
+     * refine. Исключение — стык финального вывода {@code target→point}: хвост
+     * задан резолвером и refine его не меняет, поэтому угол на стыке проверяется
+     * здесь.
+     */
     private boolean validSegment(Coordinate from, Coordinate target, List<Coordinate> tail,
-                                 Coordinate point, Map<String, ForestNode> nodes, List<Edge> edges,
-                                 ObstacleIndex obstacleIndex, Set<PreparedGeometry> ignored,
-                                 Coordinate incoming) {
+                                 Coordinate point, List<Edge> edges,
+                                 ObstacleIndex obstacleIndex, Set<PreparedGeometry> ignored) {
         LineString segment = line(from, target);
         if (obstacleIndex != null && obstacleIndex.isInteriorBlocked(segment, ignored)) {
             return false;
         }
-        double maxTurn = appProperties.getForestMaxTurnDeg() > 0
-                ? appProperties.getForestMaxTurnDeg() : 90.0;
-        if (incoming != null) {
-            Coordinate out = unit(target.x - from.x, target.y - from.y);
-            if (angle(incoming, out) > maxTurn + EPS) {
-                return false;
-            }
-        }
         if (!tail.isEmpty()) {
-            Coordinate out = unit(point.x - target.x, point.y - target.y);
-            Coordinate in = unit(target.x - from.x, target.y - from.y);
-            if (angle(in, out) > maxTurn + EPS) {
+            double maxTurn = appProperties.getForestMaxTurnDeg() > 0
+                    ? appProperties.getForestMaxTurnDeg() : 90.0;
+            Coordinate in = new Coordinate(target.x - from.x, target.y - from.y);
+            Coordinate out = new Coordinate(point.x - target.x, point.y - target.y);
+            double dot = in.x * out.x + in.y * out.y;
+            double cross = in.x * out.y - in.y * out.x;
+            if (Math.toDegrees(Math.atan2(Math.abs(cross), dot)) > maxTurn + EPS) {
                 return false;
             }
         }
@@ -264,72 +261,6 @@ public class TerminalRelinker {
             return null;
         }
         return new Coordinate(a.x + t * dx, a.y + t * dy);
-    }
-
-    private Coordinate parentEnd(Edge edge, String rootId, Map<String, ForestNode> nodes,
-                                 List<Edge> edges) {
-        Integer depthA = depth(edge.a, rootId, nodes, edges);
-        Integer depthB = depth(edge.b, rootId, nodes, edges);
-        if (depthA == null || depthB == null) {
-            return edge.coords.get(0);
-        }
-        return depthA <= depthB ? edge.coords.get(0)
-                : edge.coords.get(edge.coords.size() - 1);
-    }
-
-    private Coordinate incomingDirection(String nodeId, String rootId, Map<String, ForestNode> nodes,
-                                         List<Edge> edges) {
-        Map<String, String> parent = parentMap(rootId, nodes, edges);
-        String p = parent.get(nodeId);
-        if (p == null) {
-            return null;
-        }
-        ForestNode node = nodes.get(nodeId);
-        ForestNode parentNode = nodes.get(p);
-        if (node == null || parentNode == null) {
-            return null;
-        }
-        return unit(node.getCoordinate().x - parentNode.getCoordinate().x,
-                node.getCoordinate().y - parentNode.getCoordinate().y);
-    }
-
-    private Map<String, String> parentMap(String rootId, Map<String, ForestNode> nodes,
-                                          List<Edge> edges) {
-        Map<String, List<String>> adjacency = adjacency(nodes, edges);
-        Map<String, String> parent = new HashMap<>();
-        Set<String> visited = new HashSet<>();
-        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>();
-        if (!nodes.containsKey(rootId)) {
-            return parent;
-        }
-        visited.add(rootId);
-        queue.add(rootId);
-        while (!queue.isEmpty()) {
-            String current = queue.poll();
-            for (String next : adjacency.getOrDefault(current, List.of())) {
-                if (visited.add(next)) {
-                    parent.put(next, current);
-                    queue.add(next);
-                }
-            }
-        }
-        return parent;
-    }
-
-    private Integer depth(String nodeId, String rootId, Map<String, ForestNode> nodes,
-                          List<Edge> edges) {
-        Map<String, String> parent = parentMap(rootId, nodes, edges);
-        if (!nodes.containsKey(nodeId)) {
-            return null;
-        }
-        int depth = 0;
-        String current = nodeId;
-        int guard = nodes.size() + 1;
-        while (parent.containsKey(current) && guard-- > 0) {
-            current = parent.get(current);
-            depth++;
-        }
-        return depth;
     }
 
     private Edge incident(String nodeId, List<Edge> edges) {
@@ -395,18 +326,6 @@ public class TerminalRelinker {
             right.addAll(coords.subList(segment + 1, coords.size()));
         }
         return List.of(left, right);
-    }
-
-    private Map<String, List<String>> adjacency(Map<String, ForestNode> nodes, List<Edge> edges) {
-        Map<String, List<String>> adjacency = new HashMap<>();
-        for (String id : nodes.keySet()) {
-            adjacency.put(id, new ArrayList<>());
-        }
-        for (Edge edge : edges) {
-            adjacency.computeIfAbsent(edge.a, key -> new ArrayList<>()).add(edge.b);
-            adjacency.computeIfAbsent(edge.b, key -> new ArrayList<>()).add(edge.a);
-        }
-        return adjacency;
     }
 
     private Rebuild rebuild(String rootId, Map<String, ForestNode> nodes, List<Edge> edges,
@@ -530,17 +449,6 @@ public class TerminalRelinker {
 
     private LineString line(List<Coordinate> coords) {
         return GeometrySupport.GEOMETRY_FACTORY.createLineString(coords.toArray(new Coordinate[0]));
-    }
-
-    private Coordinate unit(double x, double y) {
-        double len = Math.hypot(x, y);
-        return len < EPS ? new Coordinate(0, 0) : new Coordinate(x / len, y / len);
-    }
-
-    private double angle(Coordinate a, Coordinate b) {
-        double dot = a.x * b.x + a.y * b.y;
-        double cross = a.x * b.y - a.y * b.x;
-        return Math.toDegrees(Math.atan2(Math.abs(cross), dot));
     }
 
     private static final class Edge {

@@ -149,11 +149,12 @@
   (fast): каждое конфигурируемое поле имеет ключ в yml, env-имена —
   `HEATING_<ПОЛЕ>`.
   Регресс на реальном наборе — `CalculationPipelineSlowTest
-  .producesRun28BaselineWithDefaultParameters` (baseline после дефолта
-  `relocation=false`, cell=1.0: `score` ≈ 14.3207, длина ≈ 2071.78 м,
-  `calculatedCost` = 289478636, `chamberConstructionCost` = 58000000,
-  `unconnected` = 0, `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок,
-  ребро к точке 6 < 60 м; гекс-сетка).
+  .producesRun28BaselineWithDefaultParameters` (baseline после ADR-0043:
+  `score` ≈ 14.1533, длина ≈ 2054.11 м, `calculatedCost` = 285391150,
+  `chamberConstructionCost` = 56000000, `unconnected` = 0,
+  `TURN_ANGLE_EXCEEDS_90` ≤ 6, не более 12 вершин на участок, ребро к точке 6
+  < 60 м; гекс-сетка, cell 1 м; relink не проверяет углы маршрута, refine чинит
+  их в узлах).
 - **Опция `relocation=true`** — отдельный slow-тест
   `CalculationPipelineSlowTest.relinkExitRelocation_consolidatesPoints368`:
   точки 3, 6, 8 сходятся на одной камере (проверка
@@ -193,3 +194,4 @@
 | 2026-09-22 | ADR-0041: baseline на гекс-сетке (`S` 12.9730, длина 1836.49 м); A/B `GridShapeExperimentTest` | команда |
 | 2026-09-22 | `AppPropertiesEnvBindingTest` (поле ↔ env); дефолт ячейки 1.0, baseline `S` 13.7065 | команда |
 | 2026-09-22 | `forest-relink-exit-relocation=false` по умолчанию; baseline `S` 14.3207; консолидация 3/6/8 — отдельный slow-тест опции | команда |
+| 2026-09-22 | ADR-0043: relink без углов маршрута, refine чинит углы; baseline `S` 14.1533; 1/2 на одной камере | команда |
