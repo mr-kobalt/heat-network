@@ -70,11 +70,24 @@ public class TerminalRelinker {
                 return tree;
             }
             boolean changed = false;
-            List<String> terminals = terminalIds(nodes);
+            List<String> movables = new ArrayList<>(nodes.keySet());
             int idCounter = idBase;
-            for (String terminal : terminals) {
-                Best best = bestFor(terminal, tree.getTieInNodeId(), nodes, edges, current.score,
-                        exits, terminalFlow, obstacleIndex, ownObstacles, idCounter);
+            for (String nodeId : movables) {
+                if (nodeId.equals(tree.getTieInNodeId())) {
+                    idCounter += 100;
+                    continue;
+                }
+                ForestNode node = nodes.get(nodeId);
+                Best best;
+                if (node.getType() == NodeType.CONNECTION_POINT) {
+                    best = bestFor(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
+                            exits, terminalFlow, obstacleIndex, ownObstacles, idCounter);
+                } else if (appProperties.isForestRelinkNodes()) {
+                    best = bestForNode(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
+                            terminalFlow, obstacleIndex, idCounter);
+                } else {
+                    best = null;
+                }
                 if (best != null && best.rebuild.score < current.score - EPS) {
                     nodes = best.nodes;
                     edges = best.edges;
@@ -91,16 +104,6 @@ public class TerminalRelinker {
         }
         Rebuild finalState = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow);
         return finalState == null ? tree : finalState.tree;
-    }
-
-    private List<String> terminalIds(Map<String, ForestNode> nodes) {
-        List<String> result = new ArrayList<>();
-        for (ForestNode node : nodes.values()) {
-            if (node.getType() == NodeType.CONNECTION_POINT) {
-                result.add(node.getId());
-            }
-        }
-        return result;
     }
 
     private Best bestFor(String terminalId, String rootId, Map<String, ForestNode> nodes,
@@ -177,6 +180,9 @@ public class TerminalRelinker {
 
     private Best evaluate(Best best, Map<String, ForestNode> nodes, List<Edge> edges, String rootId,
                           Map<String, Double> terminalFlow, double currentScore) {
+        if (!degreeWithinLimit(edges)) {
+            return best;
+        }
         Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow);
         if (rebuild == null || rebuild.score >= currentScore) {
             return best;
@@ -185,6 +191,168 @@ public class TerminalRelinker {
             return new Best(nodes, edges, rebuild);
         }
         return best;
+    }
+
+    /** FR-26: степень узла не выше {@code forest-max-chamber-degree}. */
+    private boolean degreeWithinLimit(List<Edge> edges) {
+        int max = appProperties.getForestMaxChamberDegree();
+        if (max <= 0) {
+            return true;
+        }
+        Map<String, Integer> degree = new HashMap<>();
+        for (Edge edge : edges) {
+            if (degree.merge(edge.a, 1, Integer::sum) > max
+                    || degree.merge(edge.b, 1, Integer::sum) > max) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * ADR-0044: перенос промежуточного узла {@code nodeId} вместе с поддеревом
+     * к более дешёвому месту (существующий узел или T-врезка) в радиусе
+     * {@code forest-relink-nodes-radius-m}. Углы маршрута чинит refine.
+     */
+    private Best bestForNode(String nodeId, String rootId, Map<String, ForestNode> nodes,
+                             List<Edge> edges, double currentScore,
+                             Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
+                             int idCounter) {
+        ForestNode node = nodes.get(nodeId);
+        if (node == null || nodeId.equals(rootId)) {
+            return null;
+        }
+        Map<String, String> parent = parentMap(rootId, edges);
+        String parentId = parent.get(nodeId);
+        if (parentId == null) {
+            return null;
+        }
+        Edge parentEdge = edgeBetween(nodeId, parentId, edges);
+        if (parentEdge == null) {
+            return null;
+        }
+        Set<String> subtree = subtreeNodes(nodeId, parentEdge.id, edges);
+        Coordinate vertex = node.getCoordinate();
+        double radius = appProperties.getForestRelinkNodesRadiusM();
+        Best best = null;
+        // 1. Существующие узлы.
+        for (ForestNode candidate : nodes.values()) {
+            if (candidate.getId().equals(nodeId)
+                    || candidate.getType() == NodeType.CONNECTION_POINT
+                    || subtree.contains(candidate.getId())) {
+                continue;
+            }
+            Coordinate from = candidate.getCoordinate();
+            if (radius > 0 && from.distance(vertex) > radius) {
+                continue;
+            }
+            if (!validSegment(from, vertex, List.of(), vertex, edges, obstacleIndex, Set.of())) {
+                continue;
+            }
+            List<Edge> candidateEdges = removeEdge(edges, parentEdge.id);
+            candidateEdges.add(branch(candidate.getId(), nodeId, from, vertex, vertex, List.of(),
+                    "rj_b_" + idCounter + "_" + candidate.getId()));
+            best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore);
+        }
+        // 2. T-врезки в рёбра вне поддерева.
+        for (Edge edge : edges) {
+            if (edge.id.equals(parentEdge.id)) {
+                continue;
+            }
+            if (subtree.contains(edge.a) && subtree.contains(edge.b)) {
+                continue;
+            }
+            if (radius > 0 && edge.distanceTo(vertex) > radius) {
+                continue;
+            }
+            for (Coordinate p : tPoints(edge, vertex)) {
+                if (p.equals2D(edge.coords.get(0))
+                        || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
+                    continue;
+                }
+                if (radius > 0 && p.distance(vertex) > radius) {
+                    continue;
+                }
+                if (!validSegment(p, vertex, List.of(), vertex, edges, obstacleIndex, Set.of())) {
+                    continue;
+                }
+                String newId = "rj_" + (idCounter++);
+                List<Edge> candidateEdges = removeEdge(edges, parentEdge.id);
+                candidateEdges = removeEdge(candidateEdges, edge.id);
+                List<List<Coordinate>> split = splitPolyline(edge.coords, p);
+                candidateEdges.add(new Edge(edge.id + "_a", edge.a, newId, split.get(0)));
+                candidateEdges.add(new Edge(edge.id + "_b", newId, edge.b, split.get(1)));
+                candidateEdges.add(branch(newId, nodeId, p, vertex, vertex, List.of(),
+                        "rj_e_" + idCounter + "_" + edge.id));
+                Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
+                candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
+                        .coordinate(p).existing(false).build());
+                best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
+                        currentScore);
+            }
+        }
+        return best;
+    }
+
+    private Map<String, String> parentMap(String rootId, List<Edge> edges) {
+        Map<String, List<String>> adjacency = new HashMap<>();
+        for (Edge edge : edges) {
+            adjacency.computeIfAbsent(edge.a, key -> new ArrayList<>()).add(edge.b);
+            adjacency.computeIfAbsent(edge.b, key -> new ArrayList<>()).add(edge.a);
+        }
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>();
+        if (!adjacency.containsKey(rootId)) {
+            return parent;
+        }
+        visited.add(rootId);
+        queue.add(rootId);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (String next : adjacency.getOrDefault(current, List.of())) {
+                if (visited.add(next)) {
+                    parent.put(next, current);
+                    queue.add(next);
+                }
+            }
+        }
+        return parent;
+    }
+
+    private Edge edgeBetween(String first, String second, List<Edge> edges) {
+        for (Edge edge : edges) {
+            if ((edge.a.equals(first) && edge.b.equals(second))
+                    || (edge.a.equals(second) && edge.b.equals(first))) {
+                return edge;
+            }
+        }
+        return null;
+    }
+
+    /** Узлы, достижимые от {@code root} без прохода по {@code parentEdgeId} (сам root и его поддерево). */
+    private Set<String> subtreeNodes(String root, String parentEdgeId, List<Edge> edges) {
+        Map<String, List<String>> adjacency = new HashMap<>();
+        for (Edge edge : edges) {
+            if (edge.id.equals(parentEdgeId)) {
+                continue;
+            }
+            adjacency.computeIfAbsent(edge.a, key -> new ArrayList<>()).add(edge.b);
+            adjacency.computeIfAbsent(edge.b, key -> new ArrayList<>()).add(edge.a);
+        }
+        Set<String> subtree = new HashSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>();
+        subtree.add(root);
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (String next : adjacency.getOrDefault(current, List.of())) {
+                if (subtree.add(next)) {
+                    queue.add(next);
+                }
+            }
+        }
+        return subtree;
     }
 
     /**
@@ -498,6 +666,26 @@ public class TerminalRelinker {
                 total += coords.get(i - 1).distance(coords.get(i));
             }
             return total;
+        }
+
+        private double distanceTo(Coordinate point) {
+            double best = Double.POSITIVE_INFINITY;
+            for (int i = 0; i < coords.size() - 1; i++) {
+                best = Math.min(best, segmentDistance(point, coords.get(i), coords.get(i + 1)));
+            }
+            return best;
+        }
+
+        private double segmentDistance(Coordinate p, Coordinate a, Coordinate b) {
+            double dx = b.x - a.x;
+            double dy = b.y - a.y;
+            double len2 = dx * dx + dy * dy;
+            if (len2 < EPS) {
+                return p.distance(a);
+            }
+            double t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+            t = Math.max(0.0, Math.min(1.0, t));
+            return p.distance(new Coordinate(a.x + t * dx, a.y + t * dy));
         }
     }
 

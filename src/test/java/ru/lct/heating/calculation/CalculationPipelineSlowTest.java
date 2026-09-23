@@ -61,13 +61,13 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         assertThat(outcome.getSummary()).isNotNull();
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         // ADR-0037/0038/0040/0041/0039/0043 см. историю; bugfix: relink удаляет
-        // тупиковые листья, оставшиеся после переприсоединения — baseline
-        // пересчитан (S 14.153 → 14.052, длина 2054.1 → 2034.2 м,
-        // стоимость 285.39 → 283.91 млн).
-        assertThat(outcome.getSummary().getScore()).isCloseTo(14.05199619032578, within(1e-6));
+        // тупиковые листья; ADR-0044: степень узла ≤4 (FR-26) — baseline
+        // пересчитан (S 14.051996 → 14.051205, длина 2034.214 → 2034.071 м,
+        // стоимость 283.906 → 283.893 млн).
+        assertThat(outcome.getSummary().getScore()).isCloseTo(14.051205495774571, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(2034.21393277526, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(283905514L);
+                .isCloseTo(2034.0705065915238, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(283892642L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(56000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())

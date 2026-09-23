@@ -90,6 +90,11 @@ heating:
     # ADR-0035: переприсоединение терминалов (T-врезка).
     forest-reattach-pass: ${HEATING_FOREST_REATTACH_PASS:true}
     forest-reattach-iterations: ${HEATING_FOREST_REATTACH_ITERATIONS:2}
+    # ADR-0044: перестройка дерева — перенос промежуточных узлов с поддеревом.
+    forest-relink-nodes: ${HEATING_FOREST_RELINK_NODES:false}
+    forest-relink-nodes-radius-m: ${HEATING_FOREST_RELINK_NODES_RADIUS_M:100.0}
+    # FR-26: предельная степень камеры.
+    forest-max-chamber-degree: ${HEATING_FOREST_MAX_CHAMBER_DEGREE:4}
     # ADR-0039: разрешить relink менять выход, выбранный growth (по умолчанию — нет).
     forest-relink-exit-relocation: ${HEATING_FOREST_RELINK_EXIT_RELOCATION:false}
     forest-relink-exit-candidates-max: ${HEATING_FOREST_RELINK_EXIT_CANDIDATES_MAX:6}

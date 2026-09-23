@@ -73,6 +73,15 @@ public class AppProperties {
     /** ADR-0035: число проходов переприсоединения. */
     private int forestReattachIterations = 2;
     /**
+     * ADR-0044: перестройка дерева — переносить не только терминалы, но и
+     * промежуточные узлы с поддеревом. По умолчанию выключено.
+     */
+    private boolean forestRelinkNodes = false;
+    /** ADR-0044: радиус поиска кандидатов при переносе узла, м. */
+    private double forestRelinkNodesRadiusM = 100.0;
+    /** FR-26: предельная степень узла-камеры (число примыканий). */
+    private int forestMaxChamberDegree = 4;
+    /**
      * ADR-0039: разрешить relink менять точку выхода, выбранную growth, выбирая
      * среди выходов-кандидатов точки ({@code OksApproachResolver.candidatesFor}).
      * По умолчанию {@code false} — relink оптимизирует только точку врезки, а
