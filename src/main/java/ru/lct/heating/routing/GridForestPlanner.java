@@ -914,7 +914,10 @@ public class GridForestPlanner {
             long refineStart = System.nanoTime();
             trees = refineTrees(trees, pass, obstacleIndex, specialZones, terminalCells, own, graph,
                     warnings);
-            if (appProperties.isForestRootOptimization()) {
+            if (appProperties.isForestChamberOptimization()) {
+                trees = optimizeChambers(trees, dataset, pass, obstacleIndex, specialZones,
+                        terminalCells, own);
+            } else if (appProperties.isForestRootOptimization()) {
                 trees = optimizeRoots(trees, dataset, pass, obstacleIndex, warnings);
             }
             long refineMs = elapsedMs(refineStart);
@@ -1894,6 +1897,382 @@ public class GridForestPlanner {
                 + Math.round(currentLen - bestLen) + " м");
         return ForestTree.builder().tieInNodeId(tree.getTieInNodeId()).nodes(nodes)
                 .edges(edges).build();
+    }
+
+    /**
+     * ADR-0051: оптимизация положения новых камер (включая корень) — сдвиг к
+     * геометрической медиане соседних вершин (для корня — к проекциям на
+     * существующую сеть) с локальной перепрокладкой стыков; принимается строго
+     * лучшее по S при сохранении длины, углов, запретов и выходов.
+     */
+    private List<ForestTree> optimizeChambers(List<ForestTree> trees, NetworkDataset dataset,
+                                              ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                              SpecialZoneIndex specialZones,
+                                              Map<Integer, Terminal> terminalCells,
+                                              Map<String, Set<PreparedGeometry>> ownObstacles) {
+        long start = System.nanoTime();
+        int count = trees.size();
+        ForestTree[] result = new ForestTree[count];
+        java.util.stream.IntStream.range(0, count).parallel().forEach(index -> result[index] =
+                optimizeChamberTree(trees.get(index), dataset, pass, obstacleIndex, specialZones,
+                        ownObstacles));
+        log.info("Chamber optimization: trees={} time={}ms", count, elapsedMs(start));
+        return new ArrayList<>(Arrays.asList(result));
+    }
+
+    private ForestTree optimizeChamberTree(ForestTree tree, NetworkDataset dataset, ObstacleMask pass,
+                                           ObstacleIndex obstacleIndex,
+                                           SpecialZoneIndex specialZones,
+                                           Map<String, Set<PreparedGeometry>> ownObstacles) {
+        Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
+        List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
+        String rootId = tree.getTieInNodeId();
+        int passes = Math.max(1, appProperties.getForestChamberPasses());
+        for (int passIndex = 0; passIndex < passes; passIndex++) {
+            List<String> movable = new ArrayList<>();
+            for (ForestNode node : nodes.values()) {
+                if (node.getType() == NodeType.CHAMBER && !node.isExisting()) {
+                    movable.add(node.getId());
+                }
+            }
+            Collections.sort(movable);
+            boolean changed = false;
+            for (String nodeId : movable) {
+                if (relocateChamber(nodeId, nodes, edges, rootId, dataset, pass, obstacleIndex,
+                        specialZones, ownObstacles)) {
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+        return ForestTree.builder().tieInNodeId(rootId).nodes(nodes).edges(edges).build();
+    }
+
+    private boolean relocateChamber(String nodeId, Map<String, ForestNode> nodes,
+                                    List<ForestEdge> edges, String rootId, NetworkDataset dataset,
+                                    ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                    SpecialZoneIndex specialZones,
+                                    Map<String, Set<PreparedGeometry>> ownObstacles) {
+        ForestNode node = nodes.get(nodeId);
+        if (node == null) {
+            return false;
+        }
+        List<Integer> incident = new ArrayList<>();
+        for (int i = 0; i < edges.size(); i++) {
+            ForestEdge edge = edges.get(i);
+            if (edge.getFromNodeId().equals(nodeId) || edge.getToNodeId().equals(nodeId)) {
+                incident.add(i);
+            }
+        }
+        if (incident.isEmpty()) {
+            return false;
+        }
+        Set<Integer> incidentSet = new HashSet<>(incident);
+        List<String> ignoredWarnings = new ArrayList<>();
+        List<Stub> stubs = new ArrayList<>();
+        for (int index : incident) {
+            Stub stub = stub(index, edges.get(index), nodeId, ownObstacles, specialZones,
+                    ignoredWarnings);
+            if (stub == null) {
+                return false;
+            }
+            stubs.add(stub);
+        }
+        double currentStubSum = 0.0;
+        for (Stub stub : stubs) {
+            currentStubSum += stub.oldStubLen;
+        }
+        boolean isRoot = nodeId.equals(rootId);
+        List<Coordinate> candidates = chamberCandidates(node, stubs, isRoot, dataset, pass);
+        // Выбор кандидата по дешёвой локальной дельте стоимости стыков; полная
+        // пересборка (enforce + оценка S) — только для лучшего кандидата.
+        long bestCheap = 0L;
+        Coordinate bestPosition = null;
+        Map<Integer, ForestEdge> bestReplaced = null;
+        for (Coordinate candidate : candidates) {
+            ChamberMove move = tryChamberMove(candidate, stubs, edges, incidentSet, obstacleIndex,
+                    specialZones);
+            if (move == null || move.stubSum >= currentStubSum - EPS) {
+                continue;
+            }
+            long cheap = 0L;
+            for (int i = 0; i < stubs.size(); i++) {
+                Stub stub = stubs.get(i);
+                cheap += costModel.segmentCost(stub.oldRestLen + move.stubLens.get(i), stub.dn, 1.0,
+                        stub.kSpecial)
+                        - costModel.segmentCost(stub.oldRestLen + stub.oldStubLen, stub.dn, 1.0,
+                                stub.kSpecial);
+            }
+            if (cheap < bestCheap - EPS) {
+                bestCheap = cheap;
+                bestPosition = candidate;
+                bestReplaced = move.replaced;
+            }
+        }
+        if (bestReplaced == null) {
+            return false;
+        }
+        List<ForestEdge> candidateEdges = new ArrayList<>(edges);
+        for (Map.Entry<Integer, ForestEdge> entry : bestReplaced.entrySet()) {
+            candidateEdges.set(entry.getKey(), entry.getValue());
+        }
+        try {
+            candidateEdges = maxLengthEnforcer.enforce(candidateEdges, rootId);
+        } catch (IllegalArgumentException noDiameter) {
+            return false;
+        }
+        Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
+        candidateNodes.put(nodeId, node.toBuilder().coordinate(bestPosition).build());
+        double currentScore = treeScore(nodes, edges, rootId, specialZones);
+        if (treeScore(candidateNodes, candidateEdges, rootId, specialZones) >= currentScore - EPS) {
+            return false;
+        }
+        edges.clear();
+        edges.addAll(candidateEdges);
+        nodes.put(nodeId, node.toBuilder().coordinate(bestPosition).build());
+        return true;
+    }
+
+    private Stub stub(int edgeIndex, ForestEdge edge, String nodeId,
+                      Map<String, Set<PreparedGeometry>> ownObstacles,
+                      SpecialZoneIndex specialZones, List<String> ignoredWarnings) {
+        List<Coordinate> coords = edge.getCoordinates();
+        if (coords.size() < 2) {
+            return null;
+        }
+        boolean nodeIsFrom = edge.getFromNodeId().equals(nodeId);
+        if (!nodeIsFrom && !edge.getToNodeId().equals(nodeId)) {
+            return null;
+        }
+        String farId = nodeIsFrom ? edge.getToNodeId() : edge.getFromNodeId();
+        Coordinate endpoint = nodeIsFrom ? coords.get(1) : coords.get(coords.size() - 2);
+        Coordinate nextAfter = coords.size() > 2
+                ? (nodeIsFrom ? coords.get(2) : coords.get(coords.size() - 3)) : null;
+        double oldStubLen = nodeIsFrom
+                ? coords.get(0).distance(coords.get(1))
+                : coords.get(coords.size() - 1).distance(coords.get(coords.size() - 2));
+        Stub stub = new Stub();
+        stub.edgeIndex = edgeIndex;
+        stub.dn = edge.getDiameterMm();
+        stub.kSpecial = maxKSpecial(edge, specialZones, ignoredWarnings);
+        stub.costPerM = diameters.newCostPerM(edge.getDiameterMm());
+        stub.oldStubLen = oldStubLen;
+        stub.oldRestLen = edge.lengthM() - oldStubLen;
+        stub.endpoint = endpoint;
+        stub.nextAfter = nextAfter;
+        stub.nodeIsFrom = nodeIsFrom;
+        stub.ignored = ownObstacles == null ? Set.of()
+                : ownObstacles.getOrDefault(farId, Set.of());
+        return stub;
+    }
+
+    private List<Coordinate> chamberCandidates(ForestNode node, List<Stub> stubs, boolean isRoot,
+                                               NetworkDataset dataset, ObstacleMask pass) {
+        List<Coordinate> points = new ArrayList<>();
+        List<Double> weights = new ArrayList<>();
+        for (Stub stub : stubs) {
+            points.add(stub.endpoint);
+            weights.add(stub.costPerM > 0 ? stub.costPerM : 1.0);
+        }
+        Coordinate median = weightedMedian(points, weights);
+        List<Coordinate> candidates = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        addCandidate(candidates, seen, node.getCoordinate());
+        int max = Math.max(1, appProperties.getForestChamberMaxCandidates());
+        if (isRoot) {
+            for (TieInCandidate candidate : candidateProvider.projections(dataset, median)) {
+                if (candidates.size() >= max) {
+                    break;
+                }
+                addCandidate(candidates, seen, candidate.getCoordinate());
+            }
+        } else {
+            int width = pass.width();
+            int height = pass.height();
+            int cell = pass.cellAt(median.x, median.y);
+            int col = cell % width;
+            int row = cell / width;
+            int radius = (int) Math.ceil(appProperties.getForestChamberSearchRadiusCells());
+            List<Coordinate> cells = new ArrayList<>();
+            for (int dr = -radius; dr <= radius; dr++) {
+                for (int dc = -radius; dc <= radius; dc++) {
+                    int c = col + dc;
+                    int r = row + dr;
+                    if (c < 0 || r < 0 || c >= width || r >= height || pass.blockedCell(c, r)) {
+                        continue;
+                    }
+                    cells.add(new Coordinate(pass.centerX(c, r), pass.centerY(c, r)));
+                }
+            }
+            cells.sort(Comparator.comparingDouble(median::distance));
+            for (Coordinate cellCenter : cells) {
+                if (candidates.size() >= max) {
+                    break;
+                }
+                addCandidate(candidates, seen, cellCenter);
+            }
+        }
+        return candidates;
+    }
+
+    private void addCandidate(List<Coordinate> candidates, Set<String> seen, Coordinate candidate) {
+        if (candidate == null) {
+            return;
+        }
+        String key = Math.round(candidate.x * 1000.0) + ":" + Math.round(candidate.y * 1000.0);
+        if (seen.add(key)) {
+            candidates.add(new Coordinate(candidate));
+        }
+    }
+
+    private Coordinate weightedMedian(List<Coordinate> points, List<Double> weights) {
+        int n = points.size();
+        if (n == 1) {
+            return points.get(0);
+        }
+        if (n == 2) {
+            return new Coordinate((points.get(0).x + points.get(1).x) / 2.0,
+                    (points.get(0).y + points.get(1).y) / 2.0);
+        }
+        double x = 0.0;
+        double y = 0.0;
+        double totalWeight = 0.0;
+        for (int i = 0; i < n; i++) {
+            x += points.get(i).x * weights.get(i);
+            y += points.get(i).y * weights.get(i);
+            totalWeight += weights.get(i);
+        }
+        x /= totalWeight;
+        y /= totalWeight;
+        for (int iteration = 0; iteration < 50; iteration++) {
+            double nx = 0.0;
+            double ny = 0.0;
+            double den = 0.0;
+            for (int i = 0; i < n; i++) {
+                double distance = Math.sqrt(Math.pow(x - points.get(i).x, 2)
+                        + Math.pow(y - points.get(i).y, 2));
+                if (distance < 1e-9) {
+                    return new Coordinate(points.get(i));
+                }
+                double w = weights.get(i) / distance;
+                nx += points.get(i).x * w;
+                ny += points.get(i).y * w;
+                den += w;
+            }
+            double nextX = nx / den;
+            double nextY = ny / den;
+            if (Math.sqrt(Math.pow(nextX - x, 2) + Math.pow(nextY - y, 2)) < 1e-4) {
+                x = nextX;
+                y = nextY;
+                break;
+            }
+            x = nextX;
+            y = nextY;
+        }
+        return new Coordinate(x, y);
+    }
+
+    private ChamberMove tryChamberMove(Coordinate candidate, List<Stub> stubs, List<ForestEdge> edges,
+                                       Set<Integer> incidentSet, ObstacleIndex obstacleIndex,
+                                       SpecialZoneIndex specialZones) {
+        List<Coordinate> firstSteps = new ArrayList<>();
+        List<Double> stubLens = new ArrayList<>();
+        double stubSum = 0.0;
+        for (Stub stub : stubs) {
+            // Прямой отрезок «кандидат → соседняя вершина» (как в refine/string
+            // pulling); если запрет или недопустимый стык — кандидат отклоняется.
+            if (obstacleIndex != null && obstacleIndex.isInteriorBlocked(
+                    line(candidate, stub.endpoint), stub.ignored)) {
+                return null;
+            }
+            if (specialZones != null && !specialZones.angleOk(line(candidate, stub.endpoint))) {
+                return null;
+            }
+            if (!turnAllowed(candidate, stub.endpoint, stub.nextAfter)) {
+                return null;
+            }
+            firstSteps.add(stub.endpoint);
+            double length = candidate.distance(stub.endpoint);
+            stubLens.add(length);
+            stubSum += length;
+        }
+        for (int i = 0; i < firstSteps.size(); i++) {
+            for (int j = i + 1; j < firstSteps.size(); j++) {
+                if (!turnAllowed(firstSteps.get(i), candidate, firstSteps.get(j))) {
+                    return null;
+                }
+            }
+        }
+        Map<Integer, ForestEdge> replaced = new HashMap<>();
+        for (Stub stub : stubs) {
+            ForestEdge old = edges.get(stub.edgeIndex);
+            List<Coordinate> coords = new ArrayList<>();
+            if (stub.nodeIsFrom) {
+                coords.add(new Coordinate(candidate));
+                coords.addAll(old.getCoordinates().subList(1, old.getCoordinates().size()));
+            } else {
+                int count = old.getCoordinates().size();
+                coords.addAll(old.getCoordinates().subList(0, count - 1));
+                coords.add(new Coordinate(candidate));
+            }
+            replaced.put(stub.edgeIndex, ForestEdge.builder().id(old.getId())
+                    .fromNodeId(old.getFromNodeId()).toNodeId(old.getToNodeId())
+                    .coordinates(coords).flowTph(old.getFlowTph()).diameterMm(old.getDiameterMm())
+                    .build());
+        }
+        for (ForestEdge replacement : replaced.values()) {
+            LineString replacementLine = line(replacement);
+            Envelope envelope = replacementLine.getEnvelopeInternal();
+            for (int i = 0; i < edges.size(); i++) {
+                if (incidentSet.contains(i)) {
+                    continue;
+                }
+                ForestEdge other = edges.get(i);
+                if (sharesNode(replacement, other)) {
+                    continue;
+                }
+                LineString otherLine = line(other);
+                if (!envelope.intersects(otherLine.getEnvelopeInternal())) {
+                    continue;
+                }
+                if (!replacementLine.intersection(otherLine).isEmpty()) {
+                    return null;
+                }
+            }
+        }
+        ChamberMove move = new ChamberMove();
+        move.replaced = replaced;
+        move.stubSum = stubSum;
+        move.stubLens = stubLens;
+        return move;
+    }
+
+    private double treeScore(Map<String, ForestNode> nodes, List<ForestEdge> edges, String rootId,
+                             SpecialZoneIndex specialZones) {
+        ForestTree tree = ForestTree.builder().tieInNodeId(rootId).nodes(nodes).edges(edges).build();
+        return estimateScore(List.of(tree), List.of(), Map.of(), specialZones);
+    }
+
+    /** Стык ребра у перемещаемой камеры (для локальной перепрокладки). */
+    private static final class Stub {
+        private int edgeIndex;
+        private int dn;
+        private double kSpecial;
+        private double costPerM;
+        private double oldStubLen;
+        private double oldRestLen;
+        private Coordinate endpoint;
+        private Coordinate nextAfter;
+        private boolean nodeIsFrom;
+        private Set<PreparedGeometry> ignored;
+    }
+
+    private static final class ChamberMove {
+        private Map<Integer, ForestEdge> replaced;
+        private double stubSum;
+        private List<Double> stubLens;
     }
 
     private boolean rootConnectorTurnsOk(Coordinate q, ForestNode branch, ForestTree tree) {

@@ -116,6 +116,11 @@ heating:
     forest-gate-retries: ${HEATING_FOREST_GATE_RETRIES:2}
     # E35: оптимизация точки врезки корня (перпендикулярная проекция на сеть).
     forest-root-optimization: ${HEATING_FOREST_ROOT_OPTIMIZATION:true}
+    # ADR-0051: оптимизация положения новых камер (медиана соседей + стыки).
+    forest-chamber-optimization: ${HEATING_FOREST_CHAMBER_OPTIMIZATION:true}
+    forest-chamber-search-radius-cells: ${HEATING_FOREST_CHAMBER_SEARCH_RADIUS_CELLS:3.0}
+    forest-chamber-max-candidates: ${HEATING_FOREST_CHAMBER_MAX_CANDIDATES:25}
+    forest-chamber-passes: ${HEATING_FOREST_CHAMBER_PASSES:1}
     # E25-05b: буферы по фактическому Ду (пересборка индекса и повтор расчёта).
     forest-diameter-aware-buffers: ${HEATING_FOREST_DIAMETER_AWARE_BUFFERS:false}
     forest-diameter-aware-iterations: ${HEATING_FOREST_DIAMETER_AWARE_ITERATIONS:2}
