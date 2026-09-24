@@ -906,6 +906,9 @@ public class GridForestPlanner {
                 trees = new TerminalRelinker(costModel, diameters, appProperties, graph)
                         .relink(trees, exits, terminalFlow, obstacleIndex, own);
             }
+            // FR-30: сквозные (degree-2) узлы без смены параметра — не технические
+            // узлы; после relink склеиваем их рёбра в одну LineString.
+            trees = contractPassThroughNodes(trees);
             long relinkMs = elapsedMs(relinkStart);
             List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineStart = System.nanoTime();
@@ -933,6 +936,100 @@ public class GridForestPlanner {
         } finally {
             store.close();
         }
+    }
+
+    /**
+     * FR-30: технический узел — только смена параметра без разветвления, а не
+     * обычный поворот. После {@code relink} бывшие развилки могут стать
+     * сквозными (degree 2); контрактируем такие узлы, склеивая рёбра в одну
+     * LineString. Узлы смены Ду, камеры, корень и терминалы сохраняются.
+     */
+    static List<ForestTree> contractPassThroughNodes(List<ForestTree> trees) {
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            result.add(contractTree(tree));
+        }
+        return result;
+    }
+
+    static ForestTree contractTree(ForestTree tree) {
+        Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
+        List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
+        String rootId = tree.getTieInNodeId();
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            Map<String, List<Integer>> incident = new HashMap<>();
+            for (int i = 0; i < edges.size(); i++) {
+                ForestEdge edge = edges.get(i);
+                incident.computeIfAbsent(edge.getFromNodeId(), key -> new ArrayList<>()).add(i);
+                incident.computeIfAbsent(edge.getToNodeId(), key -> new ArrayList<>()).add(i);
+            }
+            for (Map.Entry<String, List<Integer>> entry : incident.entrySet()) {
+                String nodeId = entry.getKey();
+                List<Integer> ids = entry.getValue();
+                if (ids.size() != 2 || nodeId.equals(rootId)) {
+                    continue;
+                }
+                ForestNode node = nodes.get(nodeId);
+                if (node == null || node.isExisting()
+                        || node.getType() != NodeType.TECHNICAL_NODE) {
+                    continue;
+                }
+                ForestEdge first = edges.get(ids.get(0));
+                ForestEdge second = edges.get(ids.get(1));
+                if (first.getDiameterMm() != second.getDiameterMm()) {
+                    continue;
+                }
+                ForestEdge merged = mergeAt(first, second, nodeId);
+                if (merged == null) {
+                    continue;
+                }
+                nodes.remove(nodeId);
+                edges.remove(first);
+                edges.remove(second);
+                edges.add(merged);
+                changed = true;
+                break;
+            }
+        }
+        return ForestTree.builder().tieInNodeId(rootId).nodes(nodes).edges(edges).build();
+    }
+
+    /** Склейка двух рёбер, сходящихся в сквозном узле {@code nodeId}. */
+    private static ForestEdge mergeAt(ForestEdge first, ForestEdge second, String nodeId) {
+        List<Coordinate> firstCoords = new ArrayList<>(first.getCoordinates());
+        List<Coordinate> secondCoords = new ArrayList<>(second.getCoordinates());
+        String fromId;
+        if (nodeId.equals(first.getToNodeId())) {
+            fromId = first.getFromNodeId();
+        } else if (nodeId.equals(first.getFromNodeId())) {
+            Collections.reverse(firstCoords);
+            fromId = first.getToNodeId();
+        } else {
+            return null;
+        }
+        String toId;
+        if (nodeId.equals(second.getFromNodeId())) {
+            toId = second.getToNodeId();
+        } else if (nodeId.equals(second.getToNodeId())) {
+            Collections.reverse(secondCoords);
+            toId = second.getFromNodeId();
+        } else {
+            return null;
+        }
+        List<Coordinate> coordinates = new ArrayList<>(firstCoords);
+        for (int i = 1; i < secondCoords.size(); i++) {
+            coordinates.add(secondCoords.get(i));
+        }
+        return ForestEdge.builder()
+                .id(first.getId())
+                .fromNodeId(fromId)
+                .toNodeId(toId)
+                .coordinates(coordinates)
+                .flowTph(first.getFlowTph())
+                .diameterMm(first.getDiameterMm())
+                .build();
     }
 
     /** Сырое дерево прохода: отрезки сетки «родитель → клетка» до сглаживания. */

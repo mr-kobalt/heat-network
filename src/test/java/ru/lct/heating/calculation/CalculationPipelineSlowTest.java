@@ -63,11 +63,12 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // ADR-0037/0038/0040/0041/0039/0043+bugfix см. историю; ADR-0044:
         // перестройка дерева включена; E23-04 закрыт (FR-34: 0); ADR-0045
         // (строгий обход) и E26 (правило 10 м) включены по умолчанию, добавлено
-        // упрощение рёбер (FR-28) — baseline пересчитан.
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.580152442677246, within(1e-6));
+        // упрощение рёбер (FR-28) — baseline пересчитан. ADR-0050: сквозные
+        // degree-2 узлы контрактируются (FR-30) — baseline пересчитан повторно.
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.560621677285116, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1913.4793848924153, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279989796L);
+                .isCloseTo(1910.364811095039, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279625973L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(60000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
