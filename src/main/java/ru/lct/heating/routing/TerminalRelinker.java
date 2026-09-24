@@ -1,6 +1,7 @@
 package ru.lct.heating.routing;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -8,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
 import ru.lct.heating.config.AppProperties;
@@ -51,15 +53,15 @@ public class TerminalRelinker {
     public List<ForestTree> relink(List<ForestTree> trees, Map<String, List<ConnectionExit>> exits,
                                    Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                                    Map<String, Set<PreparedGeometry>> ownObstacles) {
-        List<ForestTree> result = new ArrayList<>();
         int iterations = Math.max(1, appProperties.getForestReattachIterations());
-        int idCounter = 0;
-        for (ForestTree tree : trees) {
-            result.add(relinkTree(tree, exits, terminalFlow, obstacleIndex, ownObstacles,
-                    iterations, idCounter));
-            idCounter += 10_000_000;
-        }
-        return result;
+        int count = trees.size();
+        ForestTree[] result = new ForestTree[count];
+        // Деревья переприсоединяются независимо: распараллеливаем с сохранением
+        // порядка (детерминированный idBase по индексу дерева).
+        java.util.stream.IntStream.range(0, count).parallel().forEach(index ->
+                result[index] = relinkTree(trees.get(index), exits, terminalFlow, obstacleIndex,
+                        ownObstacles, iterations, index * 10_000_000));
+        return new ArrayList<>(Arrays.asList(result));
     }
 
     private ForestTree relinkTree(ForestTree tree, Map<String, List<ConnectionExit>> exits,
@@ -131,6 +133,9 @@ public class TerminalRelinker {
         }
         Set<PreparedGeometry> ignored = ownObstacles == null ? Set.of()
                 : ownObstacles.getOrDefault(terminalId, Set.of());
+        LineString[] edgeLines = new LineString[edges.size()];
+        Envelope[] edgeEnvelopes = new Envelope[edges.size()];
+        edgeGeometries(edges, edgeLines, edgeEnvelopes);
         Best best = null;
         // ADR-0039: перебираем все выходы-кандидаты точки, а не только канонический.
         for (ConnectionExit exit : candidates) {
@@ -146,7 +151,8 @@ public class TerminalRelinker {
                     continue;
                 }
                 Coordinate from = candidate.getCoordinate();
-                if (!validSegment(from, target, tail, point, edges, obstacleIndex, ignored)) {
+                if (!validSegment(from, target, tail, point, edges, edgeLines, edgeEnvelopes,
+                        obstacleIndex, ignored)) {
                     continue;
                 }
                 List<Edge> candidateEdges = removeEdge(edges, current.id);
@@ -164,7 +170,8 @@ public class TerminalRelinker {
                             || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
                         continue;
                     }
-                    if (!validSegment(p, target, tail, point, edges, obstacleIndex, ignored)) {
+                    if (!validSegment(p, target, tail, point, edges, edgeLines, edgeEnvelopes,
+                            obstacleIndex, ignored)) {
                         continue;
                     }
                     String newId = "rj_" + (idCounter++);
@@ -255,6 +262,9 @@ public class TerminalRelinker {
         Set<String> subtree = subtreeNodes(nodeId, parentEdge.id, edges);
         Coordinate vertex = node.getCoordinate();
         double radius = appProperties.getForestRelinkNodesRadiusM();
+        LineString[] edgeLines = new LineString[edges.size()];
+        Envelope[] edgeEnvelopes = new Envelope[edges.size()];
+        edgeGeometries(edges, edgeLines, edgeEnvelopes);
         Best best = null;
         // 1. Существующие узлы.
         for (ForestNode candidate : nodes.values()) {
@@ -267,7 +277,8 @@ public class TerminalRelinker {
             if (radius > 0 && from.distance(vertex) > radius) {
                 continue;
             }
-            if (!validSegment(from, vertex, List.of(), vertex, edges, obstacleIndex, Set.of())) {
+            if (!validSegment(from, vertex, List.of(), vertex, edges, edgeLines, edgeEnvelopes,
+                    obstacleIndex, Set.of())) {
                 continue;
             }
             List<Edge> candidateEdges = removeEdge(edges, parentEdge.id);
@@ -294,7 +305,8 @@ public class TerminalRelinker {
                 if (radius > 0 && p.distance(vertex) > radius) {
                     continue;
                 }
-                if (!validSegment(p, vertex, List.of(), vertex, edges, obstacleIndex, Set.of())) {
+                if (!validSegment(p, vertex, List.of(), vertex, edges, edgeLines, edgeEnvelopes,
+                        obstacleIndex, Set.of())) {
                     continue;
                 }
                 String newId = "rj_" + (idCounter++);
@@ -383,7 +395,8 @@ public class TerminalRelinker {
      * здесь.
      */
     private boolean validSegment(Coordinate from, Coordinate target, List<Coordinate> tail,
-                                 Coordinate point, List<Edge> edges,
+                                 Coordinate point, List<Edge> edges, LineString[] edgeLines,
+                                 Envelope[] edgeEnvelopes,
                                  ObstacleIndex obstacleIndex, Set<PreparedGeometry> ignored) {
         LineString segment = line(from, target);
         if (obstacleIndex != null && obstacleIndex.isInteriorBlocked(segment, ignored)) {
@@ -400,15 +413,28 @@ public class TerminalRelinker {
                 return false;
             }
         }
-        for (Edge edge : edges) {
+        Envelope segmentEnvelope = segment.getEnvelopeInternal();
+        for (int i = 0; i < edges.size(); i++) {
+            Edge edge = edges.get(i);
             if (contains(edge.coords, from) || contains(edge.coords, target)) {
                 continue;
             }
-            if (segment.crosses(line(edge.coords))) {
+            if (!segmentEnvelope.intersects(edgeEnvelopes[i])) {
+                continue;
+            }
+            if (segment.crosses(edgeLines[i])) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** Линии и envelope рёбер для дешёвого отсева по габаритам при проверке. */
+    private void edgeGeometries(List<Edge> edges, LineString[] lines, Envelope[] envelopes) {
+        for (int i = 0; i < edges.size(); i++) {
+            lines[i] = line(edges.get(i).coords);
+            envelopes[i] = lines[i].getEnvelopeInternal();
+        }
     }
 
     private boolean contains(List<Coordinate> coords, Coordinate point) {

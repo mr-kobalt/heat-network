@@ -1,7 +1,5 @@
 package ru.lct.heating.geometry;
 
-import java.util.List;
-
 /**
  * Гексагональная сетка, pointy-top, odd-r смещение (ADR-0041). Шесть соседей
  * по рёбрам на равном расстоянии {@code cellM}; строки смещены на полшага.
@@ -12,6 +10,14 @@ public final class HexGridShape implements GridShape {
     private static final double SQRT3 = Math.sqrt(3.0);
     /** Вертикальный шаг строк: 3/2 от circumradius = sqrt(3)/2 от шага. */
     private static final double VERTICAL = SQRT3 / 2.0;
+
+    /** Соседи для чётной строки (порядок фиксирован: он входит в ключ состояния). */
+    private static final int[][] NEIGHBORS_EVEN = {
+            {1, 0}, {-1, 0}, {0, -1}, {-1, -1}, {0, 1}, {-1, 1}
+    };
+    private static final int[][] NEIGHBORS_ODD = {
+            {1, 0}, {-1, 0}, {1, -1}, {0, -1}, {1, 1}, {0, 1}
+    };
 
     public static final HexGridShape INSTANCE = new HexGridShape();
 
@@ -75,13 +81,8 @@ public final class HexGridShape implements GridShape {
     }
 
     @Override
-    public List<int[]> neighbors(int col, int row) {
-        if ((row & 1) == 0) {
-            return List.of(new int[]{1, 0}, new int[]{-1, 0}, new int[]{0, -1},
-                    new int[]{-1, -1}, new int[]{0, 1}, new int[]{-1, 1});
-        }
-        return List.of(new int[]{1, 0}, new int[]{-1, 0}, new int[]{1, -1},
-                new int[]{0, -1}, new int[]{1, 1}, new int[]{0, 1});
+    public int[][] neighbors(int col, int row) {
+        return (row & 1) == 0 ? NEIGHBORS_EVEN : NEIGHBORS_ODD;
     }
 
     @Override

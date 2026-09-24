@@ -59,37 +59,51 @@ public final class ObstacleMask {
         if (a == null || b == null) {
             return true;
         }
+        return anyBlockedAlong(a.x, a.y, b.x, b.y);
+    }
+
+    /**
+     * То же без аллокации {@link Coordinate}: вызывается на каждом ребре поиска
+     * пути как дешёвый префильтр перед точной JTS-проверкой.
+     */
+    public boolean anyBlockedAlong(double ax, double ay, double bx, double by) {
         if (coarseFactor > 1
-                && !traverse(a, b, cell * coarseFactor, coarseWidth, coarseHeight, coarse)) {
+                && !traverse(ax, ay, bx, by, cell * coarseFactor, coarseWidth, coarseHeight,
+                        coarse)) {
             return false;
         }
-        return traverse(a, b, cell, width, height, fine);
+        return traverse(ax, ay, bx, by, cell, width, height, fine);
     }
 
     private boolean traverse(Coordinate a, Coordinate b, double gridCell, int gridWidth,
                              int gridHeight, long[] bits) {
-        int col = clamp((int) Math.floor((a.x - originX) / gridCell), gridWidth);
-        int row = clamp((int) Math.floor((a.y - originY) / gridCell), gridHeight);
+        return traverse(a.x, a.y, b.x, b.y, gridCell, gridWidth, gridHeight, bits);
+    }
+
+    private boolean traverse(double ax, double ay, double bx, double by, double gridCell,
+                             int gridWidth, int gridHeight, long[] bits) {
+        int col = clamp((int) Math.floor((ax - originX) / gridCell), gridWidth);
+        int row = clamp((int) Math.floor((ay - originY) / gridCell), gridHeight);
         if (bit(bits, (long) row * gridWidth + col)) {
             return true;
         }
-        int endCol = clamp((int) Math.floor((b.x - originX) / gridCell), gridWidth);
-        int endRow = clamp((int) Math.floor((b.y - originY) / gridCell), gridHeight);
+        int endCol = clamp((int) Math.floor((bx - originX) / gridCell), gridWidth);
+        int endRow = clamp((int) Math.floor((by - originY) / gridCell), gridHeight);
         if (col == endCol && row == endRow) {
             return false;
         }
-        double dx = b.x - a.x;
-        double dy = b.y - a.y;
+        double dx = bx - ax;
+        double dy = by - ay;
         int stepX = dx >= 0 ? 1 : -1;
         int stepY = dy >= 0 ? 1 : -1;
         double tDeltaX = dx != 0 ? Math.abs(gridCell / dx) : Double.POSITIVE_INFINITY;
         double tDeltaY = dy != 0 ? Math.abs(gridCell / dy) : Double.POSITIVE_INFINITY;
         double tMaxX = dx != 0
-                ? (dx > 0 ? originX + (col + 1) * gridCell - a.x : a.x - (originX + col * gridCell))
+                ? (dx > 0 ? originX + (col + 1) * gridCell - ax : ax - (originX + col * gridCell))
                         / Math.abs(dx)
                 : Double.POSITIVE_INFINITY;
         double tMaxY = dy != 0
-                ? (dy > 0 ? originY + (row + 1) * gridCell - a.y : a.y - (originY + row * gridCell))
+                ? (dy > 0 ? originY + (row + 1) * gridCell - ay : ay - (originY + row * gridCell))
                         / Math.abs(dy)
                 : Double.POSITIVE_INFINITY;
         long guard = (long) gridWidth + gridHeight + 4;
@@ -170,7 +184,7 @@ public final class ObstacleMask {
         return centerY(cellIndex % width, cellIndex / width);
     }
 
-    public java.util.List<int[]> neighbors(int col, int row) {
+    public int[][] neighbors(int col, int row) {
         return shape.neighbors(col, row);
     }
 

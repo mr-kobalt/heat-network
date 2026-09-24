@@ -1,7 +1,5 @@
 package ru.lct.heating.geometry;
 
-import java.util.List;
-
 /**
  * Форма сетки поиска пути (ADR-0041). Квадратная сетка даёт 8 направлений
  * (оси + диагонали), гексагональная — 6 равных направлений, лучше подходящих
@@ -27,8 +25,11 @@ public interface GridShape {
     int[] cell(double x, double y, double originX, double originY, double cellM,
                int columns, int rows);
 
-    /** Смещения соседних клеток {@code [dcol, drow]} в зависимости от строки. */
-    List<int[]> neighbors(int col, int row);
+    /**
+     * Смещения соседних клеток {@code [dcol, drow]} в зависимости от строки.
+     * Возвращается общий неизменяемый массив (без аллокаций в горячем пути).
+     */
+    int[][] neighbors(int col, int row);
 
     /** Диагональный ли шаг (для квадрата — проверка углового проскока). */
     boolean diagonal(int dcol, int drow);

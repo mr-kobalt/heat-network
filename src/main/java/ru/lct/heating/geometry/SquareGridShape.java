@@ -1,7 +1,5 @@
 package ru.lct.heating.geometry;
 
-import java.util.List;
-
 /** Квадратная сетка (прежнее поведение, ADR-0033/0034). */
 public final class SquareGridShape implements GridShape {
 
@@ -47,8 +45,8 @@ public final class SquareGridShape implements GridShape {
     }
 
     @Override
-    public List<int[]> neighbors(int col, int row) {
-        return List.of(NEIGHBORS);
+    public int[][] neighbors(int col, int row) {
+        return NEIGHBORS;
     }
 
     @Override

@@ -23,17 +23,31 @@ public class SpecialZoneIndex {
 
     private final List<SpecialZone> zones;
     private final STRtree tree = new STRtree();
+    /** Подмножество зон с ограничением угла — отдельный индекс для горячего пути. */
+    private final List<SpecialZone> angleZones = new ArrayList<>();
+    private final STRtree angleTree = new STRtree();
 
     public SpecialZoneIndex(List<SpecialZone> zones) {
         this.zones = zones;
         for (int i = 0; i < zones.size(); i++) {
-            tree.insert(zones.get(i).getZone().getEnvelopeInternal(), i);
+            SpecialZone zone = zones.get(i);
+            tree.insert(zone.getZone().getEnvelopeInternal(), i);
+            if (zone.getAngleMinDeg() != null && zone.getAxis() != null) {
+                angleTree.insert(zone.getZone().getEnvelopeInternal(), angleZones.size());
+                angleZones.add(zone);
+            }
         }
         tree.build();
+        angleTree.build();
     }
 
     public int size() {
         return zones.size();
+    }
+
+    /** Есть ли зоны с ограничением минимального угла пересечения (E41). */
+    public boolean hasAngleZones() {
+        return !angleZones.isEmpty();
     }
 
     /** Спецзоны для визуализации этапа «спецпроходы» (ADR-0036). */
@@ -106,16 +120,13 @@ public class SpecialZoneIndex {
      * заданного. Используется как жёсткое ограничение в поиске пути.
      */
     public boolean angleOk(LineString segment) {
-        if (zones.isEmpty() || segment == null || segment.getNumPoints() < 2) {
+        if (angleZones.isEmpty() || segment == null || segment.getNumPoints() < 2) {
             return true;
         }
         @SuppressWarnings("unchecked")
-        List<Integer> candidates = tree.query(segment.getEnvelopeInternal());
+        List<Integer> candidates = angleTree.query(segment.getEnvelopeInternal());
         for (Integer index : candidates) {
-            SpecialZone zone = zones.get(index);
-            if (zone.getAngleMinDeg() == null || zone.getAxis() == null) {
-                continue;
-            }
+            SpecialZone zone = angleZones.get(index);
             Geometry intersection = segment.intersection(zone.getAxis());
             if (intersection.isEmpty()) {
                 continue;
