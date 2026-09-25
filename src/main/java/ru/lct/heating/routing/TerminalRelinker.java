@@ -131,8 +131,9 @@ public class TerminalRelinker {
         if (current == null) {
             return null;
         }
-        Set<PreparedGeometry> ignored = ownObstacles == null ? Set.of()
-                : ownObstacles.getOrDefault(terminalId, Set.of());
+        // E50: переприсоединяется ствол `кандидат→target`; свой ОКС не
+        // игнорируется (канонический хвост `target→point` добавляется отдельно).
+        Set<PreparedGeometry> ignored = Set.of();
         LineString[] edgeLines = new LineString[edges.size()];
         Envelope[] edgeEnvelopes = new Envelope[edges.size()];
         edgeGeometries(edges, edgeLines, edgeEnvelopes);

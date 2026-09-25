@@ -364,21 +364,25 @@ abstract class AbstractCalculationPipelineTest {
             if (coords.size() < 2) {
                 continue;
             }
-            double[] last = {coords.get(coords.size() - 1).get(0).asDouble(),
-                    coords.get(coords.size() - 1).get(1).asDouble()};
-            for (Map.Entry<String, double[]> point : points.entrySet()) {
-                if (Math.hypot(point.getValue()[0] - last[0], point.getValue()[1] - last[1])
-                        > 1e-9) {
-                    continue;
-                }
-                double[] target = canonical.get(point.getKey());
-                if (target == null) {
-                    continue;
-                }
-                for (JsonNode coordinate : coords) {
-                    if (Math.hypot(coordinate.get(0).asDouble() - target[0],
-                            coordinate.get(1).asDouble() - target[1]) < 1e-7) {
-                        found.put(point.getKey(), true);
+            // E50: терминальное ребро может быть ориентировано в любую сторону —
+            // проверяем точку подключения и в начале, и в конце.
+            for (int endIndex : new int[]{0, coords.size() - 1}) {
+                double[] end = {coords.get(endIndex).get(0).asDouble(),
+                        coords.get(endIndex).get(1).asDouble()};
+                for (Map.Entry<String, double[]> point : points.entrySet()) {
+                    if (Math.hypot(point.getValue()[0] - end[0], point.getValue()[1] - end[1])
+                            > 1e-9) {
+                        continue;
+                    }
+                    double[] target = canonical.get(point.getKey());
+                    if (target == null) {
+                        continue;
+                    }
+                    for (JsonNode coordinate : coords) {
+                        if (Math.hypot(coordinate.get(0).asDouble() - target[0],
+                                coordinate.get(1).asDouble() - target[1]) < 1e-7) {
+                            found.put(point.getKey(), true);
+                        }
                     }
                 }
             }

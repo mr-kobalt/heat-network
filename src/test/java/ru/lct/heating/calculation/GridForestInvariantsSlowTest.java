@@ -60,13 +60,19 @@ class GridForestInvariantsSlowTest extends AbstractCalculationPipelineTest {
         int turnViolations = countTurnViolations(resultFile, mapper);
         printTurnViolations(resultFile, mapper);
         int chamberDegreeViolations = countChamberDegreeViolations(resultFile, mapper);
+        int exitMismatches = countMissingCanonicalExits(SAMPLE, resultFile, mapper);
         System.out.println("INVARIANTS selfIntersections=" + selfIntersections
                 + " turnViolations=" + turnViolations
-                + " chamberDegreeViolations=" + chamberDegreeViolations);
+                + " chamberDegreeViolations=" + chamberDegreeViolations
+                + " exitMismatches=" + exitMismatches);
         // FR-29 и FR-34 на текущем наборе выполняются (E23-04/E27 закрыты).
         assertThat(selfIntersections).isZero();
         assertThat(turnViolations).isZero();
         // FR-26: текущие новые камеры в норме; после E26 — учёт существующих примыканий.
         assertThat(chamberDegreeViolations).isZero();
+        // E50: канонический выход присутствует в терминальном ребре любого варианта.
+        assertThat(exitMismatches).isZero();
+        // E50/ТП 2.2: трасса входит в свой ОКС только финальным выводом (все варианты).
+        assertNoOksCrossingBeyondApproach(SAMPLE, resultFile, mapper);
     }
 }

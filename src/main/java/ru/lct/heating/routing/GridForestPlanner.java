@@ -909,6 +909,10 @@ public class GridForestPlanner {
             // FR-30: сквозные (degree-2) узлы без смены параметра — не технические
             // узлы; после relink склеиваем их рёбра в одну LineString.
             trees = contractPassThroughNodes(trees);
+            // E50: единая ориентация рёбер от корня к листьям — терминал всегда
+            // конечный узел ребра (иначе `contractPassThroughNodes`/`relink` могут
+            // развернуть ребро и канонический выход потеряется).
+            trees = orientEdgesFromRoot(trees);
             long relinkMs = elapsedMs(relinkStart);
             List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineStart = System.nanoTime();
@@ -1033,6 +1037,73 @@ public class GridForestPlanner {
                 .flowTph(first.getFlowTph())
                 .diameterMm(first.getDiameterMm())
                 .build();
+    }
+
+    /**
+     * E50: ориентировать все рёбра дерева от корня к листьям. После контракции
+     * сквозных узлов ребро может быть развёрнуто (`a` — лист, `b` — корень);
+     * терминалы обязаны быть конечным (`to`) узлом, иначе `refine`/`simplify`
+     * не защищают канонический выход `target→point`.
+     */
+    static List<ForestTree> orientEdgesFromRoot(List<ForestTree> trees) {
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            result.add(orientTree(tree));
+        }
+        return result;
+    }
+
+    private static ForestTree orientTree(ForestTree tree) {
+        String rootId = tree.getTieInNodeId();
+        Map<String, List<String>> adjacency = new HashMap<>();
+        for (ForestEdge edge : tree.getEdges()) {
+            adjacency.computeIfAbsent(edge.getFromNodeId(), key -> new ArrayList<>())
+                    .add(edge.getToNodeId());
+            adjacency.computeIfAbsent(edge.getToNodeId(), key -> new ArrayList<>())
+                    .add(edge.getFromNodeId());
+        }
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>();
+        visited.add(rootId);
+        queue.add(rootId);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (String next : adjacency.getOrDefault(current, List.of())) {
+                if (visited.add(next)) {
+                    parent.put(next, current);
+                    queue.add(next);
+                }
+            }
+        }
+        List<ForestEdge> edges = new ArrayList<>(tree.getEdges().size());
+        for (ForestEdge edge : tree.getEdges()) {
+            String from = edge.getFromNodeId();
+            String to = edge.getToNodeId();
+            boolean reverse;
+            if (from.equals(rootId)) {
+                reverse = false;
+            } else if (to.equals(rootId)) {
+                reverse = true;
+            } else {
+                String parentOfFrom = parent.get(from);
+                reverse = parentOfFrom != null && parentOfFrom.equals(to);
+            }
+            List<Coordinate> coordinates = edge.getCoordinates();
+            if (reverse) {
+                coordinates = new ArrayList<>(coordinates);
+                Collections.reverse(coordinates);
+            }
+            edges.add(ForestEdge.builder()
+                    .id(edge.getId())
+                    .fromNodeId(reverse ? to : from)
+                    .toNodeId(reverse ? from : to)
+                    .coordinates(coordinates)
+                    .flowTph(edge.getFlowTph())
+                    .diameterMm(edge.getDiameterMm())
+                    .build());
+        }
+        return ForestTree.builder().tieInNodeId(rootId).nodes(tree.getNodes()).edges(edges).build();
     }
 
     /** Сырое дерево прохода: отрезки сетки «родитель → клетка» до сглаживания. */
@@ -1177,10 +1248,10 @@ public class GridForestPlanner {
         List<ForestEdge> result = new ArrayList<>(edges.size());
         for (ForestEdge edge : edges) {
             List<Coordinate> coords = new ArrayList<>(edge.getCoordinates());
-            Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = ownObstacles == null
-                    ? Set.of()
-                    : union(ownObstacles.get(edge.getFromNodeId()),
-                            ownObstacles.get(edge.getToNodeId()));
+            // E50: свой ОКС можно игнорировать только на хвосте выхода
+            // `target→point`; упрощение никогда его не объединяет (последние две
+            // вершины защищены), поэтому здесь изоляция не применяется.
+            Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = Set.of();
             boolean changed = true;
             int guard = 0;
             while (changed && guard++ <= coords.size()) {
@@ -1291,10 +1362,13 @@ public class GridForestPlanner {
         return result;
     }
 
+    /**
+     * E50: свой ОКС не игнорируется — изоляция допустима только на хвосте
+     * выхода, который {@link #rebuildCrossing} сохраняет отдельно.
+     */
     private Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignoredFor(ForestEdge edge,
             Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>> ownObstacles) {
-        return ownObstacles == null ? Set.of()
-                : union(ownObstacles.get(edge.getFromNodeId()), ownObstacles.get(edge.getToNodeId()));
+        return Set.of();
     }
 
     private ForestEdge rebuildCrossing(ForestEdge victim, List<ForestEdge> all, ForestEdge avoid,
@@ -1308,6 +1382,15 @@ public class GridForestPlanner {
         }
         Coordinate start = from.getCoordinate();
         Coordinate goal = to.getCoordinate();
+        // E50: терминальный хвост `target→point` неприкосновенен — перепрокладываем
+        // только ствол до `target`, затем возвращаем канонический хвост.
+        List<Coordinate> tail = List.of();
+        if (to.getType() == NodeType.CONNECTION_POINT && victim.getCoordinates().size() >= 2) {
+            List<Coordinate> victimCoords = victim.getCoordinates();
+            int last = victimCoords.size() - 1;
+            goal = victimCoords.get(last - 1);
+            tail = List.of(goal, victimCoords.get(last));
+        }
         List<Geometry> extras = new ArrayList<>();
         List<Geometry> clearance = new ArrayList<>();
         for (ForestNode node : nodes.values()) {
@@ -1329,8 +1412,9 @@ public class GridForestPlanner {
             }
         }
         Coordinate incoming = incomingDirection(victim, all);
+        Coordinate nextAfter = tail.isEmpty() ? null : tail.get(1);
         List<Coordinate> path = gridPath(pass, obstacleIndex.withAdditional(extras), start, incoming,
-                goal, null, ignored == null ? Set.of() : ignored, 40000, false);
+                goal, nextAfter, ignored == null ? Set.of() : ignored, 40000, false);
         if (path == null && avoid != null) {
             // Fallback: обходим только пересекаемое ребро (без остальных).
             List<Geometry> onlyAvoid = new ArrayList<>();
@@ -1343,11 +1427,15 @@ public class GridForestPlanner {
             if (!buffer.isEmpty()) {
                 onlyAvoid.add(buffer);
             }
-            path = gridPath(pass, obstacleIndex.withAdditional(onlyAvoid), start, incoming, goal, null,
-                    ignored == null ? Set.of() : ignored, 40000, false);
+            path = gridPath(pass, obstacleIndex.withAdditional(onlyAvoid), start, incoming, goal,
+                    nextAfter, ignored == null ? Set.of() : ignored, 40000, false);
         }
         if (path == null || path.size() < 2) {
             return null;
+        }
+        if (!tail.isEmpty()) {
+            path = new ArrayList<>(path);
+            path.add(tail.get(1));
         }
         return ForestEdge.builder()
                 .id(victim.getId())
@@ -1992,8 +2080,17 @@ public class GridForestPlanner {
         Coordinate bestPosition = null;
         Map<Integer, ForestEdge> bestReplaced = null;
         for (Coordinate candidate : candidates) {
+            // Дешёвый префильтр: даже без обхода новый ствол не может быть
+            // короче суммы прямых отрезков «кандидат → сосед».
+            double straightSum = 0.0;
+            for (Stub stub : stubs) {
+                straightSum += candidate.distance(stub.endpoint);
+            }
+            if (straightSum >= currentStubSum - EPS) {
+                continue;
+            }
             ChamberMove move = tryChamberMove(candidate, stubs, edges, incidentSet, obstacleIndex,
-                    specialZones);
+                    specialZones, pass, isRoot);
             if (move == null || move.stubSum >= currentStubSum - EPS) {
                 continue;
             }
@@ -2063,8 +2160,8 @@ public class GridForestPlanner {
         stub.endpoint = endpoint;
         stub.nextAfter = nextAfter;
         stub.nodeIsFrom = nodeIsFrom;
-        stub.ignored = ownObstacles == null ? Set.of()
-                : ownObstacles.getOrDefault(farId, Set.of());
+        // E50: стык камеры — ствол (не хвост выхода), свой ОКС не игнорируется.
+        stub.ignored = Set.of();
         return stub;
     }
 
@@ -2082,11 +2179,19 @@ public class GridForestPlanner {
         addCandidate(candidates, seen, node.getCoordinate());
         int max = Math.max(1, appProperties.getForestChamberMaxCandidates());
         if (isRoot) {
+            // E50: проекции на сеть сортируются по расстоянию до текущего
+            // положения корня — иначе ближайшая допустимая точка может попасть
+            // за предел `max` из-за порядка участков в наборе.
+            List<Coordinate> projections = new ArrayList<>();
             for (TieInCandidate candidate : candidateProvider.projections(dataset, median)) {
+                projections.add(candidate.getCoordinate());
+            }
+            projections.sort(Comparator.comparingDouble(node.getCoordinate()::distance));
+            for (Coordinate projection : projections) {
                 if (candidates.size() >= max) {
                     break;
                 }
-                addCandidate(candidates, seen, candidate.getCoordinate());
+                addCandidate(candidates, seen, projection);
             }
         } else {
             int width = pass.width();
@@ -2176,25 +2281,40 @@ public class GridForestPlanner {
 
     private ChamberMove tryChamberMove(Coordinate candidate, List<Stub> stubs, List<ForestEdge> edges,
                                        Set<Integer> incidentSet, ObstacleIndex obstacleIndex,
-                                       SpecialZoneIndex specialZones) {
+                                       SpecialZoneIndex specialZones, ObstacleMask pass,
+                                       boolean allowFallback) {
         List<Coordinate> firstSteps = new ArrayList<>();
+        List<List<Coordinate>> connectors = new ArrayList<>();
         List<Double> stubLens = new ArrayList<>();
         double stubSum = 0.0;
         for (Stub stub : stubs) {
             // Прямой отрезок «кандидат → соседняя вершина» (как в refine/string
-            // pulling); если запрет или недопустимый стык — кандидат отклоняется.
-            if (obstacleIndex != null && obstacleIndex.isInteriorBlocked(
+            // pulling); если запрет — при `allowFallback` (корень) пробуем
+            // обойти по сетке, иначе кандидат отклоняется.
+            List<Coordinate> connector;
+            if (obstacleIndex == null || !obstacleIndex.isInteriorBlocked(
                     line(candidate, stub.endpoint), stub.ignored)) {
+                if (specialZones != null && !specialZones.angleOk(line(candidate, stub.endpoint))) {
+                    return null;
+                }
+                if (!turnAllowed(candidate, stub.endpoint, stub.nextAfter)) {
+                    return null;
+                }
+                connector = List.of(new Coordinate(candidate), new Coordinate(stub.endpoint));
+            } else if (allowFallback) {
+                List<Coordinate> path = gridPath(pass, obstacleIndex, candidate, null,
+                        stub.endpoint, stub.nextAfter, stub.ignored, 40000);
+                if (path == null || path.size() < 2
+                        || (specialZones != null && !polylineSpecialOk(path, specialZones))) {
+                    return null;
+                }
+                connector = path;
+            } else {
                 return null;
             }
-            if (specialZones != null && !specialZones.angleOk(line(candidate, stub.endpoint))) {
-                return null;
-            }
-            if (!turnAllowed(candidate, stub.endpoint, stub.nextAfter)) {
-                return null;
-            }
-            firstSteps.add(stub.endpoint);
-            double length = candidate.distance(stub.endpoint);
+            connectors.add(connector);
+            firstSteps.add(connector.size() >= 2 ? connector.get(1) : stub.endpoint);
+            double length = polylineLength(connector);
             stubLens.add(length);
             stubSum += length;
         }
@@ -2206,16 +2326,21 @@ public class GridForestPlanner {
             }
         }
         Map<Integer, ForestEdge> replaced = new HashMap<>();
-        for (Stub stub : stubs) {
+        for (int s = 0; s < stubs.size(); s++) {
+            Stub stub = stubs.get(s);
+            List<Coordinate> connector = connectors.get(s);
             ForestEdge old = edges.get(stub.edgeIndex);
             List<Coordinate> coords = new ArrayList<>();
             if (stub.nodeIsFrom) {
-                coords.add(new Coordinate(candidate));
-                coords.addAll(old.getCoordinates().subList(1, old.getCoordinates().size()));
+                // старый хвост: [chamber, endpoint, rest...]; новый: connector(candidate..endpoint) + rest
+                coords.addAll(connector);
+                coords.addAll(old.getCoordinates().subList(2, old.getCoordinates().size()));
             } else {
                 int count = old.getCoordinates().size();
-                coords.addAll(old.getCoordinates().subList(0, count - 1));
-                coords.add(new Coordinate(candidate));
+                coords.addAll(old.getCoordinates().subList(0, count - 2));
+                List<Coordinate> reversed = new ArrayList<>(connector);
+                Collections.reverse(reversed);
+                coords.addAll(reversed);
             }
             replaced.put(stub.edgeIndex, ForestEdge.builder().id(old.getId())
                     .fromNodeId(old.getFromNodeId()).toNodeId(old.getToNodeId())
@@ -2585,9 +2710,10 @@ public class GridForestPlanner {
         if (coords.size() < 3) {
             return false;
         }
-        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = ownObstacles == null
-                ? Set.of()
-                : union(ownObstacles.get(edge.from), ownObstacles.get(edge.to));
+        // E50: свой ОКС не игнорируется на стволе — только хвост выхода
+        // (`target→point`) вправе пересекать свой ОКС; последние две вершины
+        // здесь защищены (terminal), поэтому изоляция не нужна.
+        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = Set.of();
         if (removeMicroVertices(edge, pass, obstacleIndex, ignored, terminal)) {
             return true;
         }
@@ -2744,19 +2870,6 @@ public class GridForestPlanner {
         return best;
     }
 
-    private Set<org.locationtech.jts.geom.prep.PreparedGeometry> union(
-            Set<org.locationtech.jts.geom.prep.PreparedGeometry> first,
-            Set<org.locationtech.jts.geom.prep.PreparedGeometry> second) {
-        Set<org.locationtech.jts.geom.prep.PreparedGeometry> union = new HashSet<>();
-        if (first != null) {
-            union.addAll(first);
-        }
-        if (second != null) {
-            union.addAll(second);
-        }
-        return union;
-    }
-
     private Coordinate neighborAt(MutableEdge edge, String node) {
         if (edge.from.equals(node) && edge.coords.size() >= 2) {
             return edge.coords.get(1);
@@ -2828,9 +2941,9 @@ public class GridForestPlanner {
         int n = coords.size();
         Coordinate point = coords.get(n - 1);
         Coordinate target = coords.get(n - 2);
-        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored =
-                ownObstacles == null ? Set.of()
-                        : ownObstacles.getOrDefault(terminalId, Set.of());
+        // E50: перепрокладывается ствол до `target`; свой ОКС не игнорируется
+        // (хвост `target→point` добавляется отдельно и каноничен).
+        Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = Set.of();
         // E23-04: если локальный ремонт у target невозможен, перепрокладываем
         // подход от более дальней вершины (до 5 назад), чтобы найти допустимый
         // заход на target (углы ≤90° на стыке target→point).
@@ -3499,6 +3612,24 @@ public class GridForestPlanner {
 
     private LineString line(Coordinate a, Coordinate b) {
         return GeometrySupport.GEOMETRY_FACTORY.createLineString(new Coordinate[]{a, b});
+    }
+
+    private double polylineLength(List<Coordinate> coordinates) {
+        double total = 0.0;
+        for (int i = 0; i + 1 < coordinates.size(); i++) {
+            total += coordinates.get(i).distance(coordinates.get(i + 1));
+        }
+        return total;
+    }
+
+    /** Все сегменты ломаной допустимы по минимальному углу спецпрохода (E41). */
+    private boolean polylineSpecialOk(List<Coordinate> coordinates, SpecialZoneIndex specialZones) {
+        for (int i = 0; i + 1 < coordinates.size(); i++) {
+            if (!specialZones.angleOk(line(coordinates.get(i), coordinates.get(i + 1)))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private long elapsedMs(long startNanos) {

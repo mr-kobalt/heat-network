@@ -122,32 +122,34 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
             if (coords.size() < 2) {
                 continue;
             }
-            double[] last = {coords.get(coords.size() - 1).get(0).asDouble(),
-                    coords.get(coords.size() - 1).get(1).asDouble()};
-            for (var point : points.entrySet()) {
-                if (Math.hypot(point.getValue()[0] - last[0], point.getValue()[1] - last[1])
-                        > 1e-9) {
-                    continue;
-                }
-                double[] target = canonical.get(point.getKey());
-                if (target == null) {
-                    continue;
-                }
-                boolean found = false;
-                for (var coordinate : coords) {
-                    if (Math.hypot(coordinate.get(0).asDouble() - target[0],
-                            coordinate.get(1).asDouble() - target[1]) < 1e-7) {
-                        found = true;
+            for (int endIndex : new int[]{0, coords.size() - 1}) {
+                double[] end = {coords.get(endIndex).get(0).asDouble(),
+                        coords.get(endIndex).get(1).asDouble()};
+                for (var point : points.entrySet()) {
+                    if (Math.hypot(point.getValue()[0] - end[0], point.getValue()[1] - end[1])
+                            > 1e-9) {
+                        continue;
                     }
+                    double[] target = canonical.get(point.getKey());
+                    if (target == null) {
+                        continue;
+                    }
+                    boolean found = false;
+                    for (var coordinate : coords) {
+                        if (Math.hypot(coordinate.get(0).asDouble() - target[0],
+                                coordinate.get(1).asDouble() - target[1]) < 1e-7) {
+                            found = true;
+                        }
+                    }
+                    String key = properties.path("variant_id").asText() + "|" + point.getKey();
+                    if (!found) {
+                        System.out.println("EXIT MISS var=" + properties.path("variant_id").asText()
+                                + " point=" + point.getKey() + " edge="
+                                + properties.path("id").asText() + " canonical=("
+                                + target[0] + "," + target[1] + ") coords=" + coords);
+                    }
+                    foundByVariantKey.merge(key, found, (a, b) -> a || b);
                 }
-                String key = properties.path("variant_id").asText() + "|" + point.getKey();
-                if (!found) {
-                    System.out.println("EXIT MISS var=" + properties.path("variant_id").asText()
-                            + " point=" + point.getKey() + " edge="
-                            + properties.path("id").asText() + " canonical=("
-                            + target[0] + "," + target[1] + ") coords=" + coords);
-                }
-                foundByVariantKey.merge(key, found, (a, b) -> a || b);
             }
         }
     }
