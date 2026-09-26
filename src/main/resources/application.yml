@@ -98,6 +98,11 @@ heating:
     # ADR-0039: разрешить relink менять выход, выбранный growth (по умолчанию — нет).
     forest-relink-exit-relocation: ${HEATING_FOREST_RELINK_EXIT_RELOCATION:false}
     forest-relink-exit-candidates-max: ${HEATING_FOREST_RELINK_EXIT_CANDIDATES_MAX:6}
+    # R1: предел T-точек на ребро при переборе врезок в relink (0 — без предела).
+    # Дефолт 64: ≈2× быстрее relink; основной набор S 13.5598 → 13.5752.
+    forest-relink-tpoint-max: ${HEATING_FOREST_RELINK_TPOINT_MAX:64}
+    # R2: безопасное досрочное прерывание оценки хода relink.
+    forest-relink-cost-bound: ${HEATING_FOREST_RELINK_COST_BOUND:true}
     # ADR-0040: фильтрация выходов-кандидатов ОКС (соседние корпуса, возврат, глубина).
     oks-exit-filter: ${HEATING_OKS_EXIT_FILTER:true}
     oks-exit-max-tail-m: ${HEATING_OKS_EXIT_MAX_TAIL_M:15.0}

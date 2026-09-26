@@ -357,6 +357,11 @@
 - [x] E50-04 Инварианты и baseline: `GridForestOsmInvariantsSlowTest`,
   расширенный `countMissingCanonicalExits`, основной baseline
   `S` 13.2279 → 13.5598, OSM 13.4463 → 13.8057; 0 неподключённых.
+  OSM-baseline запинен в тесте: дефолт (`forest-relink-tpoint-max=64`)
+  `producesOsmBaselineWithDefaultParameters` — score 13.802858532408175,
+  L 1991.392, C 279595752; полный перебор `producesOsmBaselineWithUnlimitedTpoints`
+  — score 13.8057345876048, L 1991.896, C 279644516; счётчик
+  `TURN_ANGLE_EXCEEDS_90` 3 / 4. R1: основной набор `S` 13.5598 → 13.5752.
 - [ ] E50-05 (следующая задача) Объединение близких новых камер (пункт 1):
   `br_0_12`+`rj_1847` (степень 4 — сливать), `rj_802`+`rj_1509` (степень 5 —
   не сливать, только диагностика); флаг `forest-chamber-merge`.

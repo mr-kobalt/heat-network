@@ -1,6 +1,7 @@
 package ru.lct.heating.calculation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,12 +9,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import ru.lct.heating.config.AppProperties;
 
 /**
  * E50: инварианты на наборе с препятствиями OSM — канонический выход каждого
  * варианта (в т.ч. точки 11) и запрет входа в собственный ОКС за пределами
- * финального вывода (пункты 2, 3, 5). Повороты здесь не проверяются: на этом
- * наборе остаётся одно унаследованное нарушение {@code >90°} вне рамок E50.
+ * финального вывода (пункты 2, 3, 5). Здесь же пинится OSM-baseline
+ * (дефолт {@code forest-relink-tpoint-max=64} и полный перебор {@code =0}).
+ * Счётчик {@code TURN_ANGLE_EXCEEDS_90} фиксируется фактом: дефолт 3,
+ * полный перебор 4 (унаследованные предупреждения, не уникальные нарушения).
  */
 @Tag("slow")
 class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
@@ -40,5 +44,64 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
         assertThat(exitMismatches).isZero();
         assertThat(selfIntersections).isZero();
         assertNoOksCrossingBeyondApproach(SAMPLE, resultFile, mapper);
+    }
+
+    /**
+     * Baseline E29/E50 на наборе с препятствиями OSM (дефолтные параметры,
+     * {@code forest-relink-tpoint-max=64}). {@code TURN_ANGLE_EXCEEDS_90} —
+     * счётчик предупреждений (не уникальных геометрических нарушений); на этом
+     * наборе унаследовано, фиксируется фактом.
+     */
+    @Test
+    void producesOsmBaselineWithDefaultParameters() throws Exception {
+        assumeTrue(Files.exists(SAMPLE),
+                "Набор source/Датасет с препятствиями OSM.geojson недоступен");
+        Path resultFile = tempDir.resolve("osm-baseline-result.geojson");
+        Path summaryFile = tempDir.resolve("osm-baseline-summary.json");
+
+        CalculationOutcome outcome = service().calculate(SAMPLE, resultFile, summaryFile);
+        long turns = outcome.getWarnings().stream()
+                .filter(w -> w.startsWith("TURN_ANGLE_EXCEEDS_90")).count();
+
+        assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
+        assertThat(outcome.getSummary().getScore())
+                .isCloseTo(13.802858532408175, within(1e-6));
+        assertThat(outcome.getSummary().getNewNetworkLengthM())
+                .isCloseTo(1991.3924921360585, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279595752L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
+        assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
+        assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
+        assertThat(turns).isEqualTo(3L);
+    }
+
+    /**
+     * Baseline OSM с полным перебором T-точек ({@code forest-relink-tpoint-max=0}).
+     * На этом наборе прежний (неоптимизированный) режим давал чуть хуже
+     * (S 13.8057 против 13.8029 у дефолта cap64) — оставлен как опциональный.
+     */
+    @Test
+    void producesOsmBaselineWithUnlimitedTpoints() throws Exception {
+        assumeTrue(Files.exists(SAMPLE),
+                "Набор source/Датасет с препятствиями OSM.geojson недоступен");
+        AppProperties properties = new AppProperties();
+        properties.setForestRelinkTpointMax(0);
+        Path resultFile = tempDir.resolve("osm-tpoint0-result.geojson");
+        Path summaryFile = tempDir.resolve("osm-tpoint0-summary.json");
+
+        CalculationOutcome outcome = service(properties).calculate(SAMPLE, resultFile, summaryFile);
+        long turns = outcome.getWarnings().stream()
+                .filter(w -> w.startsWith("TURN_ANGLE_EXCEEDS_90")).count();
+
+        assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
+        assertThat(outcome.getSummary().getScore())
+                .isCloseTo(13.8057345876048, within(1e-6));
+        assertThat(outcome.getSummary().getNewNetworkLengthM())
+                .isCloseTo(1991.8960465349335, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279644516L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
+        assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
+        assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
+        assertThat(turns).isEqualTo(4L);
     }
 }

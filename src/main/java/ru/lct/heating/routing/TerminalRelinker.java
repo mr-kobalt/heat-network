@@ -81,6 +81,13 @@ public class TerminalRelinker {
                 return tree;
             }
             boolean changed = false;
+            // R7: геометрии рёбер пересчитываются один раз на итерацию и
+            // переиспользуются всеми кандидатами (bestFor/bestForNode), а не
+            // пересоздаются на каждый узел/терминал. Инвалидируются только при
+            // принятии хода (edges меняются).
+            LineString[] edgeLines = new LineString[edges.size()];
+            Envelope[] edgeEnvelopes = new Envelope[edges.size()];
+            edgeGeometries(edges, edgeLines, edgeEnvelopes);
             List<String> movables = new ArrayList<>(nodes.keySet());
             for (String nodeId : movables) {
                 if (nodeId.equals(tree.getTieInNodeId())) {
@@ -91,10 +98,11 @@ public class TerminalRelinker {
                 Best best;
                 if (node.getType() == NodeType.CONNECTION_POINT) {
                     best = bestFor(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
-                            exits, terminalFlow, obstacleIndex, ownObstacles, idCounter);
+                            exits, terminalFlow, obstacleIndex, ownObstacles, idCounter,
+                            edgeLines, edgeEnvelopes);
                 } else if (appProperties.isForestRelinkNodes()) {
                     best = bestForNode(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
-                            terminalFlow, obstacleIndex, idCounter);
+                            terminalFlow, obstacleIndex, idCounter, edgeLines, edgeEnvelopes);
                 } else {
                     best = null;
                 }
@@ -104,6 +112,9 @@ public class TerminalRelinker {
                     current = best.rebuild;
                     changed = true;
                     idCounter += 100;
+                    edgeLines = new LineString[edges.size()];
+                    edgeEnvelopes = new Envelope[edges.size()];
+                    edgeGeometries(edges, edgeLines, edgeEnvelopes);
                 } else {
                     idCounter += 100;
                 }
@@ -120,7 +131,8 @@ public class TerminalRelinker {
                          List<Edge> edges, double currentScore,
                          Map<String, List<ConnectionExit>> exits,
                          Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
-                         Map<String, Set<PreparedGeometry>> ownObstacles, int idCounter) {
+                         Map<String, Set<PreparedGeometry>> ownObstacles, int idCounter,
+                         LineString[] edgeLines, Envelope[] edgeEnvelopes) {
         ForestNode terminal = nodes.get(terminalId);
         List<ConnectionExit> candidates = exits == null ? null : exits.get(terminalId);
         if (terminal == null || candidates == null || candidates.isEmpty()) {
@@ -134,9 +146,6 @@ public class TerminalRelinker {
         // E50: переприсоединяется ствол `кандидат→target`; свой ОКС не
         // игнорируется (канонический хвост `target→point` добавляется отдельно).
         Set<PreparedGeometry> ignored = Set.of();
-        LineString[] edgeLines = new LineString[edges.size()];
-        Envelope[] edgeEnvelopes = new Envelope[edges.size()];
-        edgeGeometries(edges, edgeLines, edgeEnvelopes);
         Best best = null;
         // ADR-0039: перебираем все выходы-кандидаты точки, а не только канонический.
         for (ConnectionExit exit : candidates) {
@@ -199,7 +208,12 @@ public class TerminalRelinker {
         if (!degreeWithinLimit(edges, nodes)) {
             return best;
         }
-        Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow);
+        // R2 (флаг forest-relink-cost-bound): порог = лучшая найденная оценка
+        // (или текущая), досрочное прерывание безопасно — оценка монотонна.
+        double abort = appProperties.isForestRelinkCostBound()
+                ? (best != null ? best.rebuild.score : currentScore)
+                : Double.POSITIVE_INFINITY;
+        Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow, abort);
         if (rebuild == null || rebuild.score >= currentScore) {
             return best;
         }
@@ -246,7 +260,7 @@ public class TerminalRelinker {
     private Best bestForNode(String nodeId, String rootId, Map<String, ForestNode> nodes,
                              List<Edge> edges, double currentScore,
                              Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
-                             int idCounter) {
+                             int idCounter, LineString[] edgeLines, Envelope[] edgeEnvelopes) {
         ForestNode node = nodes.get(nodeId);
         if (node == null || nodeId.equals(rootId)) {
             return null;
@@ -263,9 +277,6 @@ public class TerminalRelinker {
         Set<String> subtree = subtreeNodes(nodeId, parentEdge.id, edges);
         Coordinate vertex = node.getCoordinate();
         double radius = appProperties.getForestRelinkNodesRadiusM();
-        LineString[] edgeLines = new LineString[edges.size()];
-        Envelope[] edgeEnvelopes = new Envelope[edges.size()];
-        edgeGeometries(edges, edgeLines, edgeEnvelopes);
         Best best = null;
         // 1. Существующие узлы.
         for (ForestNode candidate : nodes.values()) {
@@ -453,6 +464,7 @@ public class TerminalRelinker {
         for (int i = 1; i < c.size() - 1; i++) {
             result.add(c.get(i));
         }
+        List<Coordinate> projections = new ArrayList<>();
         for (int i = 0; i < c.size() - 1; i++) {
             Coordinate a = c.get(i);
             Coordinate b = c.get(i + 1);
@@ -460,9 +472,26 @@ public class TerminalRelinker {
             Coordinate projection = projection(target, a, b);
             if (projection != null) {
                 result.add(projection);
+                projections.add(projection);
             }
         }
-        return result;
+        int max = appProperties.getForestRelinkTpointMax();
+        if (max <= 0 || result.size() <= max) {
+            return result;
+        }
+        // R1: прореживаем список, сохраняя порядок; проекции target обязательны
+        // (кратчайшая T-врезка), поэтому добавляем их поверх.
+        List<Coordinate> thinned = new ArrayList<>(max + projections.size());
+        int step = (int) Math.ceil(result.size() / (double) max);
+        for (int i = 0; i < result.size(); i += step) {
+            thinned.add(result.get(i));
+        }
+        for (Coordinate projection : projections) {
+            if (!thinned.contains(projection)) {
+                thinned.add(projection);
+            }
+        }
+        return thinned;
     }
 
     private Coordinate projection(Coordinate p, Coordinate a, Coordinate b) {
@@ -546,6 +575,18 @@ public class TerminalRelinker {
 
     private Rebuild rebuild(String rootId, Map<String, ForestNode> nodes, List<Edge> edges,
                             Map<String, Double> terminalFlow) {
+        return rebuild(rootId, nodes, edges, terminalFlow, Double.POSITIVE_INFINITY);
+    }
+
+    /**
+     * R2: помимо полной пересборки умеет досрочно прерваться, как только
+     * частичная оценка (стоимость+длина уже обработанных рёбер) достигает
+     * {@code abortScore}. Поскольку стоимость и длина только растут, итоговая
+     * оценка не может стать меньше частичной — ход гарантированно не лучше
+     * порога, и его можно не досчитывать. Оптимум не меняется.
+     */
+    private Rebuild rebuild(String rootId, Map<String, ForestNode> nodes, List<Edge> edges,
+                            Map<String, Double> terminalFlow, double abortScore) {
         if (!nodes.containsKey(rootId)) {
             return null;
         }
@@ -645,6 +686,9 @@ public class TerminalRelinker {
             double edgeLength = edge.length();
             cost += costModel.segmentCost(edgeLength, dn, 1.0, 1.0);
             length += edgeLength;
+            if (costModel.score(cost, length) >= abortScore) {
+                return null;
+            }
             rebuiltEdges.add(ForestEdge.builder().id(edge.id).fromNodeId(edge.a)
                     .toNodeId(edge.b).coordinates(edge.coords).flowTph(flow).diameterMm(dn)
                     .build());

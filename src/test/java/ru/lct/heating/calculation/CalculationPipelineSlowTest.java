@@ -67,11 +67,13 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // degree-2 узлы контрактируются (FR-30). ADR-0051: оптимизация положения
         // новых камер (медиана соседей). E50 (ADR-0052/0053): изоляция своего ОКС
         // только на хвосте выхода + ориентация терминалов — маршруты обходят свои
-        // здания (длина/S растут), baseline пересчитан.
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.55976295732206, within(1e-6));
+        // здания (длина/S растут), baseline пересчитан. R1 (2026-09-26): включён
+        // предел T-точек relink `forest-relink-tpoint-max=64` (≈2× быстрее,
+        // S 13.5598 → 13.5752), baseline пересчитан.
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.57519811155337, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1911.860593774021, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279435042L);
+                .isCloseTo(1914.0125758511233, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279755728L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(60000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())

@@ -98,6 +98,21 @@ public class AppProperties {
     private boolean forestRelinkExitRelocation = false;
     /** ADR-0039: предел числа выходов-кандидатов на точку при relink. */
     private int forestRelinkExitCandidatesMax = 6;
+    /**
+     * R1: предел числа T-точек на ребро при enumerating кандидатов T-врезки в
+     * relink. Геометрия рёбер на входе relink — сырая сеточная «лестница»
+     * (вершина на клетку), поэтому список точек квадратично велик; прореживание
+     * снижает перебор без изменения финальной геометрии (её формирует refine).
+     * Дефолт {@code 64} (≈2× быстрее relink); {@code 0} — без ограничения
+     * (прежнее поведение, опция).
+     */
+    private int forestRelinkTpointMax = 64;
+    /**
+     * R2: досрочно прерывать оценку хода relink, когда частичная стоимость+длина
+     * уже не могут оказаться лучше текущего оптимума. Оптимум не меняется,
+     * перебор сокращается. По умолчанию включено.
+     */
+    private boolean forestRelinkCostBound = true;
     /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */
