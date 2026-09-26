@@ -28,6 +28,8 @@ export interface RunResponse {
   status: 'PENDING' | 'RUNNING' | 'DONE' | 'PARTIAL' | 'FAILED';
   algorithm?: string;
   traced?: boolean;
+  stage?: string | null;
+  progress?: number | null;
   summary?: Record<string, unknown>;
   error?: string;
 }
@@ -89,6 +91,12 @@ export async function fetchResult(runId: string): Promise<FeatureCollection> {
   return parseFeatureCollection(await response.json());
 }
 
+/** Сырой файл результата (формат заказчика) для скачивания. */
+export async function fetchResultBlob(runId: string): Promise<Blob> {
+  const response = await ensureOk(await fetch(`${baseUrl}/api/v1/runs/${runId}/result`));
+  return response.blob();
+}
+
 export async function fetchStages(runId: string): Promise<StageManifest> {
   const response = await ensureOk(await fetch(`${baseUrl}/api/v1/runs/${runId}/stages`));
   return response.json();
@@ -112,27 +120,38 @@ export interface RunFetchResult {
   runId: string;
   result: FeatureCollection;
   traced: boolean;
+  status: RunResponse['status'];
+}
+
+/** Хуки хода расчёта (ADR-0057). */
+export interface RunHooks {
+  /** Началась загрузка набора на сервис. */
+  onUpload?: () => void;
+  /** Очередное состояние запуска (создание и опрос). */
+  onRun?: (run: RunResponse) => void;
+  /** Расчёт завершён, загружается результат. */
+  onResultLoading?: () => void;
 }
 
 export async function runAndFetch(
   file: File,
   algorithm: string | null | undefined,
-  onStatus: (status: string) => void,
+  hooks: RunHooks = {},
 ): Promise<RunFetchResult> {
-  onStatus('Загрузка набора…');
+  hooks.onUpload?.();
   const dataset = await uploadDataset(file);
-  onStatus('Запуск расчёта…');
   const created = await createRun(dataset.id, algorithm, true);
   let run = created;
+  hooks.onRun?.(run);
   while (run.status === 'PENDING' || run.status === 'RUNNING') {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 700));
     run = await getRun(created.id);
-    onStatus(`Расчёт: ${run.status}`);
+    hooks.onRun?.(run);
   }
   if (run.status === 'FAILED') {
     throw new Error(run.error ?? 'Расчёт завершился ошибкой');
   }
-  onStatus('Загрузка результата…');
+  hooks.onResultLoading?.();
   const result = await fetchResult(run.id);
-  return { runId: run.id, result, traced: Boolean(run.traced) };
+  return { runId: run.id, result, traced: Boolean(run.traced), status: run.status };
 }

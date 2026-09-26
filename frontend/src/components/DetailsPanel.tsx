@@ -58,6 +58,36 @@ const PREFERRED_ORDER = [
   'depth_end',
 ];
 
+/** Оценка высоты попапа: сколько свойств держим в одной колонке. */
+function splitColumns(keys: string[]): [string[], string[]] {
+  const half = Math.ceil(keys.length / 2);
+  return [keys.slice(0, half), keys.slice(half)];
+}
+
+function PropertyLine({
+  name,
+  properties,
+}: {
+  name: string;
+  properties: FeatureProperties;
+}) {
+  return (
+    <Group gap={6} wrap="nowrap" align="baseline" justify="space-between">
+      <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+        {PROP_LABELS[name] ?? name}
+      </Text>
+      <Text
+        size="xs"
+        fw={600}
+        ta="right"
+        style={{ minWidth: 0, wordBreak: 'break-word' }}
+      >
+        {formatValue(name, properties[name as keyof FeatureProperties])}
+      </Text>
+    </Group>
+  );
+}
+
 export function DetailsPanel({
   compact = false,
   feature,
@@ -84,35 +114,57 @@ export function DetailsPanel({
   const objectType = String(properties.object_type ?? '');
   const ordered = PREFERRED_ORDER.filter((key) => key in properties);
   const rest = Object.keys(properties).filter((key) => !ordered.includes(key));
+  const keys = [...ordered, ...rest];
   const special = properties.laying_method === 'special';
   const cost = typeof properties.cost === 'number' ? properties.cost : null;
 
-  return (
-    <Stack gap="xs" h={compact ? undefined : '100%'} w={compact ? 300 : undefined}>
-      <Group justify="space-between" wrap="nowrap">
-        <Group gap={4} wrap="nowrap">
-          <Badge size="lg" variant="light">
-            {OBJECT_LABELS[objectType] ?? objectType}
+  const header = (
+    <Group justify="space-between" wrap="nowrap">
+      <Group gap={4} wrap="nowrap">
+        <Badge size="lg" variant="light">
+          {OBJECT_LABELS[objectType] ?? objectType}
+        </Badge>
+        {special && (
+          <Badge size="lg" color="orange" variant="filled">
+            спецпроход{cost !== null ? ` · ${formatMoney(cost)}` : ''}
           </Badge>
-          {special && (
-            <Badge size="lg" color="orange" variant="filled">
-              спецпроход{cost !== null ? ` · ${formatMoney(cost)}` : ''}
-            </Badge>
-          )}
-        </Group>
-        <Text
-          size="xs"
-          c="dimmed"
-          style={{ cursor: 'pointer' }}
-          onClick={close}
-        >
-          закрыть
-        </Text>
+        )}
       </Group>
-      <ScrollArea style={compact ? undefined : { flex: 1 }} mah={compact ? 280 : undefined}>
-        <Table striped withTableBorder fz="xs">
+      <Text size="xs" c="dimmed" style={{ cursor: 'pointer' }} onClick={close}>
+        закрыть
+      </Text>
+    </Group>
+  );
+
+  if (compact) {
+    // Плотная двухколоночная сетка — весь объект помещается без прокрутки.
+    const [left, right] = splitColumns(keys);
+    return (
+      <Stack gap={6} w={330}>
+        {header}
+        <Group align="flex-start" gap="md" wrap="nowrap">
+          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+            {left.map((key) => (
+              <PropertyLine key={key} name={key} properties={properties} />
+            ))}
+          </Stack>
+          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+            {right.map((key) => (
+              <PropertyLine key={key} name={key} properties={properties} />
+            ))}
+          </Stack>
+        </Group>
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack gap="xs" h="100%">
+      {header}
+      <ScrollArea style={{ flex: 1 }}>
+        <Table striped withTableBorder fz="sm">
           <Table.Tbody>
-            {[...ordered, ...rest].map((key) => (
+            {keys.map((key) => (
               <Table.Tr key={key}>
                 <Table.Td fw={600}>{PROP_LABELS[key] ?? key}</Table.Td>
                 <Table.Td>{formatValue(key, properties[key as keyof FeatureProperties])}</Table.Td>

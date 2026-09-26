@@ -29,7 +29,7 @@ export class FitZoomControl implements IControl {
   onAdd(map: MapLibreMap): HTMLElement {
     this.map = map;
     const container = document.createElement('div');
-    container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    container.className = 'maplibregl-ctrl maplibregl-ctrl-group heating-map-controls';
     container.appendChild(this.button('+', 'Приблизить', () => map.zoomIn()));
     container.appendChild(this.button('\u2212', 'Отдалить', () => map.zoomOut()));
     container.appendChild(this.button('\u2922', 'Показать все объекты', () => this.options.onFit()));
@@ -77,7 +77,7 @@ export class FitZoomControl implements IControl {
     button.title = title;
     button.setAttribute('aria-label', title);
     button.textContent = text;
-    button.style.cssText = 'font-size:16px;line-height:1;';
+    button.style.cssText = 'line-height:1;';
     button.addEventListener('click', (event) => {
       event.preventDefault();
       onClick();

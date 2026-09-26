@@ -13,3 +13,14 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
 }
+
+// jsdom не реализует ResizeObserver (нужен Mantine SegmentedControl/Popover).
+if (typeof window !== 'undefined' && !window.ResizeObserver) {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  window.ResizeObserver = ResizeObserverStub as unknown as typeof window.ResizeObserver;
+}
+

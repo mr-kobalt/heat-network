@@ -60,11 +60,11 @@ describe('store', () => {
     expect(useStore.getState().realPipeScale).toBe(false);
   });
 
-  it('keeps restriction buffer zones hidden by default and toggles them', () => {
-    expect(useStore.getState().visibility.restrictionBuffers).toBe(false);
-    useStore.getState().toggleLayer('restrictionBuffers');
-    expect(useStore.getState().visibility.restrictionBuffers).toBe(true);
-    useStore.getState().toggleLayer('restrictionBuffers');
+  it('keeps restriction buffer zones off by default and switches modes', () => {
+    expect(useStore.getState().layerMode.restrictionBuffers).toBe('off');
+    useStore.getState().setLayerMode('restrictionBuffers', 'labels');
+    expect(useStore.getState().layerMode.restrictionBuffers).toBe('labels');
+    useStore.getState().setLayerMode('restrictionBuffers', 'off');
   });
 
   it('activates stages from a manifest and resets on a new result', () => {
@@ -107,5 +107,24 @@ describe('store', () => {
     });
     expect(useStore.getState().variants).toEqual(['v1', 'v2']);
     expect(useStore.getState().activeVariant).toBe('v1');
+  });
+
+  it('tracks the run lifecycle state', () => {
+    useStore.getState().resetRun();
+    expect(useStore.getState().runStatus).toBe('IDLE');
+
+    useStore.getState().beginRun();
+    expect(useStore.getState().runStatus).toBe('PENDING');
+
+    useStore.getState().updateRun('RUNNING', 'generate', 67);
+    expect(useStore.getState().runStage).toBe('generate');
+    expect(useStore.getState().runProgress).toBe(67);
+
+    useStore.getState().finishRun('DONE');
+    expect(useStore.getState().runStatus).toBe('DONE');
+    expect(useStore.getState().runProgress).toBe(100);
+
+    useStore.getState().resetRun();
+    expect(useStore.getState().runStatus).toBe('IDLE');
   });
 });

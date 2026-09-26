@@ -1,21 +1,28 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Divider, FileButton, Select, Stack, Text } from '@mantine/core';
+import { Alert, Button, Divider, Group, Progress, Stack, Text } from '@mantine/core';
+import { Dropzone } from '@mantine/dropzone';
+import { IconDownload, IconFileDownload, IconFileImport, IconUpload } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { parseFeatureCollection } from '../types';
 import { useStore } from '../store';
-import { fetchAlgorithms, fetchStages, runAndFetch } from '../api/client';
+import { fetchAlgorithms, fetchResultBlob } from '../api/client';
+import { runDataset } from '../runDataset';
+import { stageLabel } from '../runStages';
+
+const ACCEPT = ['.geojson', '.json', 'application/geo+json'];
 
 export function DataSourcePanel() {
   const setInput = useStore((state) => state.setInput);
   const setResult = useStore((state) => state.setResult);
-  const algorithms = useStore((state) => state.algorithms);
-  const selectedAlgorithm = useStore((state) => state.selectedAlgorithm);
   const setAlgorithms = useStore((state) => state.setAlgorithms);
-  const setSelectedAlgorithm = useStore((state) => state.setSelectedAlgorithm);
-  const setStages = useStore((state) => state.setStages);
+  const runBusy = useStore((state) => state.runBusy);
+  const runStage = useStore((state) => state.runStage);
+  const runProgress = useStore((state) => state.runProgress);
+  const runError = useStore((state) => state.runError);
+  const runId = useStore((state) => state.runId);
+  const result = useStore((state) => state.result);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const { data: fetchedAlgorithms, error: algorithmsError } = useQuery({
     queryKey: ['algorithms'],
@@ -31,7 +38,10 @@ export function DataSourcePanel() {
     }
   }, [fetchedAlgorithms, setAlgorithms]);
 
-  const loadFile = async (file: File | null, setter: (value: ReturnType<typeof parseFeatureCollection>) => void) => {
+  const loadFile = async (
+    file: File | null,
+    setter: (value: ReturnType<typeof parseFeatureCollection>) => void,
+  ) => {
     if (!file) {
       return;
     }
@@ -45,89 +55,129 @@ export function DataSourcePanel() {
     }
   };
 
-  const runViaApi = async (file: File | null) => {
+  const runFile = async (file: File | null) => {
     if (!file) {
       return;
     }
-    setBusy(true);
     setError(null);
+    setStatus('');
+    await runDataset(file);
+  };
+
+  /** Скачивание выходного GeoJSON: файл запуска (формат заказчика) либо текущий результат. */
+  const downloadResult = async () => {
     try {
-      // Показываем входные данные (ОКС, существующая сеть) вместе с результатом.
-      const parsedInput = parseFeatureCollection(JSON.parse(await file.text()));
-      setInput(parsedInput);
-      const run = await runAndFetch(file, selectedAlgorithm, setStatus);
-      setResult(run.result);
-      if (run.traced && run.runId) {
-        try {
-          const manifest = await fetchStages(run.runId);
-          setStages(run.runId, manifest);
-        } catch (stageError) {
-          console.warn('Не удалось загрузить этапы расчёта', stageError);
-        }
+      let blob: Blob;
+      let filename = 'result.geojson';
+      if (runId) {
+        blob = await fetchResultBlob(runId);
+        filename = `result-${runId}.geojson`;
+      } else if (result) {
+        blob = new Blob([JSON.stringify(result)], { type: 'application/geo+json' });
+      } else {
+        return;
       }
-      setStatus('Готово');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : String(exception));
-    } finally {
-      setBusy(false);
     }
   };
 
   return (
     <Stack gap="xs">
-      <Text fw={600} size="sm">
-        Данные
-      </Text>
-      <FileButton accept=".geojson,.json,application/geo+json" onChange={(file) => loadFile(file, setResult)}>
-        {(props) => (
-          <Button {...props} size="xs" variant="light">
-            Открыть результат (GeoJSON)
-          </Button>
-        )}
-      </FileButton>
-      <FileButton accept=".geojson,.json,application/geo+json" onChange={(file) => loadFile(file, setInput)}>
-        {(props) => (
-          <Button {...props} size="xs" variant="light">
-            Открыть исходные данные (контекст)
-          </Button>
-        )}
-      </FileButton>
+      <Divider label="визуализировать" labelPosition="center" />
 
-      <Divider label="через сервис" labelPosition="center" my={4} />
-      <Select
-        label="Алгоритм трассировки"
-        size="xs"
-        placeholder={algorithms.length === 0 ? 'Загрузка…' : 'Выберите алгоритм'}
-        data={algorithms.map((algorithm) => ({
-          value: algorithm.id,
-          label: `${algorithm.id} — ${algorithm.description}`,
-        }))}
-        value={selectedAlgorithm}
-        onChange={setSelectedAlgorithm}
-        allowDeselect={false}
-        disabled={algorithms.length === 0}
-      />
+      <Group grow align="stretch" gap="xs">
+        <Dropzone
+          accept={ACCEPT}
+          multiple={false}
+          onDrop={(files) => loadFile(files[0] ?? null, setInput)}
+          onReject={() => setError('Неподдерживаемый файл')}
+          p="xs"
+          style={{ minHeight: 76 }}
+        >
+          <Stack align="center" gap={4}>
+            <IconFileImport size={20} />
+            <Text size="xs" ta="center">Исходные данные</Text>
+          </Stack>
+        </Dropzone>
+        <Dropzone
+          accept={ACCEPT}
+          multiple={false}
+          onDrop={(files) => loadFile(files[0] ?? null, setResult)}
+          onReject={() => setError('Неподдерживаемый файл')}
+          p="xs"
+          style={{ minHeight: 76 }}
+        >
+          <Stack align="center" gap={4}>
+            <IconFileDownload size={20} />
+            <Text size="xs" ta="center">Результат</Text>
+          </Stack>
+        </Dropzone>
+      </Group>
+
+      <Divider label="рассчитать" labelPosition="center" my={4} />
       {algorithmsError && (
-        <Text size="xs" c="red">
+        <Text size="sm" c="red">
           Не удалось получить список алгоритмов: {String(algorithmsError)}
         </Text>
       )}
-      <FileButton accept=".geojson,.json,application/geo+json" onChange={runViaApi}>
-        {(props) => (
-          <Button {...props} size="xs" loading={busy} disabled={busy}>
-            Загрузить и рассчитать
-          </Button>
-        )}
-      </FileButton>
+
+      {runBusy ? (
+        <Stack gap={4}>
+          <Group justify="space-between">
+            <Text size="sm" fw={600}>
+              {stageLabel(runStage)}
+            </Text>
+            <Text size="sm" c="dimmed">
+              {Math.round(runProgress)}%
+            </Text>
+          </Group>
+          <Progress value={runProgress} animated size="md" radius="sm" />
+        </Stack>
+      ) : (
+        <Group grow align="stretch" gap="xs">
+          <Dropzone
+            accept={ACCEPT}
+            multiple={false}
+            onDrop={(files) => runFile(files[0] ?? null)}
+            onReject={() => setError('Неподдерживаемый файл')}
+            p="sm"
+          >
+            <Stack align="center" gap={4}>
+              <IconUpload size={22} />
+              <Text size="sm" fw={600}>Загрузить и рассчитать</Text>
+            </Stack>
+          </Dropzone>
+          {(runId || result) && (
+            <Button
+              variant="light"
+              h="100%"
+              p="sm"
+              onClick={() => { void downloadResult(); }}
+            >
+              <Stack align="center" gap={4}>
+                <IconDownload size={22} />
+                <Text size="sm" fw={600}>Скачать результат</Text>
+              </Stack>
+            </Button>
+          )}
+        </Group>
+      )}
 
       {status && (
-        <Text size="xs" c="dimmed">
+        <Text size="sm" c="dimmed">
           {status}
         </Text>
       )}
-      {error && (
+      {(error ?? runError) && (
         <Alert color="red" title="Ошибка" p="xs">
-          {error}
+          {error ?? runError}
         </Alert>
       )}
     </Stack>

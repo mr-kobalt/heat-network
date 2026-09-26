@@ -17,6 +17,7 @@ import { FitZoomControl } from './controls';
 import { DetailsPanel } from '../components/DetailsPanel';
 import { useStore } from '../store';
 import type { GeoFeature } from '../types';
+import { stageFileKey } from '../types';
 
 let pmtilesProtocolRegistered = false;
 
@@ -52,33 +53,36 @@ export function MapView() {
   const input = useStore((state) => state.input);
   const result = useStore((state) => state.result);
   const activeVariant = useStore((state) => state.activeVariant);
-  const visibility = useStore((state) => state.visibility);
+  const layerMode = useStore((state) => state.layerMode);
   const basemap = useStore((state) => state.basemap);
   const realPipeScale = useStore((state) => state.realPipeScale);
   const selected = useStore((state) => state.selected);
   const selectedAnchor = useStore((state) => state.selectedAnchor);
   const select = useStore((state) => state.select);
   const activeStage = useStore((state) => state.activeStage);
+  const stages = useStore((state) => state.stages);
   const treePass = useStore((state) => state.treePass);
   const stageData = useStore((state) => state.stageData);
   const gridMask = useStore((state) => state.gridMask);
+  const panelResizing = useStore((state) => state.panelResizing);
 
   const buffers = useMemo(
-    () => (visibility.restrictionBuffers ? buildRestrictionBuffers(input) : EMPTY_COLLECTION),
-    [visibility.restrictionBuffers, input],
+    () => (layerMode.restrictionBuffers !== 'off' ? buildRestrictionBuffers(input) : EMPTY_COLLECTION),
+    [layerMode.restrictionBuffers, input],
   );
 
   const stageFeatures = useMemo(() => {
-    const key = activeStage === 'trees' ? `trees-${treePass}` : activeStage;
-    return stageData[key] ?? null;
-  }, [activeStage, treePass, stageData]);
+    const descriptor = stages.find((stage) => stage.id === activeStage);
+    const key = stageFileKey(descriptor, treePass);
+    return (key && stageData[key]) || null;
+  }, [activeStage, stages, treePass, stageData]);
 
   const overlayData = useMemo(
     () => ({
       input,
       result,
       activeVariant,
-      visibility,
+      layerMode,
       buffers,
       realPipeScale,
       activeStage,
@@ -89,7 +93,7 @@ export function MapView() {
       input,
       result,
       activeVariant,
-      visibility,
+      layerMode,
       buffers,
       realPipeScale,
       activeStage,
@@ -144,8 +148,7 @@ export function MapView() {
         }),
         'top-right',
       );
-      if (debugTiles) {
-        map.showTileBoundaries = true;
+      if (debugTiles) {        map.showTileBoundaries = true;
         map.on('error', (event) => {
           const error = (event as { error?: { message?: string; url?: string } }).error;
           console.warn('[map] error:', error?.message ?? event, error?.url ?? '');
@@ -222,17 +225,29 @@ export function MapView() {
   }, [select, debugTiles]);
 
   // Пересчёт размеров канвы при изменении видимой области (тумблеры панелей, окно).
+  // Во время перетаскивания границы панели resize не вызываем: карта остаётся
+  // как есть (лишь обрезается), чтобы не перерисовываться на каждом шаге.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return undefined;
     }
     const observer = new ResizeObserver(() => {
+      if (useStore.getState().panelResizing) {
+        return;
+      }
       mapRef.current?.resize();
     });
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
+
+  // По завершении перетаскивания один раз подгоняем карту под новую ширину.
+  useEffect(() => {
+    if (ready && !panelResizing) {
+      mapRef.current?.resize();
+    }
+  }, [ready, panelResizing]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -270,17 +285,27 @@ export function MapView() {
       return undefined;
     }
     const container = document.createElement('div');
+    const popupOffset = 10;
     const popup = new maplibregl.Popup({
       closeButton: false,
-      maxWidth: '320px',
-      offset: 10,
+      maxWidth: '360px',
+      offset: popupOffset,
       closeOnClick: false,
     })
       .setLngLat(selectedAnchor)
       .setDOMContent(container)
       .addTo(map);
+    // MapLibre выбирает якорь попапа по высоте контента, но контент приходит
+    // порталом React уже после первого пересчёта (высота ≈0) и попап уходит за
+    // верх карты. Пересчитываем положение, когда размер контента известен.
+    const reposition = () => popup.setOffset(popupOffset);
+    const observer = new ResizeObserver(reposition);
+    observer.observe(container);
+    const frame = window.requestAnimationFrame(reposition);
     setPopupContainer(container);
     return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
       popup.remove();
     };
   }, [ready, selected, selectedAnchor]);
@@ -291,13 +316,13 @@ export function MapView() {
       return;
     }
     fitStageToData(map, overlayData);
-    // Переподгонка — только при смене данных/варианта, не при переключении
-    // вкладок этапов (ADR-0037): масштаб сохраняется.
+    // Переподгонка — только при смене данных (input/result), не при выборе
+    // варианта/дерева и не при переключении вкладок этапов (ADR-0037/0057).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, input, result, activeVariant]);
+  }, [ready, input, result]);
 
   return (
-    <div ref={containerRef} style={CONTAINER_STYLE}>
+    <div ref={containerRef} className="heating-map-root" style={CONTAINER_STYLE}>
       {popupContainer && selected
         ? createPortal(
             <DetailsPanel compact feature={selected} onClose={() => select(null)} />,

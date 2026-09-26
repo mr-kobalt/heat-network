@@ -1,7 +1,8 @@
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 import { LngLatBounds } from 'maplibre-gl';
 import { FeatureCollection, GeoFeature } from '../types';
-import type { LayerKey } from '../store';
+import { hasLayerLabels, isLayerVisible } from '../store';
+import type { LayerKey, LayerMode } from '../store';
 import {
   DIAMETER_COLOR,
   DIAMETER_WIDTH,
@@ -18,7 +19,12 @@ import {
 } from './paint';
 import { markOksTargets } from './geometry';
 import { CHAMBER_EXISTING_ICON, CHAMBER_NEW_ICON } from './icons';
-import { SOURCE_COLOR, TECHNICAL_NODE_COLOR, ZONE_COLOR, ZONE_PATTERN } from './visuals';
+import {
+  SOURCE_COLOR,
+  TECHNICAL_NODE_COLOR,
+  ZONE_COLOR,
+  ZONE_PATTERN,
+} from './visuals';
 
 export { CHAMBER_EXISTING_COLOR, CHAMBER_NEW_COLOR } from './visuals';
 
@@ -26,12 +32,32 @@ export interface OverlayData {
   input: FeatureCollection | null;
   result: FeatureCollection | null;
   activeVariant: string | null;
-  visibility: Record<LayerKey, boolean>;
+  layerMode: Record<LayerKey, LayerMode>;
   /** Зоны минимальных горизонтальных расстояний вокруг ограничений. */
   buffers: FeatureCollection;
   /** Реальная ширина пары труб вместо пропорциональной Ду. */
   realPipeScale: boolean;
 }
+
+const visible = (mode: LayerMode) => isLayerVisible(mode);
+const labels = (mode: LayerMode) => hasLayerLabels(mode);
+
+/** Точечная линия специального прохода (dotted, не dashed). */
+const SPECIAL_DASHARRAY: number[] = [0.5, 2.5];
+
+const EXISTING_NETWORK_LABEL: unknown = [
+  'concat', 'Ду ', ['to-string', ['get', 'diameter']],
+];
+const NEW_NETWORK_LABEL: unknown = [
+  'concat',
+  'Ду ', ['to-string', ['get', 'diameter']],
+  ' · ', ['number-format', ['get', 'length'], { maximumFractionDigits: 0 }], ' м',
+  ' · ', ['number-format', ['get', 'cost'], { maximumFractionDigits: 0 }], ' ₽',
+];
+const CHAMBER_LABEL: unknown = ['concat', 'Ду ', ['to-string', ['get', 'diameter']]];
+const CONNECTION_POINT_LABEL: unknown = [
+  'concat', ['to-string', ['get', 'flow_tph']], ' т/ч',
+];
 
 /** Ширина линии существующей сети для текущего режима (с hover-акцентом). */
 function existingPipeWidth(real: boolean): unknown {
@@ -76,7 +102,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
   const variant = data.activeVariant;
   const input = data.input;
   const result = data.result;
-  const visibility = data.visibility;
+  const mode = data.layerMode;
   const real = data.realPipeScale;
 
   const rawConnectionPoints = features(input, (f) => f.properties.object_type === 'oks_connection_point');
@@ -116,7 +142,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
   setSource(map, 'res-chamber', resultFeatures((f) => f.properties.object_type === 'heat_chamber'));
   setSource(map, 'res-technode', resultFeatures((f) => f.properties.object_type === 'technical_node'));
 
-  ensurePatternFill(map, 'layer-in-buffers', 'in-buffers', ZONE_PATTERN, 0.35, visibility.restrictionBuffers);
+  ensurePatternFill(map, 'layer-in-buffers', 'in-buffers', ZONE_PATTERN, 0.35, visible(mode.restrictionBuffers));
   ensureLine(
     map,
     'layer-in-buffers-outline',
@@ -124,7 +150,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     ZONE_COLOR,
     1,
     undefined,
-    visibility.restrictionBuffers,
+    visible(mode.restrictionBuffers),
     [2, 2],
   );
   ensureLine(
@@ -134,7 +160,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     undefined,
     existingPipeWidth(real),
     undefined,
-    visibility.existingNetwork,
+    visible(mode.existingNetwork),
   );
   ensureFill(
     map,
@@ -143,7 +169,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     restrictionFillColor(),
     0.25,
     RESTRICTION_FILL_FILTER,
-    visibility.restrictions,
+    visible(mode.restrictions),
     0.45,
   );
   ensureLine(
@@ -153,11 +179,11 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     restrictionFillColor(),
     hoverWidth(2),
     undefined,
-    visibility.restrictions,
+    visible(mode.restrictions),
   );
-  ensureSymbol(map, 'layer-in-chambers', 'in-chambers', CHAMBER_EXISTING_ICON, 0.7, visibility.chambers);
-  ensureCircle(map, 'layer-in-source', 'in-source', SOURCE_COLOR, 8, visibility.connectionPoints);
-  ensureCircle(map, 'layer-in-cp', 'in-cp', connectionPointColor(), 6, visibility.connectionPoints);
+  ensureSymbol(map, 'layer-in-chambers', 'in-chambers', CHAMBER_EXISTING_ICON, 0.7, visible(mode.chambers));
+  ensureCircle(map, 'layer-in-source', 'in-source', SOURCE_COLOR, 8, visible(mode.connectionPoints));
+  ensureCircle(map, 'layer-in-cp', 'in-cp', connectionPointColor(), 6, visible(mode.connectionPoints));
 
   ensureLine(
     map,
@@ -166,7 +192,7 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     undefined,
     newPipeWidth(real),
     ['!=', ['get', 'laying_method'], 'special'],
-    visibility.newNetwork,
+    visible(mode.newNetwork),
   );
   ensureLine(
     map,
@@ -175,11 +201,22 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     DIAMETER_COLOR,
     newPipeWidth(real),
     ['==', ['get', 'laying_method'], 'special'],
-    visibility.newNetwork,
-    [3, 2],
+    visible(mode.newNetwork),
+    SPECIAL_DASHARRAY,
   );
-  ensureSymbol(map, 'layer-res-chamber', 'res-chamber', CHAMBER_NEW_ICON, 0.7, visibility.chambers);
-  ensureHollowCircle(map, 'layer-res-technode', 'res-technode', TECHNICAL_NODE_COLOR, 3, visibility.technicalNodes);
+  ensureSymbol(map, 'layer-res-chamber', 'res-chamber', CHAMBER_NEW_ICON, 0.7, visible(mode.chambers));
+  ensureHollowCircle(map, 'layer-res-technode', 'res-technode', TECHNICAL_NODE_COLOR, 3, visible(mode.technicalNodes));
+
+  ensureLineLabel(map, 'layer-in-network-label', 'in-network', EXISTING_NETWORK_LABEL,
+      visible(mode.existingNetwork) && labels(mode.existingNetwork));
+  ensureLineLabel(map, 'layer-res-network-label', 'res-network', NEW_NETWORK_LABEL,
+      visible(mode.newNetwork) && labels(mode.newNetwork));
+  ensurePointLabel(map, 'layer-in-chamber-label', 'in-chambers', CHAMBER_LABEL,
+      visible(mode.chambers) && labels(mode.chambers));
+  ensurePointLabel(map, 'layer-res-chamber-label', 'res-chamber', CHAMBER_LABEL,
+      visible(mode.chambers) && labels(mode.chambers));
+  ensurePointLabel(map, 'layer-in-cp-label', 'in-cp', CONNECTION_POINT_LABEL,
+      visible(mode.connectionPoints) && labels(mode.connectionPoints));
 
   applyExistingNetworkPaint(map, real);
   applyDiameterPaint(map, real);
@@ -371,6 +408,73 @@ function ensureSymbol(
   setVisibility(map, id, visible);
 }
 
+const LABEL_FONT = ['Noto Sans Regular'];
+
+/** Подпись вдоль линии (Ду, длина, стоимость) — ADR-0058. */
+function ensureLineLabel(
+  map: MapLibreMap,
+  id: string,
+  source: string,
+  textField: unknown,
+  visible: boolean,
+): void {
+  if (!map.getLayer(id)) {
+    try {
+      map.addLayer({
+        id,
+        type: 'symbol',
+        source,
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': textField as never,
+          'text-font': LABEL_FONT,
+          'text-size': 11,
+          'text-offset': [0, -1],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'text-rotation-alignment': 'map',
+        },
+        paint: { 'text-color': '#1f2937', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+      } as never);
+    } catch (error) {
+      console.error(`[map] не удалось добавить слой ${id}`, error);
+    }
+  }
+  setVisibility(map, id, visible);
+}
+
+/** Подпись под точечным объектом (камеры, точки подключения) — ADR-0058. */
+function ensurePointLabel(
+  map: MapLibreMap,
+  id: string,
+  source: string,
+  textField: unknown,
+  visible: boolean,
+): void {
+  if (!map.getLayer(id)) {
+    try {
+      map.addLayer({
+        id,
+        type: 'symbol',
+        source,
+        layout: {
+          'text-field': textField as never,
+          'text-font': LABEL_FONT,
+          'text-size': 12,
+          'text-offset': [0, 1.4],
+          'text-anchor': 'top',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#1f2937', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+      } as never);
+    } catch (error) {
+      console.error(`[map] не удалось добавить слой ${id}`, error);
+    }
+  }
+  setVisibility(map, id, visible);
+}
+
 function setVisibility(map: MapLibreMap, id: string, visible: boolean): void {
   if (!map.getLayer(id)) {
     return;
@@ -406,6 +510,7 @@ function applyDiameterPaint(map: MapLibreMap, real: boolean): void {
     map.setPaintProperty('layer-res-base', 'line-color', DIAMETER_COLOR as never);
     map.setPaintProperty('layer-res-base', 'line-width', newPipeWidth(real) as never);
     if (map.getLayer('layer-res-special')) {
+      map.setPaintProperty('layer-res-special', 'line-color', DIAMETER_COLOR as never);
       map.setPaintProperty('layer-res-special', 'line-width', newPipeWidth(real) as never);
     }
   } catch (error) {

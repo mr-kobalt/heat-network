@@ -57,12 +57,18 @@ function stageColors(kind: string): StageColors {
       return { polygon: restrictionPolygonColor() };
     case 'exits':
       return { line: '#2563eb', point: '#2563eb' };
+    case 'ties':
+      return { point: '#7c3aed' };
     case 'trees':
       return { line: '#f97316' };
-    case 'refine':
-      return { line: '#16a34a', point: '#16a34a' };
     case 'relink':
       return { line: '#0d9488', point: '#0d9488' };
+    case 'contract':
+      return { line: '#0891b2', point: '#0891b2' };
+    case 'refine':
+      return { line: '#16a34a', point: '#16a34a' };
+    case 'chambers':
+      return { line: '#db2777', point: '#db2777' };
     default:
       return {};
   }

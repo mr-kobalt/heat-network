@@ -1,0 +1,53 @@
+/* ADR-0056/0059: контролы карты — крупнее и по центру правого края. */
+
+.heating-map-root .maplibregl-ctrl-top-right {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.heating-map-root .heating-map-controls button {
+  width: 38px;
+  height: 38px;
+  font-size: 20px;
+}
+
+.heating-map-root .heating-map-controls .maplibregl-ctrl-compass-custom svg {
+  width: 26px;
+  height: 26px;
+}
+
+.heating-map-root .heating-map-controls .maplibregl-ctrl-zoom-readout {
+  font-size: 12px;
+}
+
+/* ADR-0057: уведомления — под шапкой. Класс получают все позиционные
+   контейнеры Mantine, поэтому сдвигаем только правый верхний. */
+.app-notifications-root[data-position='top-right'] {
+  top: 64px;
+}
+
+/* ADR-0058: при активных подписях подсвечиваем и сегмент «графика» (глаз).
+   Селектор по <label>, чтобы не зависеть от хеш-классов Mantine. */
+.layer-mode-toggle[data-labels='true'] label:nth-of-type(2) {
+  background: var(--mantine-color-indigo-1);
+  border-radius: var(--mantine-radius-sm);
+}
+
+/* ADR-0059: видимая зона изменения ширины левой панели. */
+.nav-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 44px;
+  border-radius: 2px;
+  background: var(--mantine-color-gray-4);
+  transition: background 120ms ease;
+}
+
+.nav-resize-handle:hover::after,
+.nav-resize-handle:active::after {
+  background: var(--mantine-color-indigo-5);
+}

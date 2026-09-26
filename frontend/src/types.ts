@@ -27,6 +27,8 @@ export type FeatureProperties = {
   calculated_cost?: number;
   new_network_length?: number;
   score?: number;
+  /** Номер прохода поиска, из которого выращен вариант (связь с «Деревьями»). */
+  pass?: number;
   unconnected_oks_ids?: Array<string | number>;
   [key: string]: unknown;
 };
@@ -71,6 +73,17 @@ export type StageManifest = {
   bestPass: number;
   stages: StageDescriptor[];
 };
+
+/**
+ * Ключ файла стадии: постадийные стадии (`trees`, `relink`, `refine`, …)
+ * зависят от выбранного прохода и грузятся как `<id>-<pass>` (ADR-0036).
+ */
+export function stageFileKey(stage: StageDescriptor | undefined, pass: number): string {
+  if (!stage) {
+    return '';
+  }
+  return stage.passes && stage.passes.length > 0 ? `${stage.id}-${pass}` : stage.id;
+}
 
 /** Растровая диагностика этапа «сетка» (ADR-0036). */
 export type GridMask = {
