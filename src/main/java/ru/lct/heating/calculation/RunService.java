@@ -9,6 +9,8 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 import ru.lct.heating.ingest.DatasetService;
 import ru.lct.heating.persistence.CalculationRunEntity;
@@ -65,10 +67,29 @@ public class RunService {
         run.setStatus(RunStatus.PENDING.name());
         run.setAlgorithm(algorithm.id());
         run.setTrace(trace);
+        run.setProgress(0);
         run.setCreatedAt(Instant.now());
         runRepository.save(run);
-        runExecutor.execute(run.getId());
+        dispatchAfterCommit(run.getId());
         return run;
+    }
+
+    /**
+     * Запуск расчёта отправляется воркеру только после commit транзакции, иначе
+     * {@link RunExecutor} может не найти ещё не зафиксированную запись и молча
+     * выйти — запуск навсегда останется в статусе {@code PENDING}.
+     */
+    private void dispatchAfterCommit(UUID runId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    runExecutor.execute(runId);
+                }
+            });
+        } else {
+            runExecutor.execute(runId);
+        }
     }
 
     @Transactional(readOnly = true)
