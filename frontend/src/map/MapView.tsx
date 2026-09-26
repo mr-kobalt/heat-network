@@ -15,9 +15,12 @@ import { addOverlayIcons, overlayIconById } from './icons';
 import { EMPTY_COLLECTION, buildRestrictionBuffers } from './buffers';
 import { FitZoomControl } from './controls';
 import { DetailsPanel } from '../components/DetailsPanel';
+import { popupWidth } from '../components/popupWidth';
 import { useStore } from '../store';
 import type { GeoFeature } from '../types';
 import { stageFileKey } from '../types';
+import { applySelection } from './selection';
+import { applyHoverPreview, clearHoverPreview } from './hover';
 
 let pmtilesProtocolRegistered = false;
 
@@ -59,12 +62,22 @@ export function MapView() {
   const selected = useStore((state) => state.selected);
   const selectedAnchor = useStore((state) => state.selectedAnchor);
   const select = useStore((state) => state.select);
+  const centerRequest = useStore((state) => state.centerRequest);
   const activeStage = useStore((state) => state.activeStage);
   const stages = useStore((state) => state.stages);
   const treePass = useStore((state) => state.treePass);
   const stageData = useStore((state) => state.stageData);
   const gridMask = useStore((state) => state.gridMask);
   const panelResizing = useStore((state) => state.panelResizing);
+  const selectedRef = useRef<GeoFeature | null>(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+  const hovered = useStore((state) => state.hovered);
+  const hoveredRef = useRef<GeoFeature | null>(null);
+  useEffect(() => {
+    hoveredRef.current = hovered;
+  }, [hovered]);
 
   const buffers = useMemo(
     () => (layerMode.restrictionBuffers !== 'off' ? buildRestrictionBuffers(input) : EMPTY_COLLECTION),
@@ -159,6 +172,8 @@ export function MapView() {
       map.on('style.load', () => {
         addOverlayIcons(map, CHAMBER_EXISTING_COLOR, CHAMBER_NEW_COLOR);
         applyOverlays(map, overlayRef.current);
+        applySelection(map, selectedRef.current);
+        applyHoverPreview(map, hoveredRef.current);
       });
       // Контуры ячеек сетки пересчитываются под текущий вьюпорт (ADR-0037).
       map.on('moveend', () => refreshStageGridCells(map, overlayRef.current));
@@ -288,9 +303,10 @@ export function MapView() {
     const popupOffset = 10;
     const popup = new maplibregl.Popup({
       closeButton: false,
-      maxWidth: '360px',
+      maxWidth: `${popupWidth(selected.properties.object_type as string | undefined)}px`,
       offset: popupOffset,
       closeOnClick: false,
+      className: 'object-popup',
     })
       .setLngLat(selectedAnchor)
       .setDOMContent(container)
@@ -320,6 +336,34 @@ export function MapView() {
     // варианта/дерева и не при переключении вкладок этапов (ADR-0037/0057).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, input, result]);
+
+  // Переход по ссылке узла: центрируем карту, не меняя масштаб.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || centerRequest === 0 || !selectedAnchor) {
+      return;
+    }
+    map.easeTo({ center: selectedAnchor, duration: 400 });
+  }, [centerRequest, ready, selectedAnchor]);
+
+  // Подсветка выбранного объекта: бегущий пунктир (линии) или пульс-кольцо (точки).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) {
+      return;
+    }
+    applySelection(map, selected);
+  }, [ready, selected]);
+
+  // Подсветка объекта, на чип перехода которого наведён курсор.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) {
+      return undefined;
+    }
+    applyHoverPreview(map, hovered);
+    return () => clearHoverPreview(map);
+  }, [ready, hovered]);
 
   return (
     <div ref={containerRef} className="heating-map-root" style={CONTAINER_STYLE}>

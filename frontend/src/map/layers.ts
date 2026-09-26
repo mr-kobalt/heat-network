@@ -45,6 +45,10 @@ const labels = (mode: LayerMode) => hasLayerLabels(mode);
 /** Точечная линия специального прохода (dotted, не dashed). */
 const SPECIAL_DASHARRAY: number[] = [0.5, 2.5];
 
+/** Иконка камеры: базовый и hover-размер (прирост как `hoverRadius(_, 2)` у техузлов). */
+const CHAMBER_ICON_SIZE = 0.7;
+const CHAMBER_ICON_HOVER_SIZE = 0.87;
+
 const EXISTING_NETWORK_LABEL: unknown = [
   'concat', 'Ду ', ['to-string', ['get', 'diameter']],
 ];
@@ -181,7 +185,8 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     undefined,
     visible(mode.restrictions),
   );
-  ensureSymbol(map, 'layer-in-chambers', 'in-chambers', CHAMBER_EXISTING_ICON, 0.7, visible(mode.chambers));
+  ensureSymbol(map, 'layer-in-chambers', 'in-chambers', CHAMBER_EXISTING_ICON,
+      CHAMBER_ICON_SIZE, visible(mode.chambers), hoverOpacity(1, 0));
   ensureCircle(map, 'layer-in-source', 'in-source', SOURCE_COLOR, 8, visible(mode.connectionPoints));
   ensureCircle(map, 'layer-in-cp', 'in-cp', connectionPointColor(), 6, visible(mode.connectionPoints));
 
@@ -204,8 +209,16 @@ export function updateOverlays(map: MapLibreMap, data: OverlayData): void {
     visible(mode.newNetwork),
     SPECIAL_DASHARRAY,
   );
-  ensureSymbol(map, 'layer-res-chamber', 'res-chamber', CHAMBER_NEW_ICON, 0.7, visible(mode.chambers));
+  ensureSymbol(map, 'layer-res-chamber', 'res-chamber', CHAMBER_NEW_ICON,
+      CHAMBER_ICON_SIZE, visible(mode.chambers), hoverOpacity(1, 0));
   ensureHollowCircle(map, 'layer-res-technode', 'res-technode', TECHNICAL_NODE_COLOR, 3, visible(mode.technicalNodes));
+
+  // Камеры: `icon-size` — layout, где feature-state запрещён. Hover-слой —
+  // дублирующий symbol крупнее, проявляемый через paint `icon-opacity`.
+  ensureSymbol(map, 'layer-in-chambers-hover', 'in-chambers', CHAMBER_EXISTING_ICON,
+      CHAMBER_ICON_HOVER_SIZE, visible(mode.chambers), hoverOpacity(0, 1));
+  ensureSymbol(map, 'layer-res-chamber-hover', 'res-chamber', CHAMBER_NEW_ICON,
+      CHAMBER_ICON_HOVER_SIZE, visible(mode.chambers), hoverOpacity(0, 1));
 
   ensureLineLabel(map, 'layer-in-network-label', 'in-network', EXISTING_NETWORK_LABEL,
       visible(mode.existingNetwork) && labels(mode.existingNetwork));
@@ -385,6 +398,7 @@ function ensureSymbol(
   icon: string,
   size: number,
   visible: boolean,
+  iconOpacity?: unknown,
 ): void {
   if (!map.getLayer(id)) {
     try {
@@ -400,7 +414,10 @@ function ensureSymbol(
           'icon-ignore-placement': true,
           'icon-anchor': 'center',
         },
-      });
+        ...(iconOpacity !== undefined
+          ? { paint: { 'icon-opacity': iconOpacity as never } }
+          : {}),
+      } as never);
     } catch (error) {
       console.error(`[map] не удалось добавить слой ${id}`, error);
     }

@@ -47,6 +47,10 @@ type State = {
   selected: GeoFeature | null;
   /** Координата попапа выбранного объекта [lng, lat]. */
   selectedAnchor: [number, number] | null;
+  /** Счётчик запросов центрирования карты на выбранном объекте (без зума). */
+  centerRequest: number;
+  /** Объект, подсвечиваемый при наведении на чип перехода (ADR-0058). */
+  hovered: GeoFeature | null;
   layerMode: Record<LayerKey, LayerMode>;
   /** Выбранная подложка: OSM, топографическая или без подложки. */
   basemap: BasemapId;
@@ -82,6 +86,8 @@ type State = {
   setResult: (result: FeatureCollection | null) => void;
   setActiveVariant: (variant: string | null) => void;
   select: (feature: GeoFeature | null, anchor?: [number, number] | null) => void;
+  selectAndCenter: (feature: GeoFeature, anchor?: [number, number] | null) => void;
+  setHovered: (feature: GeoFeature | null) => void;
   setLayerMode: (layer: LayerKey, mode: LayerMode) => void;
   setBasemap: (basemap: BasemapId) => void;
   toggleRealPipeScale: () => void;
@@ -114,6 +120,8 @@ export const useStore = create<State>((set) => ({
   variantScore: {},
   selected: null,
   selectedAnchor: null,
+  centerRequest: 0,
+  hovered: null,
   layerMode: defaultLayerMode,
   basemap: 'osm',
   realPipeScale: false,
@@ -202,7 +210,15 @@ export const useStore = create<State>((set) => ({
   select: (feature, anchor = null) => set({
     selected: feature,
     selectedAnchor: feature ? anchor : null,
+    hovered: null,
   }),
+  selectAndCenter: (feature, anchor = null) => set((state) => ({
+    selected: feature,
+    selectedAnchor: anchor,
+    hovered: null,
+    centerRequest: state.centerRequest + 1,
+  })),
+  setHovered: (feature) => set({ hovered: feature }),
   setLayerMode: (layer, mode) =>
     set((state) => ({ layerMode: { ...state.layerMode, [layer]: mode } })),
   setBasemap: (basemap) => set({ basemap }),

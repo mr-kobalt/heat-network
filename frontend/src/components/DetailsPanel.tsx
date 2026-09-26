@@ -1,6 +1,27 @@
+import { Fragment, useMemo } from 'react';
 import { FeatureProperties, GeoFeature } from '../types';
 import { useStore } from '../store';
-import { Badge, Divider, Group, ScrollArea, Stack, Table, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Badge,
+  Box,
+  CopyButton,
+  Divider,
+  Group,
+  ScrollArea,
+  Stack,
+  Table,
+  Text,
+} from '@mantine/core';
+import { IconCheck, IconCopy, IconX } from '@tabler/icons-react';
+import { popupWidth } from './popupWidth';
+import {
+  buildNodeGraph,
+  buildNodeIndex,
+  featureAnchor,
+  nodeLinks,
+  nodeTypeLabel,
+} from './nodeGraph';
 
 const OBJECT_LABELS: Record<string, string> = {
   source: 'Источник',
@@ -14,6 +35,7 @@ const OBJECT_LABELS: Record<string, string> = {
 
 const PROP_LABELS: Record<string, string> = {
   id: 'Идентификатор',
+  object_type: 'Тип',
   variant_id: 'Вариант',
   diameter: 'Условный диаметр, мм',
   flow_tph: 'Расход, т/ч',
@@ -58,35 +80,20 @@ const PREFERRED_ORDER = [
   'depth_end',
 ];
 
-/** Оценка высоты попапа: сколько свойств держим в одной колонке. */
-function splitColumns(keys: string[]): [string[], string[]] {
-  const half = Math.ceil(keys.length / 2);
-  return [keys.slice(0, half), keys.slice(half)];
-}
+/** Поля, скрываемые в карточке (id — в заголовке, узлы — в переходах). */
+const HIDDEN_FIELDS = new Set(['id', 'start_node_id', 'end_node_id']);
 
-function PropertyLine({
-  name,
-  properties,
-}: {
-  name: string;
-  properties: FeatureProperties;
-}) {
-  return (
-    <Group gap={6} wrap="nowrap" align="baseline" justify="space-between">
-      <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-        {PROP_LABELS[name] ?? name}
-      </Text>
-      <Text
-        size="xs"
-        fw={600}
-        ta="right"
-        style={{ minWidth: 0, wordBreak: 'break-word' }}
-      >
-        {formatValue(name, properties[name as keyof FeatureProperties])}
-      </Text>
-    </Group>
-  );
-}
+/** Единый стиль чипов заголовка (название объекта и id) — одинаковая высота. */
+const HEADER_CHIP_STYLE = {
+  textTransform: 'none',
+  fontWeight: 500,
+  maxWidth: '100%',
+  height: 30,
+  lineHeight: 1,
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '0 10px',
+} as const;
 
 export function DetailsPanel({
   compact = false,
@@ -99,8 +106,28 @@ export function DetailsPanel({
 }) {
   const storedSelected = useStore((state) => state.selected);
   const select = useStore((state) => state.select);
+  const selectAndCenter = useStore((state) => state.selectAndCenter);
+  const setHovered = useStore((state) => state.setHovered);
+  const input = useStore((state) => state.input);
+  const result = useStore((state) => state.result);
+  const activeVariant = useStore((state) => state.activeVariant);
   const selected = feature ?? storedSelected;
   const close = onClose ?? (() => select(null));
+
+  const graph = useMemo(
+    () => buildNodeGraph(result, activeVariant),
+    [result, activeVariant],
+  );
+  const nodeIndex = useMemo(
+    () => buildNodeIndex(input, result, activeVariant),
+    [input, result, activeVariant],
+  );
+  const links = useMemo(
+    () => (selected
+      ? nodeLinks(selected, graph)
+      : { previous: [] as string[], next: [] as string[] }),
+    [selected, graph],
+  );
 
   if (!selected) {
     return (
@@ -112,48 +139,131 @@ export function DetailsPanel({
 
   const properties = selected.properties;
   const objectType = String(properties.object_type ?? '');
-  const ordered = PREFERRED_ORDER.filter((key) => key in properties);
-  const rest = Object.keys(properties).filter((key) => !ordered.includes(key));
+  const objectId = properties.id != null ? String(properties.id) : null;
+  const ordered = PREFERRED_ORDER.filter((key) => key in properties && !HIDDEN_FIELDS.has(key));
+  const rest = Object.keys(properties).filter(
+    (key) => !HIDDEN_FIELDS.has(key) && !PREFERRED_ORDER.includes(key),
+  );
   const keys = [...ordered, ...rest];
-  const special = properties.laying_method === 'special';
-  const cost = typeof properties.cost === 'number' ? properties.cost : null;
+  const columns = objectType === 'heat_network' ? 2 : 1;
+
+  const transitionChip = (id: string) => {
+    const node = nodeIndex.get(id);
+    const anchor = node ? featureAnchor(node) : null;
+    const clickable = Boolean(node && anchor);
+    const typeName = node ? nodeTypeLabel(node.properties.object_type) : '';
+    const label = typeName ? `${typeName} ${id}` : id;
+    return (
+      <Badge
+        key={id}
+        variant={clickable ? 'light' : 'outline'}
+        color={clickable ? 'indigo' : 'gray'}
+        radius="sm"
+        size="sm"
+        title={id}
+        style={{
+          cursor: clickable ? 'pointer' : 'default',
+          textTransform: 'none',
+          fontWeight: 500,
+          maxWidth: '100%',
+          whiteSpace: 'normal',
+        }}
+        onClick={clickable
+          ? () => selectAndCenter(node as GeoFeature, anchor as [number, number])
+          : undefined}
+        onMouseEnter={clickable ? () => setHovered(node as GeoFeature) : undefined}
+        onMouseLeave={clickable ? () => setHovered(null) : undefined}
+      >
+        {label}
+      </Badge>
+    );
+  };
 
   const header = (
-    <Group justify="space-between" wrap="nowrap">
-      <Group gap={4} wrap="nowrap">
-        <Badge size="lg" variant="light">
+    <Group justify="space-between" align="flex-start" wrap="nowrap" gap="sm">
+      <Group gap={6} wrap="wrap" style={{ minWidth: 0 }}>
+        <Badge size="lg" variant="light" radius="sm" style={HEADER_CHIP_STYLE}>
           {OBJECT_LABELS[objectType] ?? objectType}
         </Badge>
-        {special && (
-          <Badge size="lg" color="orange" variant="filled">
-            спецпроход{cost !== null ? ` · ${formatMoney(cost)}` : ''}
-          </Badge>
+        {objectId && (
+          <CopyButton value={objectId} timeout={1500}>
+            {({ copied, copy }) => (
+              <Badge
+                variant="light"
+                color={copied ? 'teal' : 'gray'}
+                radius="sm"
+                size="lg"
+                onClick={copy}
+                title="Скопировать id"
+                style={{ ...HEADER_CHIP_STYLE, cursor: 'pointer' }}
+              >
+                <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                  <Text
+                    size="xs"
+                    style={{ fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}
+                  >
+                    {objectId}
+                  </Text>
+                  {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                </Group>
+              </Badge>
+            )}
+          </CopyButton>
         )}
       </Group>
-      <Text size="xs" c="dimmed" style={{ cursor: 'pointer' }} onClick={close}>
-        закрыть
-      </Text>
+      <ActionIcon
+        variant="subtle"
+        color="gray"
+        size="sm"
+        aria-label="Закрыть"
+        title="Закрыть"
+        onClick={close}
+      >
+        <IconX size={16} />
+      </ActionIcon>
     </Group>
   );
 
+  const transitions = (links.previous.length > 0 || links.next.length > 0) && (
+    <>
+      <Divider my={2} />
+      <Group wrap="nowrap" align="center" gap="xs" style={{ minWidth: 0 }}>
+        <Text size="lg" c="dimmed" aria-hidden>◀</Text>
+        <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+          {links.previous.map(transitionChip)}
+        </Stack>
+        <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+          {links.next.map(transitionChip)}
+        </Stack>
+        <Text size="lg" c="dimmed" aria-hidden>▶</Text>
+      </Group>
+    </>
+  );
+
   if (compact) {
-    // Плотная двухколоночная сетка — весь объект помещается без прокрутки.
-    const [left, right] = splitColumns(keys);
+    const gridTemplate = columns === 2
+      ? 'repeat(2, minmax(0, max-content) minmax(0, 1fr))'
+      : 'minmax(0, max-content) minmax(0, 1fr)';
     return (
-      <Stack gap={6} w={330}>
+      <Stack
+        gap={6}
+        w={popupWidth(objectType)}
+        style={{ maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden' }}
+      >
         {header}
-        <Group align="flex-start" gap="md" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-            {left.map((key) => (
-              <PropertyLine key={key} name={key} properties={properties} />
-            ))}
-          </Stack>
-          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-            {right.map((key) => (
-              <PropertyLine key={key} name={key} properties={properties} />
-            ))}
-          </Stack>
-        </Group>
+        <Box style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 12, rowGap: 2 }}>
+          {keys.map((key) => (
+            <Fragment key={key}>
+              <Text size="xs" c="dimmed" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                {PROP_LABELS[key] ?? key}
+              </Text>
+              <Text size="xs" fw={600} ta="right" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                {formatValue(key, properties[key as keyof FeatureProperties])}
+              </Text>
+            </Fragment>
+          ))}
+        </Box>
+        {transitions}
       </Stack>
     );
   }
@@ -173,14 +283,10 @@ export function DetailsPanel({
           </Table.Tbody>
         </Table>
         <Divider mt="xs" />
+        {transitions}
       </ScrollArea>
     </Stack>
   );
-}
-
-/** Стоимость с разделением разрядов и руб. */
-function formatMoney(value: number): string {
-  return `${value.toLocaleString('ru-RU')} руб.`;
 }
 
 function formatValue(key: string, value: unknown): string {
@@ -188,10 +294,10 @@ function formatValue(key: string, value: unknown): string {
     return '—';
   }
   if (key === 'laying_method') {
-    return value === 'special' ? 'специальный проход' : 'обычная прокладка';
+    return value === 'special' ? 'спецпроход' : 'обычный';
   }
   if ((key === 'cost' || key.endsWith('_cost')) && typeof value === 'number') {
-    return formatMoney(value);
+    return `${value.toLocaleString('ru-RU')} руб.`;
   }
   if (Array.isArray(value)) {
     return value.length > 0 ? value.join(', ') : '—';
