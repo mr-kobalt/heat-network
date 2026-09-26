@@ -51,7 +51,7 @@ public class VariantGenerator {
                 break;
             }
             variants.add(resultBuilder.build(planning, dataset, specialZones, obstacleIndex,
-                    warnings, "v" + (variants.size() + 1), 0));
+                    warnings, "v" + (variants.size() + 1), 0, planning.getPassNumber()));
         }
         variants.sort(Comparator.comparingDouble(variant -> variant.getSummary().getScore()));
         List<VariantResult> ranked = new ArrayList<>();

@@ -54,12 +54,13 @@ public class ForestResultBuilder {
     public VariantResult build(ForestPlanningResult planning, NetworkDataset dataset,
                                SpecialZoneIndex specialZones, ObstacleIndex obstacleIndex,
                                List<String> warnings) {
-        return build(planning, dataset, specialZones, obstacleIndex, warnings, DEFAULT_VARIANT_ID, 1);
+        return build(planning, dataset, specialZones, obstacleIndex, warnings, DEFAULT_VARIANT_ID, 1,
+                planning.getPassNumber());
     }
 
     public VariantResult build(ForestPlanningResult planning, NetworkDataset dataset,
                                SpecialZoneIndex specialZones, ObstacleIndex obstacleIndex,
-                               List<String> warnings, String variantId, int rank) {
+                               List<String> warnings, String variantId, int rank, int passNumber) {
         List<OutputSegment> segments = new ArrayList<>();
         List<OutputChamber> chambers = new ArrayList<>();
         List<OutputTechnicalNode> technicalNodes = new ArrayList<>();
@@ -186,6 +187,7 @@ public class ForestResultBuilder {
         VariantSummary summary = VariantSummary.builder()
                 .variantId(variantId)
                 .rank(rank)
+                .passNumber(passNumber)
                 .constructionCost(constructionCost + chamberConstructionCost + existingTieInCost)
                 .chamberConstructionCost(chamberConstructionCost)
                 .existingChamberTieInCount(existingTieInCount)

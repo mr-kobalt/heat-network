@@ -14,4 +14,6 @@ public class ForestPlanningResult {
     List<String> unconnectedConnectionPointIds;
     /** Диагностика поиска по сетке (ADR-0033/0034); в GeoJSON не попадает. */
     GridReport gridReport;
+    /** Номер прохода поиска (1-based), из которого выращен план (ADR-0036). */
+    int passNumber;
 }

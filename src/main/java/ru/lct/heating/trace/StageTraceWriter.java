@@ -49,30 +49,22 @@ public class StageTraceWriter {
         }
         Files.createDirectories(stagesDir);
         for (Map.Entry<String, List<StageFeature>> entry : trace.stages().entrySet()) {
-            if (trace.treePasses().contains(passOf(entry.getKey()))) {
+            if (trace.isPassStageKey(entry.getKey())) {
                 continue;
             }
             writeGeoJson(stagesDir.resolve(entry.getKey() + ".geojson"), entry.getValue());
         }
-        for (int pass : trace.treePasses()) {
-            writeGeoJson(stagesDir.resolve("trees-" + pass + ".geojson"), trace.features("trees-" + pass));
+        for (Map.Entry<String, List<Integer>> entry : trace.passStages().entrySet()) {
+            for (int pass : entry.getValue()) {
+                String id = entry.getKey() + "-" + pass;
+                writeGeoJson(stagesDir.resolve(id + ".geojson"), trace.features(id));
+            }
         }
         if (trace.grid() != null) {
             writeGrid(trace.grid(), stagesDir.resolve("grid.json"));
         }
         writeManifest(trace, runId, algorithm, stagesDir.resolve("manifest.json"));
         log.info("Stage trace written: dir={} files={}", stagesDir, trace.stages().size());
-    }
-
-    private int passOf(String id) {
-        if (id.startsWith("trees-")) {
-            try {
-                return Integer.parseInt(id.substring("trees-".length()));
-            } catch (NumberFormatException ignored) {
-                return -1;
-            }
-        }
-        return -1;
     }
 
     private void writeGeoJson(Path file, List<StageFeature> features) throws IOException {
@@ -264,18 +256,29 @@ public class StageTraceWriter {
                 trace.hasStage(StageTrace.RESTRICTIONS)));
         stages.add(descriptor(StageTrace.EXITS, "Выходы", "exits", "geojson",
                 trace.hasStage(StageTrace.EXITS)));
+        stages.add(descriptor(StageTrace.TIES, "Кандидаты врезки", "ties", "geojson",
+                trace.hasStage(StageTrace.TIES)));
         stages.add(descriptor(StageTrace.GRID, "Сетка", "grid", "mask", trace.grid() != null));
-        Map<String, Object> trees = descriptor("trees", "Деревья", "trees", "geojson",
-                !trace.treePasses().isEmpty());
-        trees.put("passes", trace.treePasses());
-        trees.put("bestPass", trace.bestPass());
-        stages.add(trees);
-        stages.add(descriptor(StageTrace.RELINK, "Relink", "relink", "geojson",
-                trace.hasStage(StageTrace.RELINK)));
-        stages.add(descriptor(StageTrace.REFINE, "Refine", "refine", "geojson",
-                trace.hasStage(StageTrace.REFINE)));
+        stages.add(passDescriptor(trace, StageTrace.TREES, "Деревья", "trees"));
+        stages.add(passDescriptor(trace, StageTrace.RELINK, "Relink", "relink"));
+        stages.add(passDescriptor(trace, StageTrace.CONTRACT, "Контракция", "contract"));
+        stages.add(passDescriptor(trace, StageTrace.REFINE, "Refine", "refine"));
+        stages.add(passDescriptor(trace, StageTrace.CHAMBERS, "Камеры", "chambers"));
         manifest.put("stages", stages);
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), manifest);
+    }
+
+    /** Дескриптор постадийной стадии с номерами проходов и лучшим проходом. */
+    private Map<String, Object> passDescriptor(StageTrace trace, String id, String title,
+                                               String kind) {
+        List<Integer> passes = trace.passStages().get(id);
+        boolean available = passes != null && !passes.isEmpty();
+        Map<String, Object> descriptor = descriptor(id, title, kind, "geojson", available);
+        if (passes != null) {
+            descriptor.put("passes", passes);
+            descriptor.put("bestPass", trace.bestPass());
+        }
+        return descriptor;
     }
 
     private Map<String, Object> descriptor(String id, String title, String kind, String format,

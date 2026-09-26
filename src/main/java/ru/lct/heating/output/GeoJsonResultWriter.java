@@ -111,6 +111,7 @@ public class GeoJsonResultWriter {
         generator.writeStringField("object_type", "variant_summary");
         generator.writeStringField("variant_id", summary.getVariantId());
         generator.writeNumberField("rank", summary.getRank());
+        generator.writeNumberField("pass", summary.getPassNumber());
         generator.writeNumberField("construction_cost", summary.getConstructionCost());
         generator.writeNumberField("chamber_construction_cost", summary.getChamberConstructionCost());
         generator.writeNumberField("existing_chamber_tie_in_count",

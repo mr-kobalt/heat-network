@@ -44,6 +44,12 @@ class StageTraceWriterTest {
                 .objectType("tree_cell")
                 .properties(Map.of("pass", 1))
                 .build()));
+        trace.addPassStage(StageTrace.RELINK, 1, List.of(StageFeature.builder()
+                .geometry(GeometrySupport.GEOMETRY_FACTORY.createLineString(new Coordinate[]{
+                        new Coordinate(701000, 6170000), new Coordinate(701003, 6170003)}))
+                .objectType("forest_edge")
+                .properties(Map.of("id", "e1"))
+                .build()));
         GridMaskCodec.Downscale ds = GridMaskCodec.downscale(2, 2, 0);
         trace.addGrid(GridMaskPayload.builder()
                 .originX(701000).originY(6170000).cellM(2.0)
@@ -65,6 +71,7 @@ class StageTraceWriterTest {
         assertThat(Files.exists(dir.resolve("network.geojson"))).isTrue();
         assertThat(Files.exists(dir.resolve("exits.geojson"))).isTrue();
         assertThat(Files.exists(dir.resolve("trees-1.geojson"))).isTrue();
+        assertThat(Files.exists(dir.resolve("relink-1.geojson"))).isTrue();
         assertThat(Files.exists(dir.resolve("grid.json"))).isTrue();
 
         JsonNode manifest = objectMapper.readTree(dir.resolve("manifest.json").toFile());
@@ -72,10 +79,13 @@ class StageTraceWriterTest {
         assertThat(manifest.path("bestPass").asInt()).isEqualTo(1);
         List<String> ids = new ArrayList<>();
         manifest.path("stages").forEach(stage -> ids.add(stage.path("id").asText()));
-        assertThat(ids).containsExactly("input", "network", "restrictions", "exits", "grid",
-                "trees", "relink", "refine");
-        JsonNode trees = manifest.path("stages").get(5);
+        assertThat(ids).containsExactly("input", "network", "restrictions", "exits", "ties", "grid",
+                "trees", "relink", "contract", "refine", "chambers");
+        JsonNode trees = manifest.path("stages").get(6);
         assertThat(trees.path("passes").get(0).asInt()).isEqualTo(1);
+        JsonNode relink = manifest.path("stages").get(7);
+        assertThat(relink.path("available").asBoolean()).isTrue();
+        assertThat(relink.path("passes").get(0).asInt()).isEqualTo(1);
 
         JsonNode grid = objectMapper.readTree(dir.resolve("grid.json").toFile());
         assertThat(grid.path("boundsWgs84").size()).isEqualTo(4);

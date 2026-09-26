@@ -125,9 +125,9 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         JsonNode manifest = objectMapper.readTree(stagesDir.resolve("manifest.json").toFile());
         assertThat(manifest.path("bestPass").asInt()).isGreaterThanOrEqualTo(1);
-        JsonNode trees = manifest.path("stages").get(5);
-        assertThat(trees.path("id").asText()).isEqualTo("trees");
+        JsonNode trees = findStage(manifest, "trees");
         assertThat(trees.path("passes").size()).isGreaterThanOrEqualTo(1);
+        int pass = trees.path("passes").get(0).asInt();
 
         JsonNode grid = objectMapper.readTree(stagesDir.resolve("grid.json").toFile());
         assertThat(grid.path("imageWidth").asInt()).isGreaterThan(0);
@@ -139,10 +139,22 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
 
         JsonNode network = objectMapper.readTree(stagesDir.resolve("network.geojson").toFile());
         assertThat(network.path("features").size()).isGreaterThan(0);
-        JsonNode refine = objectMapper.readTree(stagesDir.resolve("refine.geojson").toFile());
+        JsonNode refine = objectMapper.readTree(
+                stagesDir.resolve("refine-" + pass + ".geojson").toFile());
         assertThat(refine.path("features").size()).isGreaterThan(0);
-        assertThat(Files.exists(stagesDir.resolve("relink.geojson"))).isTrue();
-        assertNoDeadEndNodes(stagesDir.resolve("refine.geojson"), objectMapper);
+        assertThat(Files.exists(stagesDir.resolve("relink-" + pass + ".geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("chambers-" + pass + ".geojson"))).isTrue();
+        assertNoDeadEndNodes(stagesDir.resolve("refine-" + pass + ".geojson"), objectMapper);
+    }
+
+    /** Стадия манифеста по идентификатору (порядок этапов может меняться). */
+    private JsonNode findStage(JsonNode manifest, String id) {
+        for (JsonNode stage : manifest.path("stages")) {
+            if (id.equals(stage.path("id").asText())) {
+                return stage;
+            }
+        }
+        throw new AssertionError("Стадия не найдена в манифесте: " + id);
     }
 
     /**

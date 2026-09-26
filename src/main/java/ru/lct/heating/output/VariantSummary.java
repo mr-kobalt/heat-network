@@ -13,6 +13,8 @@ import lombok.Value;
 public class VariantSummary {
     String variantId;
     int rank;
+    /** Номер прохода поиска, из которого выращен вариант (ADR-0036). */
+    int passNumber;
     long constructionCost;
     long chamberConstructionCost;
     int existingChamberTieInCount;

@@ -156,6 +156,9 @@ public class GridForestPlanner {
             baseUnconnected.addAll(terminalIds);
             return List.of(result(List.of(), baseUnconnected));
         }
+        if (trace.isEnabled()) {
+            trace.addStage(StageTrace.TIES, tieFeatures(ties));
+        }
 
         long start = System.nanoTime();
         double cell = appProperties.getForestGridCellM() > 0
@@ -236,8 +239,8 @@ public class GridForestPlanner {
         List<GridReport.Pass> passStats = new ArrayList<>();
         double bestScore = Double.POSITIVE_INFINITY;
         int bestPassIndex = 0;
-        GridBuild bestBuild = null;
         for (int passIndex = 0; passIndex < iterations; passIndex++) {
+            trace.reportPass(passIndex + 1, iterations);
             long passStart = System.nanoTime();
             GridBuild build = buildTrees(pass, dataset, sources, terminalCells, obstacleIndex,
                     specialZones, specialK, angleMask, graph, warnings, passIndex > 0, dnEstimate,
@@ -247,21 +250,23 @@ public class GridForestPlanner {
             passStats.add(GridReport.Pass.builder().index(passIndex + 1).score(build.score)
                     .trees(build.trees.size()).timeMs(passMs).build());
             if (trace.isEnabled()) {
-                trace.addTreePass(passIndex + 1, build.rawFeatures);
+                int treePass = passIndex + 1;
+                trace.addTreePass(treePass, build.rawFeatures);
+                trace.addPassStage(StageTrace.RELINK, treePass, treeFeatures(build.relinkedTrees));
+                trace.addPassStage(StageTrace.CONTRACT, treePass, treeFeatures(build.contractedTrees));
+                trace.addPassStage(StageTrace.REFINE, treePass, treeFeatures(build.refinedTrees));
+                trace.addPassStage(StageTrace.CHAMBERS, treePass, treeFeatures(build.optimizedTrees));
             }
             log.info("Grid pass {}/{}: score={} trees={} time={}ms", passIndex + 1, iterations,
                     build.score, build.trees.size(), passMs);
             if (build.score < bestScore - EPS) {
                 bestScore = build.score;
                 bestPassIndex = passIndex;
-                bestBuild = build;
             } else if (passIndex > 0) {
                 break;
             }
         }
-        if (trace.isEnabled() && bestBuild != null) {
-            trace.addStage(StageTrace.RELINK, treeFeatures(bestBuild.relinkedTrees));
-            trace.addStage(StageTrace.REFINE, treeFeatures(bestBuild.refinedTrees));
+        if (trace.isEnabled()) {
             trace.setPasses(passStats.size());
             trace.setBestPass(bestPassIndex + 1);
         }
@@ -306,7 +311,8 @@ public class GridForestPlanner {
                 .trees(build.trees.size()).unconnected(unconnected.size()).timeMs(totalMs)
                 .passes(passStats).build();
         return ForestPlanningResult.builder().trees(build.trees)
-                .unconnectedConnectionPointIds(unconnected).gridReport(report).build();
+                .unconnectedConnectionPointIds(unconnected).gridReport(report)
+                .passNumber(build.passNumber).build();
     }
 
     /** Сигнатура геометрии леса для дедупликации одинаковых проходов. */
@@ -906,6 +912,7 @@ public class GridForestPlanner {
                 trees = new TerminalRelinker(costModel, diameters, appProperties, graph)
                         .relink(trees, exits, terminalFlow, obstacleIndex, own);
             }
+            List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             // FR-30: сквозные (degree-2) узлы без смены параметра — не технические
             // узлы; после relink склеиваем их рёбра в одну LineString.
             trees = contractPassThroughNodes(trees);
@@ -913,19 +920,20 @@ public class GridForestPlanner {
             // конечный узел ребра (иначе `contractPassThroughNodes`/`relink` могут
             // развернуть ребро и канонический выход потеряется).
             trees = orientEdgesFromRoot(trees);
+            List<ForestTree> contractedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long relinkMs = elapsedMs(relinkStart);
-            List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineStart = System.nanoTime();
             trees = refineTrees(trees, pass, obstacleIndex, specialZones, terminalCells, own, graph,
                     warnings);
+            List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             if (appProperties.isForestChamberOptimization()) {
                 trees = optimizeChambers(trees, dataset, pass, obstacleIndex, specialZones,
                         terminalCells, own);
             } else if (appProperties.isForestRootOptimization()) {
                 trees = optimizeRoots(trees, dataset, pass, obstacleIndex, warnings);
             }
+            List<ForestTree> optimizedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineMs = elapsedMs(refineStart);
-            List<ForestTree> refinedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             log.info("Grid pass {}: dijkstra={}ms extract={}ms relink={}ms refine={}ms", passNumber,
                     dijkstraMs, extractMs, relinkMs, refineMs);
 
@@ -939,7 +947,8 @@ public class GridForestPlanner {
                 }
             }
             double score = estimateScore(trees, unconnected, terminalFlow, specialZones);
-            return new GridBuild(trees, score, connected, rawFeatures, refinedTrees, relinkedTrees);
+            return new GridBuild(trees, score, connected, rawFeatures, relinkedTrees,
+                    contractedTrees, refinedTrees, optimizedTrees, passNumber);
         } finally {
             store.close();
         }
@@ -1154,6 +1163,23 @@ public class GridForestPlanner {
                                 "existing", node.isExisting()))
                         .build());
             }
+        }
+        return features;
+    }
+
+    /** Кандидаты врезки в существующую сеть (этап «Кандидаты врезки»). */
+    private List<StageFeature> tieFeatures(List<TieInCandidate> ties) {
+        List<StageFeature> features = new ArrayList<>();
+        for (TieInCandidate tie : ties) {
+            features.add(StageFeature.builder()
+                    .geometry(GeometrySupport.GEOMETRY_FACTORY.createPoint(tie.getCoordinate()))
+                    .objectType("tie_in_candidate")
+                    .properties(Map.of(
+                            "existing_id", String.valueOf(tie.getExistingObjectId()),
+                            "existing_type", String.valueOf(tie.getExistingObjectType()),
+                            "diameter_mm", tie.getExistingDiameterMm() == null
+                                    ? 0 : tie.getExistingDiameterMm()))
+                    .build());
         }
         return features;
     }
@@ -3670,18 +3696,25 @@ public class GridForestPlanner {
         private final double score;
         private final Set<String> connected;
         private final List<StageFeature> rawFeatures;
-        private final List<ForestTree> refinedTrees;
         private final List<ForestTree> relinkedTrees;
+        private final List<ForestTree> contractedTrees;
+        private final List<ForestTree> refinedTrees;
+        private final List<ForestTree> optimizedTrees;
+        private final int passNumber;
 
         private GridBuild(List<ForestTree> trees, double score, Set<String> connected,
-                          List<StageFeature> rawFeatures, List<ForestTree> refinedTrees,
-                          List<ForestTree> relinkedTrees) {
+                          List<StageFeature> rawFeatures, List<ForestTree> relinkedTrees,
+                          List<ForestTree> contractedTrees, List<ForestTree> refinedTrees,
+                          List<ForestTree> optimizedTrees, int passNumber) {
             this.trees = trees;
             this.score = score;
             this.connected = connected;
             this.rawFeatures = rawFeatures;
-            this.refinedTrees = refinedTrees;
             this.relinkedTrees = relinkedTrees;
+            this.contractedTrees = contractedTrees;
+            this.refinedTrees = refinedTrees;
+            this.optimizedTrees = optimizedTrees;
+            this.passNumber = passNumber;
         }
     }
 

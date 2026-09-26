@@ -53,8 +53,11 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
         assertThat(Files.exists(stagesDir.resolve("restrictions.geojson"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("exits.geojson"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("trees-1.geojson"))).isTrue();
-        assertThat(Files.exists(stagesDir.resolve("refine.geojson"))).isTrue();
-        assertThat(Files.exists(stagesDir.resolve("relink.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("refine-1.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("relink-1.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("contract-1.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("chambers-1.geojson"))).isTrue();
+        assertThat(Files.exists(stagesDir.resolve("ties.geojson"))).isTrue();
 
         JsonNode manifest = new ObjectMapper().readTree(stagesDir.resolve("manifest.json").toFile());
         assertThat(manifest.path("algorithm").asText()).isEqualTo("grid-forest");
