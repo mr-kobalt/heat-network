@@ -30,5 +30,17 @@ public class GridReport {
         double score;
         int trees;
         long timeMs;
+        /** R3: счётчики relink (кандидаты, T-точки, проверки, пересборки, принятые ходы). */
+        long relinkCandidateNodes;
+        long relinkCandidateEdges;
+        long relinkTpoints;
+        long relinkValidSegmentCalls;
+        long relinkRebuildCalls;
+        long relinkMovesAccepted;
+        /** R3: тайминги relink, мс. */
+        long relinkMs;
+        long relinkValidSegmentMs;
+        long relinkRebuildMs;
+        long relinkIndexBuildMs;
     }
 }

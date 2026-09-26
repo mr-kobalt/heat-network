@@ -2,6 +2,7 @@ package ru.lct.heating.routing;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -11,7 +12,11 @@ import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.index.strtree.ItemDistance;
+import org.locationtech.jts.index.strtree.STRtree;
+import org.locationtech.jts.operation.distance.DistanceOp;
 import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.cost.CostModel;
 import ru.lct.heating.domain.GeometrySupport;
@@ -53,6 +58,17 @@ public class TerminalRelinker {
     public List<ForestTree> relink(List<ForestTree> trees, Map<String, List<ConnectionExit>> exits,
                                    Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                                    Map<String, Set<PreparedGeometry>> ownObstacles) {
+        return relink(trees, exits, terminalFlow, obstacleIndex, ownObstacles, new RelinkStats());
+    }
+
+    /**
+     * @param stats коллектор диагностики (R3): счётчики и тайминги relink.
+     */
+    public List<ForestTree> relink(List<ForestTree> trees, Map<String, List<ConnectionExit>> exits,
+                                   Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
+                                   Map<String, Set<PreparedGeometry>> ownObstacles,
+                                   RelinkStats stats) {
+        long start = System.nanoTime();
         int iterations = Math.max(1, appProperties.getForestReattachIterations());
         int count = trees.size();
         ForestTree[] result = new ForestTree[count];
@@ -60,20 +76,23 @@ public class TerminalRelinker {
         // порядка (детерминированный idBase по индексу дерева).
         java.util.stream.IntStream.range(0, count).parallel().forEach(index ->
                 result[index] = relinkTree(trees.get(index), exits, terminalFlow, obstacleIndex,
-                        ownObstacles, iterations, index * 10_000_000));
+                        ownObstacles, iterations, index * 10_000_000, stats));
+        stats.addTotal(System.nanoTime() - start);
         return new ArrayList<>(Arrays.asList(result));
     }
 
     private ForestTree relinkTree(ForestTree tree, Map<String, List<ConnectionExit>> exits,
                                   Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                                   Map<String, Set<PreparedGeometry>> ownObstacles, int iterations,
-                                  int idBase) {
+                                  int idBase, RelinkStats stats) {
         Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
         List<Edge> edges = new ArrayList<>();
         for (ForestEdge edge : tree.getEdges()) {
             edges.add(new Edge(edge.getId(), edge.getFromNodeId(), edge.getToNodeId(),
                     new ArrayList<>(edge.getCoordinates())));
         }
+        int candidateK = appProperties.getForestRelinkCandidateK();
+        double candidateRadius = appProperties.getForestRelinkCandidateRadiusM();
         int idCounter = idBase;
         for (int iter = 0; iter < iterations; iter++) {
             Rebuild current = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow);
@@ -88,6 +107,9 @@ public class TerminalRelinker {
             LineString[] edgeLines = new LineString[edges.size()];
             Envelope[] edgeEnvelopes = new Envelope[edges.size()];
             edgeGeometries(edges, edgeLines, edgeEnvelopes);
+            // R3: пространственный индекс кандидатов (kNN) строится на итерацию.
+            CandidateIndex index = buildIndex(nodes, edges, edgeLines, edgeEnvelopes,
+                    candidateK, candidateRadius, stats);
             List<String> movables = new ArrayList<>(nodes.keySet());
             for (String nodeId : movables) {
                 if (nodeId.equals(tree.getTieInNodeId())) {
@@ -99,10 +121,11 @@ public class TerminalRelinker {
                 if (node.getType() == NodeType.CONNECTION_POINT) {
                     best = bestFor(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
                             exits, terminalFlow, obstacleIndex, ownObstacles, idCounter,
-                            edgeLines, edgeEnvelopes);
+                            edgeLines, edgeEnvelopes, index, stats);
                 } else if (appProperties.isForestRelinkNodes()) {
                     best = bestForNode(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
-                            terminalFlow, obstacleIndex, idCounter, edgeLines, edgeEnvelopes);
+                            terminalFlow, obstacleIndex, idCounter, edgeLines, edgeEnvelopes,
+                            index, stats);
                 } else {
                     best = null;
                 }
@@ -111,10 +134,13 @@ public class TerminalRelinker {
                     edges = best.edges;
                     current = best.rebuild;
                     changed = true;
+                    stats.addMoveAccepted();
                     idCounter += 100;
                     edgeLines = new LineString[edges.size()];
                     edgeEnvelopes = new Envelope[edges.size()];
                     edgeGeometries(edges, edgeLines, edgeEnvelopes);
+                    index = buildIndex(nodes, edges, edgeLines, edgeEnvelopes,
+                            candidateK, candidateRadius, stats);
                 } else {
                     idCounter += 100;
                 }
@@ -127,12 +153,26 @@ public class TerminalRelinker {
         return finalState == null ? tree : finalState.tree;
     }
 
+    /** R3: индекс строится только если включён kNN (k > 0). */
+    private CandidateIndex buildIndex(Map<String, ForestNode> nodes, List<Edge> edges,
+                                      LineString[] edgeLines, Envelope[] edgeEnvelopes,
+                                      int candidateK, double candidateRadius, RelinkStats stats) {
+        if (candidateK <= 0) {
+            return null;
+        }
+        long start = System.nanoTime();
+        CandidateIndex index = new CandidateIndex(nodes, edges, edgeLines, edgeEnvelopes);
+        stats.addIndexBuild(System.nanoTime() - start);
+        return index;
+    }
+
     private Best bestFor(String terminalId, String rootId, Map<String, ForestNode> nodes,
                          List<Edge> edges, double currentScore,
                          Map<String, List<ConnectionExit>> exits,
                          Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                          Map<String, Set<PreparedGeometry>> ownObstacles, int idCounter,
-                         LineString[] edgeLines, Envelope[] edgeEnvelopes) {
+                         LineString[] edgeLines, Envelope[] edgeEnvelopes,
+                         CandidateIndex index, RelinkStats stats) {
         ForestNode terminal = nodes.get(terminalId);
         List<ConnectionExit> candidates = exits == null ? null : exits.get(terminalId);
         if (terminal == null || candidates == null || candidates.isEmpty()) {
@@ -154,34 +194,56 @@ public class TerminalRelinker {
             }
             Coordinate target = exit.getTarget();
             List<Coordinate> tail = exit.hasTail() ? exit.getTail() : List.of();
+            // R3: kNN-отбор ближайших узлов/рёбер + опциональный радиус.
+            List<ForestNode> nodeCandidates = candidateNodes(nodes, index, target);
+            List<Integer> edgeCandidates = candidateEdges(edges, index, target);
+            double radius = appProperties.getForestRelinkCandidateRadiusM();
+            if (radius > 0) {
+                nodeCandidates.removeIf(n -> n.getCoordinate() == null
+                        || n.getCoordinate().distance(target) > radius);
+                Envelope targetEnvelope = new Envelope(target);
+                edgeCandidates.removeIf(i -> edgeEnvelopes[i].distance(targetEnvelope) > radius);
+            }
+            stats.addCandidateNodes(nodeCandidates.size());
+            stats.addCandidateEdges(edgeCandidates.size());
             // 1. Существующие узлы.
-            for (ForestNode candidate : nodes.values()) {
+            for (ForestNode candidate : nodeCandidates) {
                 if (candidate.getId().equals(terminalId)
                         || candidate.getType() == NodeType.CONNECTION_POINT) {
                     continue;
                 }
                 Coordinate from = candidate.getCoordinate();
-                if (!validSegment(from, target, tail, point, edges, edgeLines, edgeEnvelopes,
-                        obstacleIndex, ignored)) {
+                long segmentStart = System.nanoTime();
+                boolean valid = validSegment(from, target, tail, point, edges, edgeLines,
+                        edgeEnvelopes, obstacleIndex, ignored);
+                stats.addValidSegment(System.nanoTime() - segmentStart);
+                if (!valid) {
                     continue;
                 }
                 List<Edge> candidateEdges = removeEdge(edges, current.id);
                 candidateEdges.add(branch(candidate.getId(), terminalId, from, target, point, tail,
                         "rj_b_" + idCounter + "_" + candidate.getId()));
-                best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore);
+                best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore,
+                        stats);
             }
             // 2. T-врезки в рёбра.
-            for (Edge edge : edges) {
+            for (int edgeIndex : edgeCandidates) {
+                Edge edge = edges.get(edgeIndex);
                 if (edge.id.equals(current.id)) {
                     continue;
                 }
-                for (Coordinate p : tPoints(edge, target)) {
+                List<Coordinate> tps = tPoints(edge, target);
+                stats.addTpoints(tps.size());
+                for (Coordinate p : tps) {
                     if (p.equals2D(edge.coords.get(0))
                             || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
                         continue;
                     }
-                    if (!validSegment(p, target, tail, point, edges, edgeLines, edgeEnvelopes,
-                            obstacleIndex, ignored)) {
+                    long segmentStart = System.nanoTime();
+                    boolean valid = validSegment(p, target, tail, point, edges, edgeLines,
+                            edgeEnvelopes, obstacleIndex, ignored);
+                    stats.addValidSegment(System.nanoTime() - segmentStart);
+                    if (!valid) {
                         continue;
                     }
                     String newId = "rj_" + (idCounter++);
@@ -196,15 +258,38 @@ public class TerminalRelinker {
                     candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
                             .coordinate(p).existing(false).build());
                     best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
-                            currentScore);
+                            currentScore, stats);
                 }
             }
         }
         return best;
     }
 
+    /** R3: k ближайших узлов (или все, если kNN выключен). */
+    private List<ForestNode> candidateNodes(Map<String, ForestNode> nodes, CandidateIndex index,
+                                            Coordinate target) {
+        int k = appProperties.getForestRelinkCandidateK();
+        if (index != null && k > 0) {
+            return index.nearestNodes(target, k);
+        }
+        return new ArrayList<>(nodes.values());
+    }
+
+    /** R3: индексы k ближайших рёбер (или все, если kNN выключен). */
+    private List<Integer> candidateEdges(List<Edge> edges, CandidateIndex index, Coordinate target) {
+        int k = appProperties.getForestRelinkCandidateK();
+        if (index != null && k > 0) {
+            return index.nearestEdges(target, k);
+        }
+        List<Integer> all = new ArrayList<>(edges.size());
+        for (int i = 0; i < edges.size(); i++) {
+            all.add(i);
+        }
+        return all;
+    }
+
     private Best evaluate(Best best, Map<String, ForestNode> nodes, List<Edge> edges, String rootId,
-                          Map<String, Double> terminalFlow, double currentScore) {
+                          Map<String, Double> terminalFlow, double currentScore, RelinkStats stats) {
         if (!degreeWithinLimit(edges, nodes)) {
             return best;
         }
@@ -213,7 +298,9 @@ public class TerminalRelinker {
         double abort = appProperties.isForestRelinkCostBound()
                 ? (best != null ? best.rebuild.score : currentScore)
                 : Double.POSITIVE_INFINITY;
+        long rebuildStart = System.nanoTime();
         Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow, abort);
+        stats.addRebuild(System.nanoTime() - rebuildStart);
         if (rebuild == null || rebuild.score >= currentScore) {
             return best;
         }
@@ -260,7 +347,8 @@ public class TerminalRelinker {
     private Best bestForNode(String nodeId, String rootId, Map<String, ForestNode> nodes,
                              List<Edge> edges, double currentScore,
                              Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
-                             int idCounter, LineString[] edgeLines, Envelope[] edgeEnvelopes) {
+                             int idCounter, LineString[] edgeLines, Envelope[] edgeEnvelopes,
+                             CandidateIndex index, RelinkStats stats) {
         ForestNode node = nodes.get(nodeId);
         if (node == null || nodeId.equals(rootId)) {
             return null;
@@ -279,7 +367,9 @@ public class TerminalRelinker {
         double radius = appProperties.getForestRelinkNodesRadiusM();
         Best best = null;
         // 1. Существующие узлы.
-        for (ForestNode candidate : nodes.values()) {
+        List<ForestNode> nodeCandidates = candidateNodes(nodes, index, vertex);
+        stats.addCandidateNodes(nodeCandidates.size());
+        for (ForestNode candidate : nodeCandidates) {
             if (candidate.getId().equals(nodeId)
                     || candidate.getType() == NodeType.CONNECTION_POINT
                     || subtree.contains(candidate.getId())) {
@@ -289,17 +379,24 @@ public class TerminalRelinker {
             if (radius > 0 && from.distance(vertex) > radius) {
                 continue;
             }
-            if (!validSegment(from, vertex, List.of(), vertex, edges, edgeLines, edgeEnvelopes,
-                    obstacleIndex, Set.of())) {
+            long segmentStart = System.nanoTime();
+            boolean valid = validSegment(from, vertex, List.of(), vertex, edges, edgeLines,
+                    edgeEnvelopes, obstacleIndex, Set.of());
+            stats.addValidSegment(System.nanoTime() - segmentStart);
+            if (!valid) {
                 continue;
             }
             List<Edge> candidateEdges = removeEdge(edges, parentEdge.id);
             candidateEdges.add(branch(candidate.getId(), nodeId, from, vertex, vertex, List.of(),
                     "rj_b_" + idCounter + "_" + candidate.getId()));
-            best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore);
+            best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore,
+                    stats);
         }
         // 2. T-врезки в рёбра вне поддерева.
-        for (Edge edge : edges) {
+        List<Integer> edgeCandidates = candidateEdges(edges, index, vertex);
+        stats.addCandidateEdges(edgeCandidates.size());
+        for (int edgeIndex : edgeCandidates) {
+            Edge edge = edges.get(edgeIndex);
             if (edge.id.equals(parentEdge.id)) {
                 continue;
             }
@@ -309,7 +406,9 @@ public class TerminalRelinker {
             if (radius > 0 && edge.distanceTo(vertex) > radius) {
                 continue;
             }
-            for (Coordinate p : tPoints(edge, vertex)) {
+            List<Coordinate> tps = tPoints(edge, vertex);
+            stats.addTpoints(tps.size());
+            for (Coordinate p : tps) {
                 if (p.equals2D(edge.coords.get(0))
                         || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
                     continue;
@@ -317,8 +416,11 @@ public class TerminalRelinker {
                 if (radius > 0 && p.distance(vertex) > radius) {
                     continue;
                 }
-                if (!validSegment(p, vertex, List.of(), vertex, edges, edgeLines, edgeEnvelopes,
-                        obstacleIndex, Set.of())) {
+                long segmentStart = System.nanoTime();
+                boolean valid = validSegment(p, vertex, List.of(), vertex, edges, edgeLines,
+                        edgeEnvelopes, obstacleIndex, Set.of());
+                stats.addValidSegment(System.nanoTime() - segmentStart);
+                if (!valid) {
                     continue;
                 }
                 String newId = "rj_" + (idCounter++);
@@ -333,7 +435,7 @@ public class TerminalRelinker {
                 candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
                         .coordinate(p).existing(false).build());
                 best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
-                        currentScore);
+                        currentScore, stats);
             }
         }
         return best;
@@ -800,6 +902,79 @@ public class TerminalRelinker {
             this.nodes = nodes;
             this.edges = edges;
             this.rebuild = rebuild;
+        }
+    }
+
+    /**
+     * R3: пространственный индекс узлов и рёбер дерева для kNN-отбора
+     * кандидатов (JTS {@link STRtree}). Строится на итерацию relink и
+     * инвалидируется при принятом ходе. Рассчитан на масштаб: поиск
+     * k ближайших — {@code O(log + k)} вместо перебора всех узлов/рёбер.
+     */
+    private static final class CandidateIndex {
+        private final STRtree nodeTree = new STRtree();
+        private final STRtree edgeTree = new STRtree();
+        private final LineString[] edgeLines;
+
+        private CandidateIndex(Map<String, ForestNode> nodes, List<Edge> edges,
+                               LineString[] edgeLines, Envelope[] edgeEnvelopes) {
+            this.edgeLines = edgeLines;
+            for (ForestNode node : nodes.values()) {
+                Coordinate coordinate = node.getCoordinate();
+                if (coordinate != null) {
+                    nodeTree.insert(new Envelope(coordinate), node);
+                }
+            }
+            nodeTree.build();
+            for (int i = 0; i < edges.size(); i++) {
+                edgeTree.insert(edgeEnvelopes[i], Integer.valueOf(i));
+            }
+            edgeTree.build();
+        }
+
+        private List<ForestNode> nearestNodes(Coordinate target, int k) {
+            Point query = GeometrySupport.GEOMETRY_FACTORY.createPoint(target);
+            ItemDistance distance = (a, b) -> {
+                Object first = a.getItem();
+                Object second = b.getItem();
+                ForestNode node = (ForestNode) (first instanceof ForestNode ? first : second);
+                Point point = (Point) (first instanceof Point ? first : second);
+                return point.getCoordinate().distance(node.getCoordinate());
+            };
+            Object[] raw = nodeTree.nearestNeighbour(new Envelope(target), query, distance, k);
+            List<ForestNode> result = new ArrayList<>(raw.length);
+            for (Object item : raw) {
+                if (item != null) {
+                    result.add((ForestNode) item);
+                }
+            }
+            // Детерминизм: сортировка по (расстояние, id).
+            result.sort(Comparator
+                    .comparingDouble((ForestNode node) -> node.getCoordinate().distance(target))
+                    .thenComparing(ForestNode::getId));
+            return result;
+        }
+
+        private List<Integer> nearestEdges(Coordinate target, int k) {
+            Point query = GeometrySupport.GEOMETRY_FACTORY.createPoint(target);
+            ItemDistance distance = (a, b) -> {
+                Object first = a.getItem();
+                Object second = b.getItem();
+                Integer index = (Integer) (first instanceof Integer ? first : second);
+                Point point = (Point) (first instanceof Point ? first : second);
+                return DistanceOp.distance(point, edgeLines[index]);
+            };
+            Object[] raw = edgeTree.nearestNeighbour(new Envelope(target), query, distance, k);
+            List<Integer> result = new ArrayList<>(raw.length);
+            for (Object item : raw) {
+                if (item != null) {
+                    result.add((Integer) item);
+                }
+            }
+            result.sort(Comparator
+                    .comparingDouble((Integer index) -> DistanceOp.distance(query, edgeLines[index]))
+                    .thenComparingInt(Integer::intValue));
+            return result;
         }
     }
 }

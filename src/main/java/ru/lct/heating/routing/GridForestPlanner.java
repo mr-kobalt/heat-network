@@ -248,7 +248,18 @@ public class GridForestPlanner {
             long passMs = elapsedMs(passStart);
             builds.add(build);
             passStats.add(GridReport.Pass.builder().index(passIndex + 1).score(build.score)
-                    .trees(build.trees.size()).timeMs(passMs).build());
+                    .trees(build.trees.size()).timeMs(passMs)
+                    .relinkCandidateNodes(build.relinkStats.getCandidateNodes())
+                    .relinkCandidateEdges(build.relinkStats.getCandidateEdges())
+                    .relinkTpoints(build.relinkStats.getTpoints())
+                    .relinkValidSegmentCalls(build.relinkStats.getValidSegmentCalls())
+                    .relinkRebuildCalls(build.relinkStats.getRebuildCalls())
+                    .relinkMovesAccepted(build.relinkStats.getMovesAccepted())
+                    .relinkMs(build.relinkStats.getTotalMs())
+                    .relinkValidSegmentMs(build.relinkStats.getValidSegmentMs())
+                    .relinkRebuildMs(build.relinkStats.getRebuildMs())
+                    .relinkIndexBuildMs(build.relinkStats.getIndexBuildMs())
+                    .build());
             if (trace.isEnabled()) {
                 int treePass = passIndex + 1;
                 trace.addTreePass(treePass, build.rawFeatures);
@@ -893,6 +904,7 @@ public class GridForestPlanner {
             long extractMs = elapsedMs(extractStart);
 
             long relinkStart = System.nanoTime();
+            RelinkStats relinkStats = new RelinkStats();
             Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>> own = new HashMap<>();
             if (obstacleIndex != null && !trees.isEmpty()) {
                 for (Terminal term : new LinkedHashSet<>(terminalCells.values())) {
@@ -910,7 +922,7 @@ public class GridForestPlanner {
                     }
                 }
                 trees = new TerminalRelinker(costModel, diameters, appProperties, graph)
-                        .relink(trees, exits, terminalFlow, obstacleIndex, own);
+                        .relink(trees, exits, terminalFlow, obstacleIndex, own, relinkStats);
             }
             List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             // FR-30: сквозные (degree-2) узлы без смены параметра — не технические
@@ -948,7 +960,7 @@ public class GridForestPlanner {
             }
             double score = estimateScore(trees, unconnected, terminalFlow, specialZones);
             return new GridBuild(trees, score, connected, rawFeatures, relinkedTrees,
-                    contractedTrees, refinedTrees, optimizedTrees, passNumber);
+                    contractedTrees, refinedTrees, optimizedTrees, passNumber, relinkStats);
         } finally {
             store.close();
         }
@@ -3701,11 +3713,12 @@ public class GridForestPlanner {
         private final List<ForestTree> refinedTrees;
         private final List<ForestTree> optimizedTrees;
         private final int passNumber;
+        private final RelinkStats relinkStats;
 
         private GridBuild(List<ForestTree> trees, double score, Set<String> connected,
                           List<StageFeature> rawFeatures, List<ForestTree> relinkedTrees,
                           List<ForestTree> contractedTrees, List<ForestTree> refinedTrees,
-                          List<ForestTree> optimizedTrees, int passNumber) {
+                          List<ForestTree> optimizedTrees, int passNumber, RelinkStats relinkStats) {
             this.trees = trees;
             this.score = score;
             this.connected = connected;
@@ -3715,6 +3728,7 @@ public class GridForestPlanner {
             this.refinedTrees = refinedTrees;
             this.optimizedTrees = optimizedTrees;
             this.passNumber = passNumber;
+            this.relinkStats = relinkStats;
         }
     }
 

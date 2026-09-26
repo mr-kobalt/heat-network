@@ -113,6 +113,14 @@ public class AppProperties {
      * перебор сокращается. По умолчанию включено.
      */
     private boolean forestRelinkCostBound = true;
+    /**
+     * R3: kNN-отбор кандидатов relink (узлов и рёбер) через пространственный
+     * индекс. Дефолт {@code 16} — на проверочных наборах даёт идентичный {@code S}
+     * при relink ≈3× быстрее; {@code 0} — без ограничения (полный перебор).
+     */
+    private int forestRelinkCandidateK = 16;
+    /** R3: дополнительный верхний предел расстояния до кандидата, м (0 — без предела). */
+    private double forestRelinkCandidateRadiusM = 0.0;
     /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */
