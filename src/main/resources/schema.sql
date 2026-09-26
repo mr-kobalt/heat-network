@@ -27,3 +27,7 @@ ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS algorithm VARCHAR(64);
 
 -- ADR-0036: поэтапная трассировка для визуализации (идемпотентно).
 ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS trace BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ADR-0057: прогресс расчёта по этапам (идемпотентно).
+ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS stage VARCHAR(32);
+ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS progress INTEGER;

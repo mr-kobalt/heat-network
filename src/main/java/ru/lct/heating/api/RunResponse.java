@@ -17,6 +17,9 @@ public class RunResponse {
     Instant createdAt;
     Instant startedAt;
     Instant finishedAt;
+    /** ADR-0057: текущий этап расчёта и прогресс 0…100. */
+    String stage;
+    Integer progress;
     String error;
     JsonNode summary;
 }

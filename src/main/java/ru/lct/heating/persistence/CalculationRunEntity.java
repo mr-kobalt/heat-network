@@ -33,6 +33,11 @@ public class CalculationRunEntity {
 
     private Instant finishedAt;
 
+    /** ADR-0057: текущий этап расчёта (машинный ключ) и прогресс 0…100. */
+    private String stage;
+
+    private Integer progress;
+
     @Column(columnDefinition = "text")
     private String error;
 

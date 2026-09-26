@@ -33,3 +33,4 @@
 |------|-----------|-------|
 | 2026-09-16 | Первоначальная версия (планирование M1) | команда |
 | 2026-09-25 | Bugfix: диспатч воркеру регистрируется через `afterCommit` (иначе при прогретом пуле поток мог стартовать до commit и запуск оставался `PENDING`); MVC-стриминг `/result` и `/stages` переведён на ограниченный `ThreadPoolTaskExecutor` (`configureAsyncSupport`) вместо `SimpleAsyncTaskExecutor` | команда |
+| 2026-09-25 | ADR-0057: в `calculation_run` добавлены `stage`/`progress`; `CalculationService` отдаёт `ProgressReporter` (этапы + проходы), `RunResponse` возвращает прогресс | команда |

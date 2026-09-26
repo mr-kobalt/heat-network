@@ -37,10 +37,13 @@ public class RunExecutor {
     public void execute(UUID runId) {
         CalculationRunEntity run = runRepository.findById(runId).orElse(null);
         if (run == null) {
+            log.warn("Запуск {} не найден — расчёт не выполнен", runId);
             return;
         }
         run.setStatus(RunStatus.RUNNING.name());
         run.setStartedAt(Instant.now());
+        run.setStage("ingest");
+        run.setProgress(0);
         runRepository.save(run);
         try {
             Path resultFile = storageService.runResultFile(runId);
@@ -49,11 +52,17 @@ public class RunExecutor {
             Path stagesDir = run.isTrace() ? storageService.runStageDir(runId) : null;
             CalculationOutcome outcome = calculationService.calculate(
                     storageService.datasetFile(run.getDatasetId()), resultFile, summaryFile,
-                    run.getAlgorithm(), warningsFile, stagesDir);
+                    run.getAlgorithm(), warningsFile, stagesDir, (stage, progress) -> {
+                        run.setStage(stage);
+                        run.setProgress(progress);
+                        runRepository.save(run);
+                    });
             boolean partial = outcome.getSummary() == null
                     || !outcome.getSummary().getUnconnectedOksIds().isEmpty();
             run.setStatus(partial ? RunStatus.PARTIAL.name() : RunStatus.DONE.name());
             run.setFinishedAt(Instant.now());
+            run.setStage("done");
+            run.setProgress(100);
             run.setResultPath(resultFile.toString());
             run.setSummary(outcome.getSummary() == null
                     ? null : objectMapper.writeValueAsString(outcome.getSummary()));

@@ -37,6 +37,8 @@ public class ApiMapper {
                 .createdAt(entity.getCreatedAt())
                 .startedAt(entity.getStartedAt())
                 .finishedAt(entity.getFinishedAt())
+                .stage(entity.getStage())
+                .progress(entity.getProgress())
                 .error(entity.getError())
                 .summary(readTree(entity.getSummary()))
                 .build();

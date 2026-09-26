@@ -114,9 +114,25 @@ public class CalculationService {
     public CalculationOutcome calculate(Path inputFile, Path resultFile, Path summaryFile,
                                         String algorithmId, Path warningsFile, Path stagesDir)
             throws IOException {
+        return calculate(inputFile, resultFile, summaryFile, algorithmId, warningsFile, stagesDir,
+                ProgressReporter.NOOP);
+    }
+
+    /**
+     * @param reporter отчёт о ходе расчёта (ADR-0057); {@code null} — без отчёта.
+     *                 Прогресс монотонно неубывающий.
+     */
+    public CalculationOutcome calculate(Path inputFile, Path resultFile, Path summaryFile,
+                                        String algorithmId, Path warningsFile, Path stagesDir,
+                                        ProgressReporter reporter) throws IOException {
+        ProgressReporter progress = monotonic(reporter == null
+                ? ProgressReporter.NOOP : reporter);
         long totalStart = System.nanoTime();
+        progress.report("ingest", 5);
         TracingAlgorithm algorithm = algorithmRegistry.require(algorithmId);
         StageTrace trace = stagesDir != null ? StageTrace.enabled() : StageTrace.disabled();
+        trace.setPassProgress((pass, total) -> progress.report("generate",
+                45 + (int) Math.round(45.0 * pass / Math.max(1, total))));
         List<String> warnings = new ArrayList<>();
         long stage = System.nanoTime();
         IngestResult ingestResult;
@@ -131,6 +147,7 @@ public class CalculationService {
         log.info("Stage ingest: {} ms; connectionPoints={} segments={} chambers={} restrictions={} warnings={}",
                 elapsedMs(stage), size(dataset.getConnectionPoints()), size(dataset.getNetworkSegments()),
                 size(dataset.getHeatChambers()), size(dataset.getRestrictions()), warnings.size());
+        progress.report("ingest", 10);
 
         stage = System.nanoTime();
         ExistingNetworkGraph graph = graphBuilder.build(dataset);
@@ -139,33 +156,39 @@ public class CalculationService {
                 elapsedMs(stage), graph.getSegments().size(), graph.getChambers().size(),
                 graph.getChamberAttachments().size());
         traceNetwork(trace, graph);
+        progress.report("graph", 20);
 
         stage = System.nanoTime();
         ObstacleIndex obstacleIndex = obstacleIndexBuilder.build(dataset, warnings);
         log.info("Stage obstacle index: {} ms; size={}", elapsedMs(stage), obstacleIndex.size());
+        progress.report("obstacles", 30);
 
         stage = System.nanoTime();
         SpecialZoneIndex specialZones = specialZoneIndexBuilder.build(
                 dataset, appProperties.getDefaultDiameterMm(), warnings);
         log.info("Stage special zones: {} ms; size={}", elapsedMs(stage), specialZones.size());
         traceRestrictions(trace, obstacleIndex, specialZones);
+        progress.report("special", 35);
 
         stage = System.nanoTime();
         Map<String, ConnectionExit> exits = approachResolver.resolveExits(dataset);
         log.info("Stage exits: {} ms; resolved={}", elapsedMs(stage), exits.size());
         traceExits(trace, exits);
+        progress.report("exits", 40);
 
         stage = System.nanoTime();
         List<VariantResult> variants = generateVariants(dataset, obstacleIndex, graph, specialZones,
                 warnings, exits, algorithm, trace);
         log.info("Stage generate: {} ms; algorithm={} variants={}", elapsedMs(stage),
                 algorithm.id(), variants.size());
+        progress.report("generate", 90);
 
         stage = System.nanoTime();
         try (OutputStream outputStream = Files.newOutputStream(resultFile)) {
             resultWriter.write(variants, outputStream);
         }
         log.info("Stage write: {} ms; resultBytes={}", elapsedMs(stage), Files.size(resultFile));
+        progress.report("write", 95);
 
         List<VariantSummary> summaries = variants.stream()
                 .map(VariantResult::getSummary)
@@ -196,12 +219,31 @@ public class CalculationService {
             String runId = stagesDir.getParent() == null
                     ? null : stagesDir.getParent().getFileName().toString();
             traceWriter.write(trace, runId, algorithm.id(), stagesDir);
+            progress.report("trace", 98);
         }
         log.info("Calculation total: {} ms; warnings={}", elapsedMs(totalStart), warnings.size());
+        progress.report("done", 100);
         return CalculationOutcome.builder()
                 .summary(best)
                 .warnings(warnings)
                 .build();
+    }
+
+    /** Прогресс не должен убывать (повторы генерации при адаптиве). */
+    private ProgressReporter monotonic(ProgressReporter delegate) {
+        int[] last = { -1 };
+        return (stage, value) -> {
+            int clamped = Math.max(0, Math.min(100, value));
+            if (clamped < last[0]) {
+                return;
+            }
+            last[0] = clamped;
+            try {
+                delegate.report(stage, clamped);
+            } catch (RuntimeException exception) {
+                log.warn("Не удалось сообщить прогресс {}={}", stage, clamped, exception);
+            }
+        };
     }
 
     /**

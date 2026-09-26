@@ -65,6 +65,28 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
     }
 
     @Test
+    void reportsMonotonicProgressStages() throws Exception {
+        assumeTrue(Files.exists(SAMPLE), "Фикстур pipeline-small.geojson недоступен");
+
+        Path resultFile = tempDir.resolve("progress-result.geojson");
+        Path summaryFile = tempDir.resolve("progress-summary.json");
+        java.util.List<String> stages = new java.util.ArrayList<>();
+        java.util.List<Integer> values = new java.util.ArrayList<>();
+
+        service(permissiveExitProperties()).calculate(SAMPLE, resultFile, summaryFile, null,
+                null, null, (stage, progress) -> {
+                    stages.add(stage);
+                    values.add(progress);
+                });
+
+        assertThat(stages).startsWith("ingest").endsWith("done");
+        assertThat(values).contains(100);
+        for (int i = 1; i < values.size(); i++) {
+            assertThat(values.get(i)).isGreaterThanOrEqualTo(values.get(i - 1));
+        }
+    }
+
+    @Test
     void producesResultWithExplicitGridForestOnSmallFixture() throws Exception {
         assumeTrue(Files.exists(SAMPLE), "Фикстур pipeline-small.geojson недоступен");
 
