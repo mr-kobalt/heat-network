@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
@@ -29,23 +28,28 @@ public class ObstacleIndex {
 
     private final List<PreparedGeometry> prohibited;
     private final STRtree tree = new STRtree();
-    private final STRtree erodedTree = new STRtree();
-    private final Map<PreparedGeometry, PreparedGeometry> erodedToOriginal = new IdentityHashMap<>();
+    /** Ленивая эрозия: считается при первом обращении к препятствию (R6/E8-12). */
+    private final java.util.concurrent.ConcurrentHashMap<PreparedGeometry,
+            java.util.Optional<PreparedGeometry>> erodedCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public ObstacleIndex(List<PreparedGeometry> prohibited) {
         this.prohibited = prohibited;
         for (PreparedGeometry prepared : prohibited) {
             tree.insert(prepared.getGeometry().getEnvelopeInternal(), prepared);
-            Geometry erodedGeometry = prepared.getGeometry().buffer(-EROSION_M);
-            if (erodedGeometry.isEmpty()) {
-                continue;
-            }
-            PreparedGeometry eroded = PreparedGeometryFactory.prepare(erodedGeometry);
-            erodedToOriginal.put(eroded, prepared);
-            erodedTree.insert(erodedGeometry.getEnvelopeInternal(), eroded);
         }
         tree.build();
-        erodedTree.build();
+    }
+
+    /** Эрозия препятствия (касание границы допустимо) — по требованию, с кэшем. */
+    private PreparedGeometry eroded(PreparedGeometry original) {
+        return erodedCache.computeIfAbsent(original, key -> {
+            Geometry erodedGeometry = key.getGeometry().buffer(-EROSION_M);
+            if (erodedGeometry.isEmpty()) {
+                return java.util.Optional.empty();
+            }
+            return java.util.Optional.of(PreparedGeometryFactory.prepare(erodedGeometry));
+        }).orElse(null);
     }
 
     public boolean isBlocked(LineString segment) {
@@ -80,13 +84,13 @@ public class ObstacleIndex {
     public boolean isInteriorBlocked(LineString segment, Set<PreparedGeometry> ignored) {
         Envelope envelope = segment.getEnvelopeInternal();
         @SuppressWarnings("unchecked")
-        List<PreparedGeometry> candidates = erodedTree.query(envelope);
+        List<PreparedGeometry> candidates = tree.query(envelope);
         for (PreparedGeometry candidate : candidates) {
-            PreparedGeometry original = erodedToOriginal.get(candidate);
-            if (original != null && ignored.contains(original)) {
+            if (ignored.contains(candidate)) {
                 continue;
             }
-            if (candidate.intersects(segment)) {
+            PreparedGeometry eroded = eroded(candidate);
+            if (eroded != null && eroded.intersects(segment)) {
                 return true;
             }
         }

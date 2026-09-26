@@ -5,7 +5,9 @@ import org.locationtech.jts.algorithm.locate.IndexedPointInAreaLocator;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.Location;
+import org.locationtech.jts.geom.Polygon;
 import org.springframework.stereotype.Component;
 
 /**
@@ -112,27 +114,113 @@ public class ObstacleMaskBuilder {
             }
             Geometry expanded = dilation > 0.0 ? obstacle.buffer(dilation) : obstacle;
             boolean areal = expanded.getDimension() >= 2;
-            IndexedPointInAreaLocator locator = areal ? new IndexedPointInAreaLocator(expanded) : null;
             Envelope envelope = expanded.getEnvelopeInternal();
             int col0 = clamp((int) Math.floor((envelope.getMinX() - originX) / cell) - 1, width);
             int col1 = clamp((int) Math.floor((envelope.getMaxX() - originX) / cell) + 1, width);
             double rowSpacing = grid.rowSpacing(cell);
             int row0 = clamp((int) Math.floor((envelope.getMinY() - originY) / rowSpacing) - 1, height);
             int row1 = clamp((int) Math.floor((envelope.getMaxY() - originY) / rowSpacing) + 1, height);
-            for (int row = row0; row <= row1; row++) {
-                probe.y = grid.centerY(0, row, originY, cell);
+            if (areal) {
+                blocked += rasterizeAreal(expanded, fine, coarse, single, factor,
+                        coarseWidth, width, originX, originY, cell, grid, col0, col1, row0, row1);
+            } else {
+                for (int row = row0; row <= row1; row++) {
+                    probe.y = grid.centerY(0, row, originY, cell);
+                    for (int col = col0; col <= col1; col++) {
+                        probe.x = grid.centerX(col, row, originX, cell);
+                        if (!envelope.intersects(probe)) {
+                            continue;
+                        }
+                        long cellIndex = (long) row * width + col;
+                        if ((fine[(int) (cellIndex >>> 6)] & (1L << (cellIndex & 63))) == 0) {
+                            fine[(int) (cellIndex >>> 6)] |= 1L << (cellIndex & 63);
+                            blocked++;
+                        }
+                        if (!single) {
+                            long coarseIndex = (long) (row / factor) * coarseWidth + (col / factor);
+                            coarse[(int) (coarseIndex >>> 6)] |= 1L << (coarseIndex & 63);
+                        }
+                    }
+                }
+            }
+        }
+        long buildMs = (System.nanoTime() - start) / 1_000_000L;
+        return new ObstacleMask(originX, originY, cell, width, height, fine, factor, coarseWidth,
+                coarseHeight, coarse, blocked, buildMs, grid);
+    }
+
+    /**
+     * Сканлайн-растеризация полигонального препятствия: по каждой строке
+     * считаются пересечения колец, затем заполняются спаны. Возвращает
+     * {@code [новые blocked, всего клеток внутри]}. Эквивалентно
+     * {@code IndexedPointInAreaLocator != EXTERIOR} (граница — «внутри»).
+     */
+    private long rasterizeAreal(Geometry areal, long[] fine, long[] coarse, boolean single,
+                                  int factor, int coarseWidth, int width,
+                                  double originX, double originY, double cell, GridShape grid,
+                                  int col0, int col1, int row0, int row1) {
+        List<Comp> comps = new java.util.ArrayList<>();
+        for (int i = 0; i < areal.getNumGeometries(); i++) {
+            Geometry component = areal.getGeometryN(i);
+            if (!(component instanceof Polygon)) {
+                continue;
+            }
+            Polygon polygon = (Polygon) component;
+            List<double[]> edges = new java.util.ArrayList<>();
+            collectEdges(polygon.getExteriorRing(), edges);
+            for (int h = 0; h < polygon.getNumInteriorRing(); h++) {
+                collectEdges(polygon.getInteriorRingN(h), edges);
+            }
+            if (edges.isEmpty()) {
+                continue;
+            }
+            double ymin = Double.POSITIVE_INFINITY;
+            double ymax = Double.NEGATIVE_INFINITY;
+            for (double[] edge : edges) {
+                ymin = Math.min(ymin, Math.min(edge[1], edge[3]));
+                ymax = Math.max(ymax, Math.max(edge[1], edge[3]));
+            }
+            comps.add(new Comp(edges.toArray(new double[0][]), ymin, ymax));
+        }
+        if (comps.isEmpty()) {
+            return rasterizeArealFallback(areal, fine, coarse, single, factor, coarseWidth,
+                    width, originX, originY, cell, grid, col0, col1, row0, row1);
+        }
+        long newBlocked = 0L;
+        List<Double> crossings = new java.util.ArrayList<>();
+        for (int row = row0; row <= row1; row++) {
+            double y = grid.centerY(0, row, originY, cell);
+            crossings.clear();
+            for (Comp comp : comps) {
+                if (y < comp.ymin || y > comp.ymax) {
+                    continue;
+                }
+                for (double[] edge : comp.edges) {
+                    double y1 = edge[1];
+                    double y2 = edge[3];
+                    if ((y1 > y) != (y2 > y)) {
+                        crossings.add(edge[0] + (y - y1) * (edge[2] - edge[0]) / (y2 - y1));
+                    }
+                }
+            }
+            if (crossings.isEmpty()) {
+                continue;
+            }
+            java.util.Collections.sort(crossings);
+            for (int i = 0; i + 1 < crossings.size(); i += 2) {
+                double xa = crossings.get(i);
+                double xb = crossings.get(i + 1);
                 for (int col = col0; col <= col1; col++) {
-                    probe.x = grid.centerX(col, row, originX, cell);
-                    boolean inside = areal
-                            ? locator.locate(probe) != Location.EXTERIOR
-                            : envelope.intersects(probe);
-                    if (!inside) {
+                    double cx = grid.centerX(col, row, originX, cell);
+                    if (cx < xa || cx > xb) {
                         continue;
                     }
                     long cellIndex = (long) row * width + col;
-                    if ((fine[(int) (cellIndex >>> 6)] & (1L << (cellIndex & 63))) == 0) {
-                        fine[(int) (cellIndex >>> 6)] |= 1L << (cellIndex & 63);
-                        blocked++;
+                    int word = (int) (cellIndex >>> 6);
+                    long bit = 1L << (cellIndex & 63);
+                    if ((fine[word] & bit) == 0) {
+                        fine[word] |= bit;
+                        newBlocked++;
                     }
                     if (!single) {
                         long coarseIndex = (long) (row / factor) * coarseWidth + (col / factor);
@@ -141,9 +229,57 @@ public class ObstacleMaskBuilder {
                 }
             }
         }
-        long buildMs = (System.nanoTime() - start) / 1_000_000L;
-        return new ObstacleMask(originX, originY, cell, width, height, fine, factor, coarseWidth,
-                coarseHeight, coarse, blocked, buildMs, grid);
+        return newBlocked;
+    }
+
+    private long rasterizeArealFallback(Geometry areal, long[] fine, long[] coarse, boolean single,
+                                        int factor, int coarseWidth, int width,
+                                        double originX, double originY, double cell,
+                                        GridShape grid, int col0, int col1, int row0, int row1) {
+        IndexedPointInAreaLocator locator = new IndexedPointInAreaLocator(areal);
+        Coordinate probe = new Coordinate();
+        long newBlocked = 0L;
+        for (int row = row0; row <= row1; row++) {
+            probe.y = grid.centerY(0, row, originY, cell);
+            for (int col = col0; col <= col1; col++) {
+                probe.x = grid.centerX(col, row, originX, cell);
+                if (locator.locate(probe) == Location.EXTERIOR) {
+                    continue;
+                }
+                long cellIndex = (long) row * width + col;
+                int word = (int) (cellIndex >>> 6);
+                long bit = 1L << (cellIndex & 63);
+                if ((fine[word] & bit) == 0) {
+                    fine[word] |= bit;
+                    newBlocked++;
+                }
+                if (!single) {
+                    long coarseIndex = (long) (row / factor) * coarseWidth + (col / factor);
+                    coarse[(int) (coarseIndex >>> 6)] |= 1L << (coarseIndex & 63);
+                }
+            }
+        }
+        return newBlocked;
+    }
+
+    private void collectEdges(LineString ring, List<double[]> edges) {
+        Coordinate[] coordinates = ring.getCoordinates();
+        for (int i = 0; i + 1 < coordinates.length; i++) {
+            edges.add(new double[]{coordinates[i].x, coordinates[i].y,
+                    coordinates[i + 1].x, coordinates[i + 1].y});
+        }
+    }
+
+    private static final class Comp {
+        private final double[][] edges;
+        private final double ymin;
+        private final double ymax;
+
+        private Comp(double[][] edges, double ymin, double ymax) {
+            this.edges = edges;
+            this.ymin = ymin;
+            this.ymax = ymax;
+        }
     }
 
     private int clamp(int value, int size) {

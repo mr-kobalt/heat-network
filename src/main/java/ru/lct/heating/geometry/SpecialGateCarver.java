@@ -89,7 +89,14 @@ public class SpecialGateCarver {
             if (axis == null || axis.isEmpty()) {
                 continue;
             }
-            collectGates(axis, bandWidth, gateStepM, gateThicknessM, gates);
+            List<Geometry> objectGates = new ArrayList<>();
+            collectGates(axis, bandWidth, gateStepM, gateThicknessM, objectGates);
+            if (!objectGates.isEmpty()) {
+                // R6/E8-12: union ассоциативен, но объединить «ворота» по объекту
+                // (десятки прямоугольников), а затем 226 объектов дешевле, чем
+                // единый union ~12k прямоугольников.
+                gates.add(union(objectGates));
+            }
         }
         if (bands.isEmpty()) {
             return null;
@@ -103,7 +110,7 @@ public class SpecialGateCarver {
     }
 
     private Geometry union(List<Geometry> geometries) {
-        return factory.createGeometryCollection(geometries.toArray(new Geometry[0])).union();
+        return org.locationtech.jts.operation.union.CascadedPolygonUnion.union(geometries);
     }
 
     private void collectGates(Geometry axis, double bandWidthM, double gateStepM,

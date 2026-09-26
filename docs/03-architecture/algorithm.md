@@ -413,6 +413,14 @@ no-op при выключенном флаге, результат и baseline �
   downstream-пути (`selectFor`), затем проход неубывания к корню. На проверочных
   наборах предельная длина не связывает (`upsized=0`), `S` без изменений; на
   city-scale может давать выигрыш. Диагностика `relinkLengthUpsizedEdges/Ms`.
+- Геометрия запретов (R6/E8-12, 2026-09-26): `ObstacleIndex` строит эрозию
+  (касание границы) **лениво**, по требованию с кэшем, а не для всех препятствий;
+  `ObstacleMaskBuilder` растеризует полигоны **сканлайном** (пересечения колец по
+  строкам) вместо per-cell `IndexedPointInAreaLocator`; `SpecialGateCarver`
+  объединяет «ворота» по объекту и через `CascadedPolygonUnion`. Маска
+  бит-в-бит эквивалентна прежней (`fineHash`/`blocked`), `S` не меняется.
+  OSM: `obstacle index` ~6.0 → ~4.0 с, `mask build` ~3.1 → ~0.4–0.7 с,
+  `Calculation total` ~17.2 → ~12.5 с.
 
 ## 12. Расширение 2.5D (дополнительно, ТП 5)
 
@@ -483,3 +491,4 @@ no-op при выключенном флаге, результат и baseline �
 | 2026-09-26 | R3: kNN-отбор кандидатов relink (JTS `STRtree`), дефолт `forest-relink-candidate-k=16` — `S` идентичен полному перебору (осн. 13.5752, OSM 13.8029) при relink ≈3× быстрее (осн. 719→242 мс, OSM 1079→446 мс); диагностика в `grid.json` (`GridReport.Pass.relink*`) | команда |
 | 2026-09-26 | R5a: `Kспец` в оценке хода relink (`forest-relink-special-cost=true`), общий `SpecialZoneIndex.maxKSpecialNearby`, кэш по id ребра, наследование для split-рёбер. Основной набор без изменений (`S` 13.5752); OSM `S` 13.8029 → 13.8015 (её baseline пересчитан, cap0 13.8036) | команда |
 | 2026-09-26 | R5b: предельная длина в подборе Ду relink (`forest-relink-length-cost=true`, приближённо по downstream-пути). На проверочных наборах не связывает (`upsized=0`), baseline без изменений; диагностика в `grid.json` | команда |
+| 2026-09-26 | E8-12: производительность геометрии запретов — ленивая эрозия `ObstacleIndex`, сканлайн-растеризация маски (`ObstacleMaskBuilder`), группировка «ворот» + `CascadedPolygonUnion` (`SpecialGateCarver`). Маска бит-в-бит эквивалентна; OSM `obstacle index` ~6.0 → ~4.0 с, mask ~3.1 → ~0.5 с, total ~17.2 → ~12.5 с; `S` без изменений (осн. 13.5752, OSM 13.8015) | команда |
