@@ -18,6 +18,8 @@ public class RelinkStats {
     private final LongAdder movesAccepted = new LongAdder();
     private final LongAdder totalNanos = new LongAdder();
     private final LongAdder indexBuildNanos = new LongAdder();
+    private final LongAdder kSpecialCalls = new LongAdder();
+    private final LongAdder kSpecialNanos = new LongAdder();
 
     public void addCandidateNodes(long value) {
         candidateNodes.add(value);
@@ -51,6 +53,11 @@ public class RelinkStats {
 
     public void addIndexBuild(long nanos) {
         indexBuildNanos.add(nanos);
+    }
+
+    public void addKSpecial(long nanos) {
+        kSpecialCalls.increment();
+        kSpecialNanos.add(nanos);
     }
 
     public long getCandidateNodes() {
@@ -91,5 +98,13 @@ public class RelinkStats {
 
     public long getIndexBuildMs() {
         return indexBuildNanos.sum() / 1_000_000L;
+    }
+
+    public long getKSpecialCalls() {
+        return kSpecialCalls.sum();
+    }
+
+    public long getKSpecialMs() {
+        return kSpecialNanos.sum() / 1_000_000L;
     }
 }

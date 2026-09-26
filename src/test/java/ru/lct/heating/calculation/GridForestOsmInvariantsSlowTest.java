@@ -65,10 +65,10 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertThat(outcome.getSummary().getScore())
-                .isCloseTo(13.802858532408175, within(1e-6));
+                .isCloseTo(13.80153700609723, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1991.3924921360585, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279595752L);
+                .isCloseTo(1991.2650046990777, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279562214L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
         assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
         assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
@@ -95,13 +95,13 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertThat(outcome.getSummary().getScore())
-                .isCloseTo(13.8057345876048, within(1e-6));
+                .isCloseTo(13.80364593293461, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1991.8960465349335, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279644516L);
+                .isCloseTo(1991.6296843115365, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279598460L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
         assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
         assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
-        assertThat(turns).isEqualTo(4L);
+        assertThat(turns).isEqualTo(3L);
     }
 }

@@ -255,10 +255,12 @@ public class GridForestPlanner {
                     .relinkValidSegmentCalls(build.relinkStats.getValidSegmentCalls())
                     .relinkRebuildCalls(build.relinkStats.getRebuildCalls())
                     .relinkMovesAccepted(build.relinkStats.getMovesAccepted())
+                    .relinkKSpecialCalls(build.relinkStats.getKSpecialCalls())
                     .relinkMs(build.relinkStats.getTotalMs())
                     .relinkValidSegmentMs(build.relinkStats.getValidSegmentMs())
                     .relinkRebuildMs(build.relinkStats.getRebuildMs())
                     .relinkIndexBuildMs(build.relinkStats.getIndexBuildMs())
+                    .relinkKSpecialMs(build.relinkStats.getKSpecialMs())
                     .build());
             if (trace.isEnabled()) {
                 int treePass = passIndex + 1;
@@ -921,7 +923,8 @@ public class GridForestPlanner {
                         exits.put(term.pointId, relinkExits(exitCandidates, term));
                     }
                 }
-                trees = new TerminalRelinker(costModel, diameters, appProperties, graph)
+                trees = new TerminalRelinker(costModel, diameters, appProperties, graph,
+                        specialZones)
                         .relink(trees, exits, terminalFlow, obstacleIndex, own, relinkStats);
             }
             List<ForestTree> relinkedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
@@ -1249,7 +1252,9 @@ public class GridForestPlanner {
             for (ForestEdge edge : tree.getEdges()) {
                 double edgeLength = edge.lengthM();
                 cost += costModel.segmentCost(edgeLength, edge.getDiameterMm(), 1.0,
-                        maxKSpecial(edge, specialZones, ignoredWarnings));
+                        specialZones == null ? 1.0
+                                : specialZones.maxKSpecial(edge.getCoordinates(),
+                                        ignoredWarnings));
                 length += edgeLength;
                 maxIncident.merge(edge.getFromNodeId(), edge.getDiameterMm(), Math::max);
                 maxIncident.merge(edge.getToNodeId(), edge.getDiameterMm(), Math::max);
@@ -1601,22 +1606,6 @@ public class GridForestPlanner {
 
     private boolean bitSet(long[] bits, int index) {
         return (bits[index >>> 6] & (1L << (index & 63))) != 0;
-    }
-
-    /** E25-04: максимальный {@code Kспец} зон, накрывающих ребро (иначе 1.0). */
-    private double maxKSpecial(ForestEdge edge, SpecialZoneIndex specialZones,
-                               List<String> ignoredWarnings) {
-        if (specialZones == null || specialZones.size() == 0
-                || edge.getCoordinates().size() < 2) {
-            return 1.0;
-        }
-        LineString line = GeometrySupport.GEOMETRY_FACTORY.createLineString(
-                edge.getCoordinates().toArray(new Coordinate[0]));
-        double k = 1.0;
-        for (SpecialSpan span : specialZones.spans(line, ignoredWarnings)) {
-            k = Math.max(k, span.getKSpecial());
-        }
-        return k;
     }
 
     private boolean isTopology(int cell, Map<Integer, Integer> parent,
@@ -2191,7 +2180,8 @@ public class GridForestPlanner {
         Stub stub = new Stub();
         stub.edgeIndex = edgeIndex;
         stub.dn = edge.getDiameterMm();
-        stub.kSpecial = maxKSpecial(edge, specialZones, ignoredWarnings);
+        stub.kSpecial = specialZones == null ? 1.0
+                : specialZones.maxKSpecial(edge.getCoordinates(), ignoredWarnings);
         stub.costPerM = diameters.newCostPerM(edge.getDiameterMm());
         stub.oldStubLen = oldStubLen;
         stub.oldRestLen = edge.lengthM() - oldStubLen;

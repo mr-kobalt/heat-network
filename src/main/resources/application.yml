@@ -107,6 +107,8 @@ heating:
     # Дефолт 16: идентичный S на проверочных наборах, relink ≈3× быстрее.
     forest-relink-candidate-k: ${HEATING_FOREST_RELINK_CANDIDATE_K:16}
     forest-relink-candidate-radius-m: ${HEATING_FOREST_RELINK_CANDIDATE_RADIUS_M:0.0}
+    # R5a: учитывать Kспец в оценке хода relink (false — прежняя прокси-оценка, A/B).
+    forest-relink-special-cost: ${HEATING_FOREST_RELINK_SPECIAL_COST:true}
     # ADR-0040: фильтрация выходов-кандидатов ОКС (соседние корпуса, возврат, глубина).
     oks-exit-filter: ${HEATING_OKS_EXIT_FILTER:true}
     oks-exit-max-tail-m: ${HEATING_OKS_EXIT_MAX_TAIL_M:15.0}

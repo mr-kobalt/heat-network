@@ -121,6 +121,11 @@ public class AppProperties {
     private int forestRelinkCandidateK = 16;
     /** R3: дополнительный верхний предел расстояния до кандидата, м (0 — без предела). */
     private double forestRelinkCandidateRadiusM = 0.0;
+    /**
+     * R5a: учитывать {@code Kспец} в оценке хода relink (стоимость спецпроходов).
+     * По умолчанию включено; {@code false} — прежняя прокси-оценка (K=1) для A/B.
+     */
+    private boolean forestRelinkSpecialCost = true;
     /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */

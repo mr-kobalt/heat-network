@@ -116,6 +116,10 @@
   (`forest-relink-candidate-k=16`). `S` без изменений (осн. 13.5752,
   OSM 13.8029) при relink ≈3× быстрее (осн. 719→242 мс, OSM 1079→446 мс);
   диагностика relink в `grid.json` (`GridReport.Pass.relink*`)
+- [x] E8-10 Точность оценки relink (R5a): `Kспец` в оценке хода
+  (`forest-relink-special-cost`, `SpecialZoneIndex.maxKSpecialNearby`, кэш по
+  id ребра, наследование split-рёбрами). Основной набор без спецзон — `S`
+  без изменений; OSM `S` 13.8029 → 13.8015, `kSpecialMs` ≈70 мс
 
 ## Эпик E9. Глубина, отдельный необязательный режим (M4)
 

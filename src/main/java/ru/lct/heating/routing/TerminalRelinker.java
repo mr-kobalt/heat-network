@@ -21,6 +21,7 @@ import ru.lct.heating.config.AppProperties;
 import ru.lct.heating.cost.CostModel;
 import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.geometry.ObstacleIndex;
+import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.hydraulics.DiameterCatalog;
 import ru.lct.heating.hydraulics.DiameterRow;
@@ -41,18 +42,26 @@ public class TerminalRelinker {
     private final DiameterCatalog diameters;
     private final AppProperties appProperties;
     private final ExistingNetworkGraph graph;
+    private final SpecialZoneIndex specialZones;
 
     public TerminalRelinker(CostModel costModel, DiameterCatalog diameters,
                             AppProperties appProperties) {
-        this(costModel, diameters, appProperties, null);
+        this(costModel, diameters, appProperties, null, null);
     }
 
     public TerminalRelinker(CostModel costModel, DiameterCatalog diameters,
                             AppProperties appProperties, ExistingNetworkGraph graph) {
+        this(costModel, diameters, appProperties, graph, null);
+    }
+
+    public TerminalRelinker(CostModel costModel, DiameterCatalog diameters,
+                            AppProperties appProperties, ExistingNetworkGraph graph,
+                            SpecialZoneIndex specialZones) {
         this.costModel = costModel;
         this.diameters = diameters;
         this.appProperties = appProperties;
         this.graph = graph;
+        this.specialZones = specialZones;
     }
 
     public List<ForestTree> relink(List<ForestTree> trees, Map<String, List<ConnectionExit>> exits,
@@ -94,8 +103,11 @@ public class TerminalRelinker {
         int candidateK = appProperties.getForestRelinkCandidateK();
         double candidateRadius = appProperties.getForestRelinkCandidateRadiusM();
         int idCounter = idBase;
+        List<String> ignoredWarnings = new ArrayList<>();
         for (int iter = 0; iter < iterations; iter++) {
-            Rebuild current = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow);
+            CostContext ctx = costContext(edges, ignoredWarnings, stats);
+            Rebuild current = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow,
+                    Double.POSITIVE_INFINITY, ctx);
             if (current == null) {
                 return tree;
             }
@@ -109,7 +121,7 @@ public class TerminalRelinker {
             edgeGeometries(edges, edgeLines, edgeEnvelopes);
             // R3: пространственный индекс кандидатов (kNN) строится на итерацию.
             CandidateIndex index = buildIndex(nodes, edges, edgeLines, edgeEnvelopes,
-                    candidateK, candidateRadius, stats);
+                    candidateK, stats);
             List<String> movables = new ArrayList<>(nodes.keySet());
             for (String nodeId : movables) {
                 if (nodeId.equals(tree.getTieInNodeId())) {
@@ -121,11 +133,11 @@ public class TerminalRelinker {
                 if (node.getType() == NodeType.CONNECTION_POINT) {
                     best = bestFor(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
                             exits, terminalFlow, obstacleIndex, ownObstacles, idCounter,
-                            edgeLines, edgeEnvelopes, index, stats);
+                            edgeLines, edgeEnvelopes, index, ctx);
                 } else if (appProperties.isForestRelinkNodes()) {
                     best = bestForNode(nodeId, tree.getTieInNodeId(), nodes, edges, current.score,
                             terminalFlow, obstacleIndex, idCounter, edgeLines, edgeEnvelopes,
-                            index, stats);
+                            index, ctx);
                 } else {
                     best = null;
                 }
@@ -139,8 +151,8 @@ public class TerminalRelinker {
                     edgeLines = new LineString[edges.size()];
                     edgeEnvelopes = new Envelope[edges.size()];
                     edgeGeometries(edges, edgeLines, edgeEnvelopes);
-                    index = buildIndex(nodes, edges, edgeLines, edgeEnvelopes,
-                            candidateK, candidateRadius, stats);
+                    index = buildIndex(nodes, edges, edgeLines, edgeEnvelopes, candidateK, stats);
+                    ctx = costContext(edges, ignoredWarnings, stats);
                 } else {
                     idCounter += 100;
                 }
@@ -149,14 +161,38 @@ public class TerminalRelinker {
                 break;
             }
         }
-        Rebuild finalState = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow);
+        CostContext finalCtx = costContext(edges, ignoredWarnings, stats);
+        Rebuild finalState = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow,
+                Double.POSITIVE_INFINITY, finalCtx);
         return finalState == null ? tree : finalState.tree;
+    }
+
+    /**
+     * R5a: контекст стоимости хода — спецзоны ({@code Kспец}) с кэшем по id
+     * ребра на итерацию. Кэш покрывает существующие рёбра дерева; новые рёбра
+     * кандидатов считаются по месту.
+     */
+    private CostContext costContext(List<Edge> edges, List<String> warnings, RelinkStats stats) {
+        boolean specialCost = appProperties.isForestRelinkSpecialCost();
+        Map<String, Double> cache = new HashMap<>();
+        if (specialCost && specialZones != null && specialZones.size() > 0) {
+            for (Edge edge : edges) {
+                if (edge.kSpecial >= 0) {
+                    continue;
+                }
+                long start = System.nanoTime();
+                double k = specialZones.maxKSpecialNearby(edge.coords);
+                stats.addKSpecial(System.nanoTime() - start);
+                cache.put(edge.id, k);
+            }
+        }
+        return new CostContext(specialZones, cache, warnings, stats, specialCost);
     }
 
     /** R3: индекс строится только если включён kNN (k > 0). */
     private CandidateIndex buildIndex(Map<String, ForestNode> nodes, List<Edge> edges,
                                       LineString[] edgeLines, Envelope[] edgeEnvelopes,
-                                      int candidateK, double candidateRadius, RelinkStats stats) {
+                                      int candidateK, RelinkStats stats) {
         if (candidateK <= 0) {
             return null;
         }
@@ -172,7 +208,7 @@ public class TerminalRelinker {
                          Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                          Map<String, Set<PreparedGeometry>> ownObstacles, int idCounter,
                          LineString[] edgeLines, Envelope[] edgeEnvelopes,
-                         CandidateIndex index, RelinkStats stats) {
+                         CandidateIndex index, CostContext ctx) {
         ForestNode terminal = nodes.get(terminalId);
         List<ConnectionExit> candidates = exits == null ? null : exits.get(terminalId);
         if (terminal == null || candidates == null || candidates.isEmpty()) {
@@ -204,8 +240,8 @@ public class TerminalRelinker {
                 Envelope targetEnvelope = new Envelope(target);
                 edgeCandidates.removeIf(i -> edgeEnvelopes[i].distance(targetEnvelope) > radius);
             }
-            stats.addCandidateNodes(nodeCandidates.size());
-            stats.addCandidateEdges(edgeCandidates.size());
+            ctx.stats.addCandidateNodes(nodeCandidates.size());
+            ctx.stats.addCandidateEdges(edgeCandidates.size());
             // 1. Существующие узлы.
             for (ForestNode candidate : nodeCandidates) {
                 if (candidate.getId().equals(terminalId)
@@ -216,15 +252,17 @@ public class TerminalRelinker {
                 long segmentStart = System.nanoTime();
                 boolean valid = validSegment(from, target, tail, point, edges, edgeLines,
                         edgeEnvelopes, obstacleIndex, ignored);
-                stats.addValidSegment(System.nanoTime() - segmentStart);
+                ctx.stats.addValidSegment(System.nanoTime() - segmentStart);
                 if (!valid) {
                     continue;
                 }
                 List<Edge> candidateEdges = removeEdge(edges, current.id);
-                candidateEdges.add(branch(candidate.getId(), terminalId, from, target, point, tail,
-                        "rj_b_" + idCounter + "_" + candidate.getId()));
+                Edge branchEdge = branch(candidate.getId(), terminalId, from, target, point, tail,
+                        "rj_b_" + idCounter + "_" + candidate.getId());
+                ctx.assign(branchEdge);
+                candidateEdges.add(branchEdge);
                 best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore,
-                        stats);
+                        ctx);
             }
             // 2. T-врезки в рёбра.
             for (int edgeIndex : edgeCandidates) {
@@ -233,7 +271,7 @@ public class TerminalRelinker {
                     continue;
                 }
                 List<Coordinate> tps = tPoints(edge, target);
-                stats.addTpoints(tps.size());
+                ctx.stats.addTpoints(tps.size());
                 for (Coordinate p : tps) {
                     if (p.equals2D(edge.coords.get(0))
                             || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
@@ -242,7 +280,7 @@ public class TerminalRelinker {
                     long segmentStart = System.nanoTime();
                     boolean valid = validSegment(p, target, tail, point, edges, edgeLines,
                             edgeEnvelopes, obstacleIndex, ignored);
-                    stats.addValidSegment(System.nanoTime() - segmentStart);
+                    ctx.stats.addValidSegment(System.nanoTime() - segmentStart);
                     if (!valid) {
                         continue;
                     }
@@ -250,15 +288,22 @@ public class TerminalRelinker {
                     List<Edge> candidateEdges = removeEdge(edges, current.id);
                     candidateEdges = removeEdge(candidateEdges, edge.id);
                     List<List<Coordinate>> split = splitPolyline(edge.coords, p);
-                    candidateEdges.add(new Edge(edge.id + "_a", edge.a, newId, split.get(0)));
-                    candidateEdges.add(new Edge(edge.id + "_b", newId, edge.b, split.get(1)));
-                    candidateEdges.add(branch(newId, terminalId, p, target, point, tail,
-                            "rj_e_" + idCounter + "_" + edge.id));
+                    double parentK = ctx.kSpecial(edge);
+                    Edge splitA = new Edge(edge.id + "_a", edge.a, newId, split.get(0));
+                    Edge splitB = new Edge(edge.id + "_b", newId, edge.b, split.get(1));
+                    splitA.kSpecial = parentK;
+                    splitB.kSpecial = parentK;
+                    candidateEdges.add(splitA);
+                    candidateEdges.add(splitB);
+                    Edge branchEdge = branch(newId, terminalId, p, target, point, tail,
+                            "rj_e_" + idCounter + "_" + edge.id);
+                    ctx.assign(branchEdge);
+                    candidateEdges.add(branchEdge);
                     Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
                     candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
                             .coordinate(p).existing(false).build());
                     best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
-                            currentScore, stats);
+                            currentScore, ctx);
                 }
             }
         }
@@ -289,7 +334,7 @@ public class TerminalRelinker {
     }
 
     private Best evaluate(Best best, Map<String, ForestNode> nodes, List<Edge> edges, String rootId,
-                          Map<String, Double> terminalFlow, double currentScore, RelinkStats stats) {
+                          Map<String, Double> terminalFlow, double currentScore, CostContext ctx) {
         if (!degreeWithinLimit(edges, nodes)) {
             return best;
         }
@@ -299,8 +344,8 @@ public class TerminalRelinker {
                 ? (best != null ? best.rebuild.score : currentScore)
                 : Double.POSITIVE_INFINITY;
         long rebuildStart = System.nanoTime();
-        Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow, abort);
-        stats.addRebuild(System.nanoTime() - rebuildStart);
+        Rebuild rebuild = rebuild(rootId, nodes, edges, terminalFlow, abort, ctx);
+        ctx.stats.addRebuild(System.nanoTime() - rebuildStart);
         if (rebuild == null || rebuild.score >= currentScore) {
             return best;
         }
@@ -348,7 +393,7 @@ public class TerminalRelinker {
                              List<Edge> edges, double currentScore,
                              Map<String, Double> terminalFlow, ObstacleIndex obstacleIndex,
                              int idCounter, LineString[] edgeLines, Envelope[] edgeEnvelopes,
-                             CandidateIndex index, RelinkStats stats) {
+                             CandidateIndex index, CostContext ctx) {
         ForestNode node = nodes.get(nodeId);
         if (node == null || nodeId.equals(rootId)) {
             return null;
@@ -368,7 +413,7 @@ public class TerminalRelinker {
         Best best = null;
         // 1. Существующие узлы.
         List<ForestNode> nodeCandidates = candidateNodes(nodes, index, vertex);
-        stats.addCandidateNodes(nodeCandidates.size());
+        ctx.stats.addCandidateNodes(nodeCandidates.size());
         for (ForestNode candidate : nodeCandidates) {
             if (candidate.getId().equals(nodeId)
                     || candidate.getType() == NodeType.CONNECTION_POINT
@@ -382,19 +427,21 @@ public class TerminalRelinker {
             long segmentStart = System.nanoTime();
             boolean valid = validSegment(from, vertex, List.of(), vertex, edges, edgeLines,
                     edgeEnvelopes, obstacleIndex, Set.of());
-            stats.addValidSegment(System.nanoTime() - segmentStart);
+            ctx.stats.addValidSegment(System.nanoTime() - segmentStart);
             if (!valid) {
                 continue;
             }
             List<Edge> candidateEdges = removeEdge(edges, parentEdge.id);
-            candidateEdges.add(branch(candidate.getId(), nodeId, from, vertex, vertex, List.of(),
-                    "rj_b_" + idCounter + "_" + candidate.getId()));
+            Edge branchEdge = branch(candidate.getId(), nodeId, from, vertex, vertex, List.of(),
+                    "rj_b_" + idCounter + "_" + candidate.getId());
+            ctx.assign(branchEdge);
+            candidateEdges.add(branchEdge);
             best = evaluate(best, nodes, candidateEdges, rootId, terminalFlow, currentScore,
-                    stats);
+                    ctx);
         }
         // 2. T-врезки в рёбра вне поддерева.
         List<Integer> edgeCandidates = candidateEdges(edges, index, vertex);
-        stats.addCandidateEdges(edgeCandidates.size());
+        ctx.stats.addCandidateEdges(edgeCandidates.size());
         for (int edgeIndex : edgeCandidates) {
             Edge edge = edges.get(edgeIndex);
             if (edge.id.equals(parentEdge.id)) {
@@ -407,7 +454,7 @@ public class TerminalRelinker {
                 continue;
             }
             List<Coordinate> tps = tPoints(edge, vertex);
-            stats.addTpoints(tps.size());
+            ctx.stats.addTpoints(tps.size());
             for (Coordinate p : tps) {
                 if (p.equals2D(edge.coords.get(0))
                         || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
@@ -419,7 +466,7 @@ public class TerminalRelinker {
                 long segmentStart = System.nanoTime();
                 boolean valid = validSegment(p, vertex, List.of(), vertex, edges, edgeLines,
                         edgeEnvelopes, obstacleIndex, Set.of());
-                stats.addValidSegment(System.nanoTime() - segmentStart);
+                ctx.stats.addValidSegment(System.nanoTime() - segmentStart);
                 if (!valid) {
                     continue;
                 }
@@ -427,15 +474,22 @@ public class TerminalRelinker {
                 List<Edge> candidateEdges = removeEdge(edges, parentEdge.id);
                 candidateEdges = removeEdge(candidateEdges, edge.id);
                 List<List<Coordinate>> split = splitPolyline(edge.coords, p);
-                candidateEdges.add(new Edge(edge.id + "_a", edge.a, newId, split.get(0)));
-                candidateEdges.add(new Edge(edge.id + "_b", newId, edge.b, split.get(1)));
-                candidateEdges.add(branch(newId, nodeId, p, vertex, vertex, List.of(),
-                        "rj_e_" + idCounter + "_" + edge.id));
+                double parentK = ctx.kSpecial(edge);
+                Edge splitA = new Edge(edge.id + "_a", edge.a, newId, split.get(0));
+                Edge splitB = new Edge(edge.id + "_b", newId, edge.b, split.get(1));
+                splitA.kSpecial = parentK;
+                splitB.kSpecial = parentK;
+                candidateEdges.add(splitA);
+                candidateEdges.add(splitB);
+                Edge branchEdge = branch(newId, nodeId, p, vertex, vertex, List.of(),
+                        "rj_e_" + idCounter + "_" + edge.id);
+                ctx.assign(branchEdge);
+                candidateEdges.add(branchEdge);
                 Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
                 candidateNodes.put(newId, ForestNode.builder().id(newId).type(NodeType.CHAMBER)
                         .coordinate(p).existing(false).build());
                 best = evaluate(best, candidateNodes, candidateEdges, rootId, terminalFlow,
-                        currentScore, stats);
+                        currentScore, ctx);
             }
         }
         return best;
@@ -675,20 +729,17 @@ public class TerminalRelinker {
         return List.of(left, right);
     }
 
-    private Rebuild rebuild(String rootId, Map<String, ForestNode> nodes, List<Edge> edges,
-                            Map<String, Double> terminalFlow) {
-        return rebuild(rootId, nodes, edges, terminalFlow, Double.POSITIVE_INFINITY);
-    }
-
     /**
      * R2: помимо полной пересборки умеет досрочно прерваться, как только
      * частичная оценка (стоимость+длина уже обработанных рёбер) достигает
      * {@code abortScore}. Поскольку стоимость и длина только растут, итоговая
      * оценка не может стать меньше частичной — ход гарантированно не лучше
-     * порога, и его можно не досчитывать. Оптимум не меняется.
+     * порога, и его можно не досчитывать. Оптимум не меняется. R5a: {@code Kспец}
+     * берётся из {@code ctx} (кэш по id ребра).
      */
     private Rebuild rebuild(String rootId, Map<String, ForestNode> nodes, List<Edge> edges,
-                            Map<String, Double> terminalFlow, double abortScore) {
+                            Map<String, Double> terminalFlow, double abortScore,
+                            CostContext ctx) {
         if (!nodes.containsKey(rootId)) {
             return null;
         }
@@ -786,7 +837,7 @@ public class TerminalRelinker {
                 maxIncidentDn.merge(node, dn, Math::max);
             }
             double edgeLength = edge.length();
-            cost += costModel.segmentCost(edgeLength, dn, 1.0, 1.0);
+            cost += costModel.segmentCost(edgeLength, dn, 1.0, ctx.kSpecial(edge));
             length += edgeLength;
             if (costModel.score(cost, length) >= abortScore) {
                 return null;
@@ -846,6 +897,8 @@ public class TerminalRelinker {
         private final String a;
         private final String b;
         private final List<Coordinate> coords;
+        /** R5a: {@code Kспец} ребра; {@code < 0} — не задан (брать из кэша/считать). */
+        private double kSpecial = -1.0;
 
         private Edge(String id, String a, String b, List<Coordinate> coords) {
             this.id = id;
@@ -902,6 +955,53 @@ public class TerminalRelinker {
             this.nodes = nodes;
             this.edges = edges;
             this.rebuild = rebuild;
+        }
+    }
+
+    /**
+     * R5a: контекст стоимости хода. {@code Kспец} берётся из кэша по id ребра
+     * (заполняется на итерацию для существующих рёбер); новые рёбра кандидатов
+     * считаются по месту. Тайминги — в {@link RelinkStats}.
+     */
+    private static final class CostContext {
+        private final SpecialZoneIndex zones;
+        private final Map<String, Double> kSpecialCache;
+        private final List<String> warnings;
+        private final RelinkStats stats;
+        private final boolean specialCost;
+
+        private CostContext(SpecialZoneIndex zones, Map<String, Double> kSpecialCache,
+                            List<String> warnings, RelinkStats stats, boolean specialCost) {
+            this.zones = zones;
+            this.kSpecialCache = kSpecialCache;
+            this.warnings = warnings;
+            this.stats = stats;
+            this.specialCost = specialCost;
+        }
+
+        private double kSpecial(Edge edge) {
+            if (!specialCost || zones == null || zones.size() == 0) {
+                return 1.0;
+            }
+            if (edge.kSpecial >= 0) {
+                return edge.kSpecial;
+            }
+            Double cached = kSpecialCache.get(edge.id);
+            if (cached != null) {
+                return cached;
+            }
+            long start = System.nanoTime();
+            double k = zones.maxKSpecialNearby(edge.coords);
+            stats.addKSpecial(System.nanoTime() - start);
+            return k;
+        }
+
+        /** Считает и запоминает {@code Kспец} нового ребра (один раз). */
+        private double assign(Edge edge) {
+            if (edge.kSpecial < 0) {
+                edge.kSpecial = kSpecial(edge);
+            }
+            return edge.kSpecial;
         }
     }
 
