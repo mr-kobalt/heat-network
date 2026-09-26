@@ -38,11 +38,13 @@ public class GridReport {
         long relinkRebuildCalls;
         long relinkMovesAccepted;
         long relinkKSpecialCalls;
+        long relinkLengthUpsizedEdges;
         /** R3: тайминги relink, мс. */
         long relinkMs;
         long relinkValidSegmentMs;
         long relinkRebuildMs;
         long relinkIndexBuildMs;
         long relinkKSpecialMs;
+        long relinkLengthMs;
     }
 }

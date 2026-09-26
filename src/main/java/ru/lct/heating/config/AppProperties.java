@@ -126,6 +126,12 @@ public class AppProperties {
      * По умолчанию включено; {@code false} — прежняя прокси-оценка (K=1) для A/B.
      */
     private boolean forestRelinkSpecialCost = true;
+    /**
+     * R5b: учитывать предельную длину при подборе Ду в оценке хода relink
+     * (приближённо, по максимальному downstream-пути). По умолчанию включено;
+     * {@code false} — прежний подбор только по расходу (A/B).
+     */
+    private boolean forestRelinkLengthCost = true;
     /** ADR-0035: учитывать точку подключения на границе ОКС (covers вместо contains). */
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */

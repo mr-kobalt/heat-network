@@ -20,6 +20,8 @@ public class RelinkStats {
     private final LongAdder indexBuildNanos = new LongAdder();
     private final LongAdder kSpecialCalls = new LongAdder();
     private final LongAdder kSpecialNanos = new LongAdder();
+    private final LongAdder lengthUpsized = new LongAdder();
+    private final LongAdder lengthDnNanos = new LongAdder();
 
     public void addCandidateNodes(long value) {
         candidateNodes.add(value);
@@ -58,6 +60,14 @@ public class RelinkStats {
     public void addKSpecial(long nanos) {
         kSpecialCalls.increment();
         kSpecialNanos.add(nanos);
+    }
+
+    public void addLengthUpsized() {
+        lengthUpsized.increment();
+    }
+
+    public void addLengthDn(long nanos) {
+        lengthDnNanos.add(nanos);
     }
 
     public long getCandidateNodes() {
@@ -106,5 +116,13 @@ public class RelinkStats {
 
     public long getKSpecialMs() {
         return kSpecialNanos.sum() / 1_000_000L;
+    }
+
+    public long getLengthUpsizedEdges() {
+        return lengthUpsized.sum();
+    }
+
+    public long getLengthMs() {
+        return lengthDnNanos.sum() / 1_000_000L;
     }
 }

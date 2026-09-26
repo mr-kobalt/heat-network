@@ -824,6 +824,72 @@ public class TerminalRelinker {
             }
             subtree.put(node, flow);
         }
+        // R5b: приближённый подбор Ду с учётом предельной длины (максимальный
+        // downstream-путь; без сброса на смене Ду — консервативно).
+        boolean lengthCost = appProperties.isForestRelinkLengthCost();
+        Map<String, Integer> dnByEdge = new HashMap<>();
+        long dnStart = System.nanoTime();
+        if (lengthCost) {
+            Map<String, Double> downLength = new HashMap<>();
+            for (int i = order.size() - 1; i >= 0; i--) {
+                String node = order.get(i);
+                double bestChild = 0.0;
+                for (int index : incident.get(node)) {
+                    Edge edge = keptEdges.get(index);
+                    String child = edge.a.equals(node) ? edge.b : edge.a;
+                    if (parent.get(child) != null && parent.get(child).equals(node)) {
+                        bestChild = Math.max(bestChild, downLength.getOrDefault(edge.id, 0.0));
+                    }
+                }
+                Integer edgeIndex = parentEdge.get(node);
+                if (edgeIndex == null) {
+                    continue;
+                }
+                Edge edge = keptEdges.get(edgeIndex);
+                double runLength = edge.length() + bestChild;
+                downLength.put(edge.id, runLength);
+                double flow = subtree.getOrDefault(node, 0.0);
+                int dn = selectForLength(flow, runLength);
+                if (dn > diameter(flow)) {
+                    ctx.stats.addLengthUpsized();
+                }
+                dnByEdge.put(edge.id, dn);
+            }
+            // FR-48: Ду не убывает к точке присоединения.
+            for (int pass = 0; pass < 2; pass++) {
+                boolean changed = false;
+                for (int i = order.size() - 1; i >= 0; i--) {
+                    String node = order.get(i);
+                    Integer edgeIndex = parentEdge.get(node);
+                    if (edgeIndex == null) {
+                        continue;
+                    }
+                    Edge edge = keptEdges.get(edgeIndex);
+                    int parentDn = dnByEdge.getOrDefault(edge.id, 0);
+                    int maxChildDn = 0;
+                    for (int index : incident.get(node)) {
+                        Edge childEdge = keptEdges.get(index);
+                        String child = childEdge.a.equals(node) ? childEdge.b : childEdge.a;
+                        if (parent.get(child) != null && parent.get(child).equals(node)) {
+                            maxChildDn = Math.max(maxChildDn,
+                                    dnByEdge.getOrDefault(childEdge.id, 0));
+                        }
+                    }
+                    if (maxChildDn > parentDn) {
+                        int target = selectForAtLeastLength(maxChildDn,
+                                subtree.getOrDefault(node, 0.0));
+                        if (target > parentDn) {
+                            dnByEdge.put(edge.id, target);
+                            changed = true;
+                        }
+                    }
+                }
+                if (!changed) {
+                    break;
+                }
+            }
+        }
+        ctx.stats.addLengthDn(System.nanoTime() - dnStart);
         long cost = 0L;
         double length = 0.0;
         Map<String, Integer> maxIncidentDn = new HashMap<>();
@@ -832,7 +898,8 @@ public class TerminalRelinker {
             String child = parent.get(edge.b) != null && parent.get(edge.b).equals(edge.a)
                     ? edge.b : edge.a;
             double flow = subtree.getOrDefault(child, 0.0);
-            int dn = diameter(flow);
+            int dn = lengthCost
+                    ? dnByEdge.getOrDefault(edge.id, diameter(flow)) : diameter(flow);
             for (String node : List.of(edge.a, edge.b)) {
                 maxIncidentDn.merge(node, dn, Math::max);
             }
@@ -878,6 +945,26 @@ public class TerminalRelinker {
     private int diameter(double flow) {
         try {
             return diameters.select(flow).getDn();
+        } catch (IllegalArgumentException overflow) {
+            List<DiameterRow> rows = diameters.rows();
+            return rows.get(rows.size() - 1).getDn();
+        }
+    }
+
+    /** R5b: минимальный Ду по расходу и длине (approximation). */
+    private int selectForLength(double flow, double runLength) {
+        try {
+            return diameters.selectFor(flow, runLength).getDn();
+        } catch (IllegalArgumentException overflow) {
+            List<DiameterRow> rows = diameters.rows();
+            return rows.get(rows.size() - 1).getDn();
+        }
+    }
+
+    /** R5b: наименьший Ду ≥ {@code minDn}, удовлетворяющий расходу. */
+    private int selectForAtLeastLength(int minDn, double flow) {
+        try {
+            return diameters.selectForAtLeast(minDn, flow, 0.0).getDn();
         } catch (IllegalArgumentException overflow) {
             List<DiameterRow> rows = diameters.rows();
             return rows.get(rows.size() - 1).getDn();

@@ -256,11 +256,13 @@ public class GridForestPlanner {
                     .relinkRebuildCalls(build.relinkStats.getRebuildCalls())
                     .relinkMovesAccepted(build.relinkStats.getMovesAccepted())
                     .relinkKSpecialCalls(build.relinkStats.getKSpecialCalls())
+                    .relinkLengthUpsizedEdges(build.relinkStats.getLengthUpsizedEdges())
                     .relinkMs(build.relinkStats.getTotalMs())
                     .relinkValidSegmentMs(build.relinkStats.getValidSegmentMs())
                     .relinkRebuildMs(build.relinkStats.getRebuildMs())
                     .relinkIndexBuildMs(build.relinkStats.getIndexBuildMs())
                     .relinkKSpecialMs(build.relinkStats.getKSpecialMs())
+                    .relinkLengthMs(build.relinkStats.getLengthMs())
                     .build());
             if (trace.isEnabled()) {
                 int treePass = passIndex + 1;

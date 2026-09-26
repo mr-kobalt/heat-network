@@ -120,6 +120,10 @@
   (`forest-relink-special-cost`, `SpecialZoneIndex.maxKSpecialNearby`, кэш по
   id ребра, наследование split-рёбрами). Основной набор без спецзон — `S`
   без изменений; OSM `S` 13.8029 → 13.8015, `kSpecialMs` ≈70 мс
+- [x] E8-11 Точность оценки relink (R5b): предельная длина в подборе Ду
+  (`forest-relink-length-cost`, приближённо по downstream-пути + неубывание
+  к корню). На проверочных наборах длина не связывает (`upsized=0`), baseline
+  без изменений; диагностика `relinkLengthUpsizedEdges/Ms`
 
 ## Эпик E9. Глубина, отдельный необязательный режим (M4)
 
