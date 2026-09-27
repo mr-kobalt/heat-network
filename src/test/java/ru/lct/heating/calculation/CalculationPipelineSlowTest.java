@@ -68,13 +68,17 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // новых камер (медиана соседей). E50 (ADR-0052/0053): изоляция своего ОКС
         // только на хвосте выхода + ориентация терминалов — маршруты обходят свои
         // здания (длина/S растут), baseline пересчитан. R1 (2026-09-26): включён
-        // предел T-точек relink `forest-relink-tpoint-max=64` (≈2× быстрее,
-        // S 13.5598 → 13.5752), baseline пересчитан.
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.57519811155337, within(1e-6));
+        // предел T-точек relink `forest-relink-tpoint-max=64`. Углы (2026-09-26):
+        // ≤90° — маршрут/техузлы, ≥30° между парой рёбер в камере
+        // (`forest-chamber-min-angle-deg`); контракт `gridPath.incomingDir`
+        // (вектор подхода) исправлен. E50-05 (2026-09-26): объединение близких
+        // новых камер (`forest-chamber-merge=true`, ремонт углов на кандидата
+        // `forest-chamber-merge-repair=true`, без grid-фолбэка) — S 13.5552 → 13.4250.
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.425000323963804, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1914.0125758511233, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279755728L);
-        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(60000000L);
+                .isCloseTo(1913.0945613212682, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(274489880L);
+        assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(55000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
                 .isZero();

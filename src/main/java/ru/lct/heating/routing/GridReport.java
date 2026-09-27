@@ -21,6 +21,12 @@ public class GridReport {
     int trees;
     int unconnected;
     long timeMs;
+    /**
+     * Диагностика контракта {@code gridPath.incomingDir}: сколько раз в него
+     * передан не вектор направления, а координата точки (ошибка вызова).
+     * После исправления должно быть {@code 0}.
+     */
+    long turnSuspiciousIncoming;
     List<Pass> passes;
 
     @Value

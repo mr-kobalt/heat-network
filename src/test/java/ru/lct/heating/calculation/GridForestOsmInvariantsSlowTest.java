@@ -16,8 +16,8 @@ import ru.lct.heating.config.AppProperties;
  * варианта (в т.ч. точки 11) и запрет входа в собственный ОКС за пределами
  * финального вывода (пункты 2, 3, 5). Здесь же пинится OSM-baseline
  * (дефолт {@code forest-relink-tpoint-max=64} и полный перебор {@code =0}).
- * Счётчик {@code TURN_ANGLE_EXCEEDS_90} фиксируется фактом: дефолт 3,
- * полный перебор 4 (унаследованные предупреждения, не уникальные нарушения).
+ * Счётчик {@code TURN_ANGLE_EXCEEDS_90} фиксируется фактом (маршрутные
+ * нарушения ≤90°); угол между рёбрами в камере ограничен ≥30° отдельно.
  */
 @Tag("slow")
 class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
@@ -47,10 +47,9 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
     }
 
     /**
-     * Baseline E29/E50 на наборе с препятствиями OSM (дефолтные параметры,
-     * {@code forest-relink-tpoint-max=64}). {@code TURN_ANGLE_EXCEEDS_90} —
-     * счётчик предупреждений (не уникальных геометрических нарушений); на этом
-     * наборе унаследовано, фиксируется фактом.
+     * Baseline E29/E50 на наборе OSM (дефолтные параметры). Углы: ≤90° —
+     * маршрут/техузлы, ≥30° между парой рёбер в камере
+     * ({@code forest-chamber-min-angle-deg}).
      */
     @Test
     void producesOsmBaselineWithDefaultParameters() throws Exception {
@@ -65,10 +64,10 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertThat(outcome.getSummary().getScore())
-                .isCloseTo(13.80153700609723, within(1e-6));
+                .isCloseTo(13.760946722308471, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1991.2650046990777, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279562214L);
+                .isCloseTo(1985.2214941028237, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(278760080L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
         assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
         assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
@@ -77,8 +76,6 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
     /**
      * Baseline OSM с полным перебором T-точек ({@code forest-relink-tpoint-max=0}).
-     * На этом наборе прежний (неоптимизированный) режим давал чуть хуже
-     * (S 13.8057 против 13.8029 у дефолта cap64) — оставлен как опциональный.
      */
     @Test
     void producesOsmBaselineWithUnlimitedTpoints() throws Exception {
@@ -95,10 +92,10 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertThat(outcome.getSummary().getScore())
-                .isCloseTo(13.80364593293461, within(1e-6));
+                .isCloseTo(13.760834465602223, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1991.6296843115365, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(279598460L);
+                .isCloseTo(1985.1377912007415, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(278765039L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
         assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
         assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();

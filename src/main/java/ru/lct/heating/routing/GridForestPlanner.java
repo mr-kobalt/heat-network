@@ -66,6 +66,13 @@ public class GridForestPlanner {
     private static final ThreadLocal<GridPathWorkspace> GRID_PATH =
             ThreadLocal.withInitial(GridPathWorkspace::new);
 
+    /**
+     * Диагностика: число вызовов {@code gridPath} с «подходом», похожим на
+     * координату, а не на вектор направления (см. {@code GridReport}).
+     */
+    private final java.util.concurrent.atomic.LongAdder turnSuspiciousIncoming =
+            new java.util.concurrent.atomic.LongAdder();
+
     private final TieInCandidateProvider candidateProvider;
     private final DiameterCatalog diameters;
     private final CostModel costModel;
@@ -136,6 +143,7 @@ public class GridForestPlanner {
                                            ObstacleIndex obstacleIndex,
                                            SpecialZoneIndex specialZones, List<String> warnings,
                                            Map<String, ConnectionExit> exits, StageTrace trace) {
+        turnSuspiciousIncoming.reset();
         List<Terminal> terminals = terminals(dataset, exits, warnings);
         List<String> baseUnconnected = new ArrayList<>();
         Set<String> terminalIds = new HashSet<>();
@@ -324,6 +332,7 @@ public class GridForestPlanner {
                 .blockedCells(pass.blockedCells()).storage(spill ? "postgis" : "memory")
                 .sources(sources.size()).terminals(distinctTerminals(terminalCells))
                 .trees(build.trees.size()).unconnected(unconnected.size()).timeMs(totalMs)
+                .turnSuspiciousIncoming(turnSuspiciousIncoming.sum())
                 .passes(passStats).build();
         return ForestPlanningResult.builder().trees(build.trees)
                 .unconnectedConnectionPointIds(unconnected).gridReport(report)
@@ -949,6 +958,14 @@ public class GridForestPlanner {
             } else if (appProperties.isForestRootOptimization()) {
                 trees = optimizeRoots(trees, dataset, pass, obstacleIndex, warnings);
             }
+            if (appProperties.isForestChamberMerge()) {
+                Set<String> terminalNodeIds = new HashSet<>();
+                for (Terminal term : terminalCells.values()) {
+                    terminalNodeIds.add(term.pointId);
+                }
+                trees = mergeChambers(trees, dataset, pass, obstacleIndex, specialZones, own,
+                        terminalNodeIds);
+            }
             List<ForestTree> optimizedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineMs = elapsedMs(refineStart);
             log.info("Grid pass {}: dijkstra={}ms extract={}ms relink={}ms refine={}ms", passNumber,
@@ -1456,10 +1473,13 @@ public class GridForestPlanner {
                 extras.add(buffer);
             }
         }
-        Coordinate incoming = incomingDirection(victim, all);
+        Coordinate incomingNeighbor = incomingNeighborPoint(victim, all);
+        boolean chamberStart = from.getType() == NodeType.CHAMBER;
+        Coordinate incomingDir = (chamberStart || incomingNeighbor == null) ? null
+                : new Coordinate(start.x - incomingNeighbor.x, start.y - incomingNeighbor.y);
         Coordinate nextAfter = tail.isEmpty() ? null : tail.get(1);
-        List<Coordinate> path = gridPath(pass, obstacleIndex.withAdditional(extras), start, incoming,
-                goal, nextAfter, ignored == null ? Set.of() : ignored, 40000, false);
+        List<Coordinate> path = gridPath(pass, obstacleIndex.withAdditional(extras), start,
+                incomingDir, goal, nextAfter, ignored == null ? Set.of() : ignored, 40000, false);
         if (path == null && avoid != null) {
             // Fallback: обходим только пересекаемое ребро (без остальных).
             List<Geometry> onlyAvoid = new ArrayList<>();
@@ -1472,7 +1492,7 @@ public class GridForestPlanner {
             if (!buffer.isEmpty()) {
                 onlyAvoid.add(buffer);
             }
-            path = gridPath(pass, obstacleIndex.withAdditional(onlyAvoid), start, incoming, goal,
+            path = gridPath(pass, obstacleIndex.withAdditional(onlyAvoid), start, incomingDir, goal,
                     nextAfter, ignored == null ? Set.of() : ignored, 40000, false);
         }
         if (path == null || path.size() < 2) {
@@ -1493,7 +1513,8 @@ public class GridForestPlanner {
     }
 
     /** Направление подхода к началу ребра по другому инцидентному ребру. */
-    private Coordinate incomingDirection(ForestEdge victim, List<ForestEdge> all) {
+    /** Точка соседнего узла на подходе к {@code victim} (используется для вектора подхода). */
+    private Coordinate incomingNeighborPoint(ForestEdge victim, List<ForestEdge> all) {
         for (ForestEdge edge : all) {
             if (edge.getId().equals(victim.getId())) {
                 continue;
@@ -2119,7 +2140,7 @@ public class GridForestPlanner {
                 continue;
             }
             ChamberMove move = tryChamberMove(candidate, stubs, edges, incidentSet, obstacleIndex,
-                    specialZones, pass, isRoot);
+                    specialZones, pass, isRoot, null, false);
             if (move == null || move.stubSum >= currentStubSum - EPS) {
                 continue;
             }
@@ -2159,6 +2180,291 @@ public class GridForestPlanner {
         edges.addAll(candidateEdges);
         nodes.put(nodeId, node.toBuilder().coordinate(bestPosition).build());
         return true;
+    }
+
+    /**
+     * E50-05: объединение близких новых камер (Steiner-vertex merge). Две
+     * соседние новые камеры сливаются в одну, если итоговая степень не выше
+     * {@code forest-max-chamber-degree} и оценка {@code S} строго улучшается.
+     * Пары с большей степенью только логируются.
+     */
+    private List<ForestTree> mergeChambers(List<ForestTree> trees, NetworkDataset dataset,
+                                           ObstacleMask pass, ObstacleIndex obstacleIndex,
+                                           SpecialZoneIndex specialZones,
+                                           Map<String, Set<PreparedGeometry>> ownObstacles,
+                                           Set<String> terminalNodes) {
+        long start = System.nanoTime();
+        int count = trees.size();
+        ForestTree[] result = new ForestTree[count];
+        java.util.stream.IntStream.range(0, count).parallel().forEach(index -> result[index] =
+                mergeChamberTree(trees.get(index), dataset, pass, obstacleIndex, specialZones,
+                        ownObstacles, terminalNodes));
+        log.info("Chamber merge: trees={} time={}ms", count, elapsedMs(start));
+        return new ArrayList<>(Arrays.asList(result));
+    }
+
+    private ForestTree mergeChamberTree(ForestTree tree, NetworkDataset dataset, ObstacleMask pass,
+                                        ObstacleIndex obstacleIndex, SpecialZoneIndex specialZones,
+                                        Map<String, Set<PreparedGeometry>> ownObstacles,
+                                        Set<String> terminalNodes) {
+        Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
+        List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
+        String rootId = tree.getTieInNodeId();
+        int passes = Math.max(1, appProperties.getForestChamberMergePasses());
+        int[] diag = new int[7];
+        for (int passIndex = 0; passIndex < passes; passIndex++) {
+            List<Integer> pairs = new ArrayList<>();
+            for (int i = 0; i < edges.size(); i++) {
+                ForestEdge edge = edges.get(i);
+                if (isNewChamber(nodes, edge.getFromNodeId(), rootId)
+                        && isNewChamber(nodes, edge.getToNodeId(), rootId)) {
+                    pairs.add(i);
+                }
+            }
+            pairs.sort(Comparator.comparing(i -> edges.get(i).getFromNodeId() + "|"
+                    + edges.get(i).getToNodeId()));
+            boolean changed = false;
+            for (int edgeIndex : pairs) {
+                if (edgeIndex >= edges.size()) {
+                    continue;
+                }
+                if (tryMerge(edgeIndex, nodes, edges, rootId, dataset, pass, obstacleIndex,
+                        specialZones, ownObstacles, terminalNodes, diag)) {
+                    changed = true;
+                    diag[5]++;
+                    break;
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+        log.debug("CHAMBER_MERGE_DIAG: moveNull={} turnUnresolved={} rejectedAngle={} enforceFail={} "
+                        + "degreeFail={} scoreWorse={} applied={}", diag[0], diag[1], diag[6], diag[2],
+                diag[3], diag[4], diag[5]);
+        return ForestTree.builder().tieInNodeId(rootId).nodes(nodes).edges(edges).build();
+    }
+
+    private boolean isNewChamber(Map<String, ForestNode> nodes, String id, String rootId) {
+        ForestNode node = nodes.get(id);
+        return node != null && node.getType() == NodeType.CHAMBER && !node.isExisting()
+                && !id.equals(rootId);
+    }
+
+    private boolean tryMerge(int edgeIndex, Map<String, ForestNode> nodes, List<ForestEdge> edges,
+                             String rootId, NetworkDataset dataset, ObstacleMask pass,
+                             ObstacleIndex obstacleIndex, SpecialZoneIndex specialZones,
+                             Map<String, Set<PreparedGeometry>> ownObstacles,
+                             Set<String> terminalNodes, int[] diag) {
+        ForestEdge shared = edges.get(edgeIndex);
+        String a = shared.getFromNodeId();
+        String b = shared.getToNodeId();
+        if (a.compareTo(b) > 0) {
+            String swap = a;
+            a = b;
+            b = swap;
+        }
+        Set<Integer> incident = new HashSet<>();
+        int degreeA = 0;
+        int degreeB = 0;
+        for (int i = 0; i < edges.size(); i++) {
+            ForestEdge edge = edges.get(i);
+            boolean touchesA = edge.getFromNodeId().equals(a) || edge.getToNodeId().equals(a);
+            boolean touchesB = edge.getFromNodeId().equals(b) || edge.getToNodeId().equals(b);
+            if (touchesA || touchesB) {
+                incident.add(i);
+            }
+            if (touchesA) {
+                degreeA++;
+            }
+            if (touchesB) {
+                degreeB++;
+            }
+        }
+        int mergedDegree = degreeA + degreeB - 2;
+        int maxDegree = appProperties.getForestMaxChamberDegree();
+        if (maxDegree > 0 && mergedDegree > maxDegree) {
+            log.debug("CHAMBER_MERGE_SKIPPED_DEGREE: {}+{} degree={}", a, b, mergedDegree);
+            return false;
+        }
+        if (mergedDegree < 3) {
+            return false;
+        }
+        List<String> ignoredWarnings = new ArrayList<>();
+        List<Stub> stubs = new ArrayList<>();
+        for (int i : incident) {
+            if (i == edgeIndex) {
+                continue;
+            }
+            ForestEdge edge = edges.get(i);
+            String nodeId = (edge.getFromNodeId().equals(a) || edge.getToNodeId().equals(a)) ? a : b;
+            Stub stub = stub(i, edge, nodeId, ownObstacles, specialZones, ignoredWarnings);
+            if (stub == null) {
+                return false;
+            }
+            stubs.add(stub);
+        }
+        if (stubs.size() < 3) {
+            return false;
+        }
+        List<Coordinate> farPoints = new ArrayList<>();
+        List<Double> weights = new ArrayList<>();
+        for (Stub stub : stubs) {
+            farPoints.add(stub.endpoint);
+            weights.add(1.0);
+        }
+        Coordinate median = weightedMedian(farPoints, weights);
+        ForestNode nodeA = nodes.get(a);
+        ForestNode nodeB = nodes.get(b);
+        List<Coordinate> candidates = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        addCandidate(candidates, seen, nodeA.getCoordinate());
+        addCandidate(candidates, seen, nodeB.getCoordinate());
+        addCandidate(candidates, seen, median);
+        if (nodeA.getCoordinate() != null && nodeB.getCoordinate() != null) {
+            addCandidate(candidates, seen, new Coordinate(
+                    (nodeA.getCoordinate().x + nodeB.getCoordinate().x) / 2.0,
+                    (nodeA.getCoordinate().y + nodeB.getCoordinate().y) / 2.0));
+        }
+        int max = Math.max(1, appProperties.getForestChamberMaxCandidates());
+        List<Coordinate> projections = new ArrayList<>();
+        for (TieInCandidate projection : candidateProvider.projections(dataset, median)) {
+            projections.add(projection.getCoordinate());
+        }
+        projections.sort(Comparator.comparingDouble(median::distance));
+        for (Coordinate projection : projections) {
+            if (candidates.size() >= max) {
+                break;
+            }
+            addCandidate(candidates, seen, projection);
+        }
+        Map<String, String> rename = Map.of(b, a);
+        double currentScore = treeScore(nodes, edges, rootId, specialZones);
+        for (Coordinate candidate : candidates) {
+            // Ослабленные повороты без grid-фолбэка: кандидат либо проходит
+            // контракт (валидация/ремонт ниже), либо отвергается.
+            ChamberMove move = tryChamberMove(candidate, stubs, edges, incident, obstacleIndex,
+                    specialZones, pass, false, rename, true);
+            if (move == null) {
+                diag[0]++;
+                continue;
+            }
+            List<ForestEdge> candidateEdges = new ArrayList<>();
+            for (int i = 0; i < edges.size(); i++) {
+                if (i == edgeIndex) {
+                    continue;
+                }
+                candidateEdges.add(move.replaced.containsKey(i) ? move.replaced.get(i)
+                        : edges.get(i));
+            }
+            Map<String, ForestNode> candidateNodes = new LinkedHashMap<>(nodes);
+            candidateNodes.remove(b);
+            candidateNodes.put(a, nodeA.toBuilder().coordinate(candidate).build());
+            if (appProperties.isForestChamberMergeRepair()) {
+                List<String> localWarnings = new ArrayList<>();
+                candidateEdges = repairNodeTurns(candidateEdges, candidateNodes, pass, obstacleIndex,
+                        ownObstacles, localWarnings);
+                candidateEdges = repairInteriorTurns(candidateEdges, pass, obstacleIndex,
+                        ownObstacles, terminalNodes, localWarnings);
+                candidateEdges = simplifyEdges(candidateEdges, obstacleIndex, specialZones,
+                        ownObstacles);
+                candidateEdges = repairCrossings(candidateEdges, candidateNodes, pass, obstacleIndex,
+                        ownObstacles, localWarnings);
+                candidateEdges = repairExitJoints(candidateEdges, terminalNodes, pass, obstacleIndex,
+                        ownObstacles);
+                if (localWarnings.stream().anyMatch(w -> w.startsWith("FOREST_TURN_UNRESOLVED"))) {
+                    diag[1]++;
+                    continue;
+                }
+            } else if (!candidateValid(candidateEdges, candidateNodes)) {
+                diag[6]++;
+                continue;
+            }
+            List<ForestEdge> enforced;
+            try {
+                enforced = maxLengthEnforcer.enforce(candidateEdges, rootId);
+            } catch (IllegalArgumentException noDiameter) {
+                diag[2]++;
+                continue;
+            }
+            int degree = 0;
+            for (ForestEdge edge : enforced) {
+                if (edge.getFromNodeId().equals(a) || edge.getToNodeId().equals(a)) {
+                    degree++;
+                }
+            }
+            if (maxDegree > 0 && degree > maxDegree) {
+                diag[3]++;
+                continue;
+            }
+            double newScore = treeScore(candidateNodes, enforced, rootId, specialZones);
+            if (newScore >= currentScore - EPS) {
+                diag[4]++;
+                continue;
+            }
+            edges.clear();
+            edges.addAll(enforced);
+            nodes.remove(b);
+            nodes.put(a, nodeA.toBuilder().coordinate(candidate).build());
+            log.info("CHAMBER_MERGE_APPLIED: {}+{} degree={} dS={}", a, b, degree,
+                    Math.round((newScore - currentScore) * 1000.0) / 1000.0);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Оптимизация merge: проверка кандидата без ремонта — маршрутные повороты
+     * ≤90° (внутренние вершины) и попарные углы в узлах по правилу
+     * ({@code nodeAngleOk}: камера ≥30°, техузел ≤90°). true — контракт соблюдён.
+     */
+    private boolean candidateValid(List<ForestEdge> edges, Map<String, ForestNode> nodes) {
+        for (ForestEdge edge : edges) {
+            if (!turnsWithinLimit(edge.getCoordinates())) {
+                return false;
+            }
+        }
+        Map<String, List<ForestEdge>> incident = new HashMap<>();
+        for (ForestEdge edge : edges) {
+            incident.computeIfAbsent(edge.getFromNodeId(), key -> new ArrayList<>()).add(edge);
+            incident.computeIfAbsent(edge.getToNodeId(), key -> new ArrayList<>()).add(edge);
+        }
+        for (Map.Entry<String, List<ForestEdge>> entry : incident.entrySet()) {
+            List<ForestEdge> list = entry.getValue();
+            if (list.size() < 2) {
+                continue;
+            }
+            ForestNode node = nodes.get(entry.getKey());
+            if (node == null) {
+                continue;
+            }
+            Coordinate vertex = node.getCoordinate();
+            for (int i = 0; i < list.size(); i++) {
+                for (int j = i + 1; j < list.size(); j++) {
+                    Coordinate in = neighborOf(list.get(i), entry.getKey());
+                    Coordinate out = neighborOf(list.get(j), entry.getKey());
+                    if (in != null && out != null && !nodeAngleOk(node, in, vertex, out)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Соседняя к узлу вершина ребра (аналог {@code neighborAt} для {@link ForestEdge}). */
+    private Coordinate neighborOf(ForestEdge edge, String node) {
+        List<Coordinate> coords = edge.getCoordinates();
+        if (coords.size() < 2) {
+            return null;
+        }
+        if (edge.getFromNodeId().equals(node)) {
+            return coords.get(1);
+        }
+        if (edge.getToNodeId().equals(node)) {
+            return coords.get(coords.size() - 2);
+        }
+        return null;
     }
 
     private Stub stub(int edgeIndex, ForestEdge edge, String nodeId,
@@ -2312,7 +2618,8 @@ public class GridForestPlanner {
     private ChamberMove tryChamberMove(Coordinate candidate, List<Stub> stubs, List<ForestEdge> edges,
                                        Set<Integer> incidentSet, ObstacleIndex obstacleIndex,
                                        SpecialZoneIndex specialZones, ObstacleMask pass,
-                                       boolean allowFallback) {
+                                       boolean allowFallback, Map<String, String> rename,
+                                       boolean relaxedTurns) {
         List<Coordinate> firstSteps = new ArrayList<>();
         List<List<Coordinate>> connectors = new ArrayList<>();
         List<Double> stubLens = new ArrayList<>();
@@ -2327,7 +2634,7 @@ public class GridForestPlanner {
                 if (specialZones != null && !specialZones.angleOk(line(candidate, stub.endpoint))) {
                     return null;
                 }
-                if (!turnAllowed(candidate, stub.endpoint, stub.nextAfter)) {
+                if (!relaxedTurns && !turnAllowed(candidate, stub.endpoint, stub.nextAfter)) {
                     return null;
                 }
                 connector = List.of(new Coordinate(candidate), new Coordinate(stub.endpoint));
@@ -2348,9 +2655,9 @@ public class GridForestPlanner {
             stubLens.add(length);
             stubSum += length;
         }
-        for (int i = 0; i < firstSteps.size(); i++) {
+        for (int i = 0; i < firstSteps.size() && !relaxedTurns; i++) {
             for (int j = i + 1; j < firstSteps.size(); j++) {
-                if (!turnAllowed(firstSteps.get(i), candidate, firstSteps.get(j))) {
+                if (!chamberPairOk(firstSteps.get(i), candidate, firstSteps.get(j))) {
                     return null;
                 }
             }
@@ -2373,7 +2680,10 @@ public class GridForestPlanner {
                 coords.addAll(reversed);
             }
             replaced.put(stub.edgeIndex, ForestEdge.builder().id(old.getId())
-                    .fromNodeId(old.getFromNodeId()).toNodeId(old.getToNodeId())
+                    .fromNodeId(rename == null ? old.getFromNodeId()
+                            : rename.getOrDefault(old.getFromNodeId(), old.getFromNodeId()))
+                    .toNodeId(rename == null ? old.getToNodeId()
+                            : rename.getOrDefault(old.getToNodeId(), old.getToNodeId()))
                     .coordinates(coords).flowTph(old.getFlowTph()).diameterMm(old.getDiameterMm())
                     .build());
         }
@@ -2630,16 +2940,17 @@ public class GridForestPlanner {
                         if (incoming == null || outgoing == null) {
                             continue;
                         }
-                        if (turnAllowed(incoming, vertex, outgoing)) {
+                        if (nodeAngleOk(forestNode, incoming, vertex, outgoing)) {
                             continue;
                         }
+                        boolean chamberStart = forestNode.getType() == NodeType.CHAMBER;
                         if (rerouteAtNode(work, ids.get(b), node, incoming, vertex, outgoing, pass,
-                                obstacleIndex, ownObstacles)) {
+                                obstacleIndex, ownObstacles, chamberStart)) {
                             repaired = true;
                             break;
                         }
                         if (rerouteAtNode(work, ids.get(a), node, outgoing, vertex, incoming, pass,
-                                obstacleIndex, ownObstacles)) {
+                                obstacleIndex, ownObstacles, chamberStart)) {
                             repaired = true;
                         }
                     }
@@ -2672,8 +2983,10 @@ public class GridForestPlanner {
                     Coordinate incoming = neighborAt(work.get(ids.get(a)), entry.getKey());
                     Coordinate outgoing = neighborAt(work.get(ids.get(b)), entry.getKey());
                     if (incoming != null && outgoing != null
-                            && !turnAllowed(incoming, vertex, outgoing)) {
-                        warnings.add("FOREST_TURN_UNRESOLVED: узел " + entry.getKey());
+                            && !nodeAngleOk(forestNode, incoming, vertex, outgoing)) {
+                        warnings.add(forestNode.getType() == NodeType.CHAMBER
+                                ? "FOREST_CHAMBER_ANGLE_SMALL: узел " + entry.getKey()
+                                : "FOREST_TURN_UNRESOLVED: узел " + entry.getKey());
                     }
                 }
             }
@@ -2920,7 +3233,8 @@ public class GridForestPlanner {
                                   Coordinate incoming, Coordinate vertex, Coordinate outgoing,
                                   ObstacleMask pass, ObstacleIndex obstacleIndex,
                                   Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
-                                          ownObstacles) {
+                                          ownObstacles,
+                                  boolean chamberStart) {
         MutableEdge edge = edges.get(edgeIndex);
         Coordinate nextAfter = nextAfter(edge, node);
         Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored = new HashSet<>();
@@ -2934,8 +3248,12 @@ public class GridForestPlanner {
                 ignored.addAll(second);
             }
         }
-        List<Coordinate> path = gridPath(pass, obstacleIndex, vertex, incoming, outgoing, nextAfter,
-                ignored);
+        // Камера: узловой поворот ≤90° не навязываем (правило — ≥30° между парой
+        // рёбер, проверяется вызывающим). Техузел/маршрут — вектор подхода.
+        Coordinate incomingDir = (chamberStart || incoming == null) ? null
+                : new Coordinate(vertex.x - incoming.x, vertex.y - incoming.y);
+        List<Coordinate> path = gridPath(pass, obstacleIndex, vertex, incomingDir, outgoing,
+                nextAfter, ignored);
         if (path == null || path.size() < 2) {
             return false;
         }
@@ -3069,21 +3387,25 @@ public class GridForestPlanner {
      * Turn-aware поиск пути по сетке от {@code start} к {@code goal}: состояние
      * «клетка + входящее направление», поворот ≤ {@code forest-max-turn-deg},
      * запретные клетки/сегменты обходятся.
+     *
+     * <p>{@code incomingDir} — <b>вектор направления подхода</b> к {@code start}
+     * (например, {@code start - previousPoint}), а не координата точки; {@code null},
+     * если предыдущего направления нет.</p>
      */
     private List<Coordinate> gridPath(ObstacleMask pass, ObstacleIndex obstacleIndex,
-                                      Coordinate start, Coordinate incoming, Coordinate goal,
+                                      Coordinate start, Coordinate incomingDir, Coordinate goal,
                                       Coordinate nextAfter,
                                       Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored) {
-        return gridPath(pass, obstacleIndex, start, incoming, goal, nextAfter, ignored, 8000, true);
+        return gridPath(pass, obstacleIndex, start, incomingDir, goal, nextAfter, ignored, 8000, true);
     }
 
     private List<Coordinate> gridPath(ObstacleMask pass, ObstacleIndex obstacleIndex,
-                                      Coordinate start, Coordinate incoming, Coordinate goal,
+                                      Coordinate start, Coordinate incomingDir, Coordinate goal,
                                       Coordinate nextAfter,
                                       Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored,
                                       int maxExpansions) {
-        return gridPath(pass, obstacleIndex, start, incoming, goal, nextAfter, ignored, maxExpansions,
-                true);
+        return gridPath(pass, obstacleIndex, start, incomingDir, goal, nextAfter, ignored,
+                maxExpansions, true);
     }
 
     /**
@@ -3092,10 +3414,14 @@ public class GridForestPlanner {
      *                  препятствия ({@code withAdditional}), которых нет в маске.
      */
     private List<Coordinate> gridPath(ObstacleMask pass, ObstacleIndex obstacleIndex,
-                                      Coordinate start, Coordinate incoming, Coordinate goal,
+                                      Coordinate start, Coordinate incomingDir, Coordinate goal,
                                       Coordinate nextAfter,
                                       Set<org.locationtech.jts.geom.prep.PreparedGeometry> ignored,
                                       int maxExpansions, boolean trustMask) {
+        if (incomingDir != null && Math.hypot(incomingDir.x, incomingDir.y) > 1e4) {
+            // Направление подхода O(1); координата 1e5–1e6 → вызван не вектор.
+            turnSuspiciousIncoming.increment();
+        }
         int width = pass.width();
         int height = pass.height();
         int startCell = pass.cellAt(start.x, start.y);
@@ -3141,8 +3467,8 @@ public class GridForestPlanner {
                 double c1x = pass.centerX(nc, nr);
                 double c1y = pass.centerY(nc, nr);
                 if (dir == 8) {
-                    if (incoming != null
-                            && turnDegrees(incoming.x, incoming.y, c1x - c0x, c1y - c0y)
+                    if (incomingDir != null
+                            && turnDegrees(incomingDir.x, incomingDir.y, c1x - c0x, c1y - c0y)
                                     > maxTurnDeg() + ANGLE_EPS) {
                         continue;
                     }
@@ -3191,8 +3517,8 @@ public class GridForestPlanner {
             path.add(center(pass, cell));
         }
         path.set(0, start);
-        if (path.size() >= 2 && incoming != null
-                && turnDegrees(incoming.x, incoming.y,
+        if (path.size() >= 2 && incomingDir != null
+                && turnDegrees(incomingDir.x, incomingDir.y,
                         path.get(1).x - start.x, path.get(1).y - start.y)
                         > maxTurnDeg() + ANGLE_EPS) {
             return null;
@@ -3556,6 +3882,33 @@ public class GridForestPlanner {
     private double turnDegrees(Coordinate previous, Coordinate vertex, Coordinate next) {
         return turnDegrees(vertex.x - previous.x, vertex.y - previous.y,
                 next.x - vertex.x, next.y - vertex.y);
+    }
+
+    /** Минимальный угол между парой рёбер в тепловой камере (≥). */
+    private double minChamberAngleDeg() {
+        double value = appProperties.getForestChamberMinAngleDeg();
+        return value > 0 ? value : 30.0;
+    }
+
+    /**
+     * Угол между парой инцидентных рёбер в камере ≥ {@code forest-chamber-min-angle-deg}.
+     * В терминах {@link #turnDegrees} это {@code turn ≤ 180 − minAngle}.
+     */
+    private boolean chamberPairOk(Coordinate neighborA, Coordinate vertex, Coordinate neighborB) {
+        return turnDegrees(neighborA, vertex, neighborB)
+                <= 180.0 - minChamberAngleDeg() + ANGLE_EPS;
+    }
+
+    /**
+     * Правило угла в узле: технический узел/иные — поворот ≤ {@code maxTurnDeg}
+     * (90°); тепловая камера — угол между любой парой рёбер ≥ minChamberAngle.
+     */
+    private boolean nodeAngleOk(ForestNode node, Coordinate neighborA, Coordinate vertex,
+                                Coordinate neighborB) {
+        if (node != null && node.getType() == NodeType.CHAMBER) {
+            return chamberPairOk(neighborA, vertex, neighborB);
+        }
+        return turnAllowed(neighborA, vertex, neighborB);
     }
 
     private double turnDegrees(double inX, double inY, double outX, double outY) {
