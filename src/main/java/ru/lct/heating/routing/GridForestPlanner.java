@@ -82,6 +82,8 @@ public class GridForestPlanner {
     private final CellStoreFactory cellStoreFactory;
     private final AppProperties appProperties;
     private final OksApproachResolver approachResolver;
+    /** ADR-0062: глобальный оптимизатор Ду (флаг {@code forest-diameter-optimizer}). */
+    private final DiameterTreeOptimizer diameterTreeOptimizer;
 
     public GridForestPlanner(TieInCandidateProvider candidateProvider, DiameterCatalog diameters,
                              CostModel costModel, MaxLengthEnforcer maxLengthEnforcer,
@@ -97,6 +99,7 @@ public class GridForestPlanner {
         this.cellStoreFactory = cellStoreFactory;
         this.appProperties = appProperties;
         this.approachResolver = approachResolver;
+        this.diameterTreeOptimizer = new DiameterTreeOptimizer(diameters, costModel, appProperties);
     }
 
     private double maxTurnDeg() {
@@ -116,6 +119,80 @@ public class GridForestPlanner {
     private GridShape gridShape() {
         return "hex".equalsIgnoreCase(appProperties.getForestGridShape())
                 ? HexGridShape.INSTANCE : SquareGridShape.INSTANCE;
+    }
+
+    /**
+     * ADR-0062: финальный глобальный подбор Ду (флаг
+     * {@code forest-diameter-optimizer}), один вызов на дерево после слияния
+     * камер. Выполняется, только если предельная длина реально связывает
+     * (минимальные по расходу Ду дают плеть длиннее предела) — иначе результат
+     * совпал бы с {@code MaxLengthEnforcer}, и оптимизатор не запускается.
+     * При превышении бюджета состояний — фолбэк на {@code MaxLengthEnforcer}.
+     */
+    private List<ForestTree> optimizeTreeDiameters(List<ForestTree> trees,
+                                                   SpecialZoneIndex specialZones) {
+        if (!appProperties.isForestDiameterOptimizer()) {
+            return trees;
+        }
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            List<ForestEdge> current = tree.getEdges();
+            if (!lengthBinds(current, tree.getTieInNodeId())) {
+                result.add(tree);
+                continue;
+            }
+            List<ForestEdge> optimized;
+            try {
+                optimized = diameterTreeOptimizer.optimize(tree.getNodes(), current,
+                        tree.getTieInNodeId(), specialZones);
+            } catch (IllegalArgumentException noDiameter) {
+                optimized = null;
+            }
+            if (optimized == null) {
+                try {
+                    optimized = maxLengthEnforcer.enforce(current, tree.getTieInNodeId());
+                } catch (IllegalArgumentException noDiameter) {
+                    optimized = current;
+                }
+            }
+            result.add(ForestTree.builder().tieInNodeId(tree.getTieInNodeId())
+                    .nodes(tree.getNodes()).edges(optimized).build());
+        }
+        return result;
+    }
+
+    /** Связывает ли предельная длина: минимальные по расходу Ду дают превышение. */
+    private boolean lengthBinds(List<ForestEdge> edges, String rootNodeId) {
+        if (edges.isEmpty()) {
+            return false;
+        }
+        List<ForestEdge> minimal = new ArrayList<>(edges.size());
+        for (ForestEdge edge : edges) {
+            minimal.add(withDiameter(edge, selectDiameter(edge.getFlowTph())));
+        }
+        try {
+            return diametersChanged(minimal, maxLengthEnforcer.enforce(minimal, rootNodeId));
+        } catch (IllegalArgumentException noDiameter) {
+            return true;
+        }
+    }
+
+    private static boolean diametersChanged(List<ForestEdge> before, List<ForestEdge> after) {
+        if (before.size() != after.size()) {
+            return true;
+        }
+        for (int i = 0; i < before.size(); i++) {
+            if (before.get(i).getDiameterMm() != after.get(i).getDiameterMm()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ForestEdge withDiameter(ForestEdge edge, int dn) {
+        return ForestEdge.builder().id(edge.getId()).fromNodeId(edge.getFromNodeId())
+                .toNodeId(edge.getToNodeId()).coordinates(edge.getCoordinates())
+                .flowTph(edge.getFlowTph()).diameterMm(dn).build();
     }
 
     public List<ForestPlanningResult> plan(NetworkDataset dataset, ExistingNetworkGraph graph,
@@ -966,6 +1043,8 @@ public class GridForestPlanner {
                 trees = mergeChambers(trees, dataset, pass, obstacleIndex, specialZones, own,
                         terminalNodeIds);
             }
+            // ADR-0062: финальный глобальный подбор Ду (после слияния камер).
+            trees = optimizeTreeDiameters(trees, specialZones);
             List<ForestTree> optimizedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineMs = elapsedMs(refineStart);
             log.info("Grid pass {}: dijkstra={}ms extract={}ms relink={}ms refine={}ms", passNumber,

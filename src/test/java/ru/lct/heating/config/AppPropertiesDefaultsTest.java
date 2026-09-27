@@ -35,6 +35,7 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.getTieInSampleStepM()).isEqualTo(1.0);
         assertThat(properties.getTieInChamberExclusionM()).isEqualTo(1.0);
         assertThat(properties.isForestGridIncludeInputBounds()).isTrue();
+        assertThat(properties.isForestDiameterOptimizer()).isTrue();
     }
 
     @Test

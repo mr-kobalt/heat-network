@@ -200,6 +200,18 @@ public class AppProperties {
     /** E25-05b: предел итераций пересборки индекса по фактическому Ду. */
     private int forestDiameterAwareIterations = 2;
     /**
+     * ADR-0062: глобальный оптимизатор Ду — подбор диаметров на всё дерево
+     * (расход, невозрастание к точке подключения, предел плети, стоимость
+     * участков и камер) вместо покомандного {@code MaxLengthEnforcer}. Включён
+     * по умолчанию; запускается финальным проходом только там, где предельная
+     * длина связывает (иначе результат совпадает с {@code MaxLengthEnforcer}).
+     * Выключается {@code HEATING_FOREST_DIAMETER_OPTIMIZER=false}; при
+     * превышении бюджета — фолбэк на {@code MaxLengthEnforcer}.
+     */
+    private boolean forestDiameterOptimizer = true;
+    /** ADR-0062: бюджет состояний DP глобального оптимизатора Ду. */
+    private int forestDiameterOptimizerMaxStates = 500_000;
+    /**
      * E26/ADR-0046: правило 10 м (использовать существующую камеру в радиусе
      * {@code chamber-tie-in-radius-m}) и учёт существующих примыканий в контроле
      * степени ≤4. Включено по умолчанию (обязательная часть ТП v2 §2.4).

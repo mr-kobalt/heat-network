@@ -144,6 +144,9 @@ heating:
     # E25-05b: буферы по фактическому Ду (пересборка индекса и повтор расчёта).
     forest-diameter-aware-buffers: ${HEATING_FOREST_DIAMETER_AWARE_BUFFERS:false}
     forest-diameter-aware-iterations: ${HEATING_FOREST_DIAMETER_AWARE_ITERATIONS:2}
+    # ADR-0062: глобальный оптимизатор Ду на всё дерево (участки + камеры).
+    forest-diameter-optimizer: ${HEATING_FOREST_DIAMETER_OPTIMIZER:true}
+    forest-diameter-optimizer-max-states: ${HEATING_FOREST_DIAMETER_OPTIMIZER_MAX_STATES:500000}
     # E26/ADR-0046: правило 10 м и учёт существующих примыканий (степень ≤4).
     forest-chamber-tie-in-rules: ${HEATING_FOREST_CHAMBER_TIE_IN_RULES:true}
     # ADR-0036: предел пикселей растровой диагностики сетки (прореживание).
