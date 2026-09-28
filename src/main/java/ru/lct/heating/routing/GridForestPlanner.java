@@ -17,6 +17,7 @@ import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
+import org.locationtech.jts.index.strtree.STRtree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -374,15 +375,30 @@ public class GridForestPlanner {
         long totalMs = elapsedMs(start);
         List<ForestPlanningResult> variants = new ArrayList<>();
         Set<String> signatures = new HashSet<>();
+        ForestPlanningResult fallback = null;
         for (GridBuild build : builds) {
-            if (variants.size() >= MAX_PLANS) {
-                break;
+            ForestPlanningResult candidate = toResult(build, terminals, baseUnconnected, pass, spill,
+                    sources, terminalCells, passStats, totalMs);
+            if (fallback == null) {
+                fallback = candidate;
             }
             if (!signatures.add(signature(build.trees))) {
                 continue;
             }
-            variants.add(toResult(build, terminals, baseUnconnected, pass, spill, sources,
-                    terminalCells, passStats, totalMs));
+            // ADR-0067: не выпускать варианты с недопустимыми углами или
+            // самопересечениями (в т.ч. внутриреберными) — иначе дефект уходит
+            // в вывод мимо лучшего варианта.
+            if (appProperties.isForestExitRegularization() && !treesGeometryValid(build.trees)) {
+                warnings.add("VARIANT_GEOMETRY_FILTERED: pass=" + build.passNumber);
+                continue;
+            }
+            if (variants.size() >= MAX_PLANS) {
+                continue;
+            }
+            variants.add(candidate);
+        }
+        if (variants.isEmpty() && fallback != null) {
+            variants.add(fallback);
         }
         if (variants.isEmpty()) {
             variants.add(result(List.of(), baseUnconnected));
@@ -437,6 +453,51 @@ public class GridForestPlanner {
     private ForestPlanningResult result(List<ForestTree> trees, List<String> unconnected) {
         return ForestPlanningResult.builder().trees(trees)
                 .unconnectedConnectionPointIds(unconnected).build();
+    }
+
+    /**
+     * ADR-0067: геометрическая валидность варианта — нет поворотов >
+     * {@code forest-max-turn-deg}, нет самопересечений рёбер вне общих узлов и
+     * внутриреберных. STRtree — чтобы проверка оставалась линейной по числу рёбер.
+     */
+    private boolean treesGeometryValid(List<ForestTree> trees) {
+        List<ForestEdge> edges = new ArrayList<>();
+        for (ForestTree tree : trees) {
+            edges.addAll(tree.getEdges());
+        }
+        STRtree index = new STRtree();
+        for (ForestEdge edge : edges) {
+            index.insert(line(edge).getEnvelopeInternal(), edge);
+        }
+        index.build();
+        for (ForestEdge edge : edges) {
+            List<Coordinate> coords = edge.getCoordinates();
+            for (int i = 1; i + 1 < coords.size(); i++) {
+                if (!turnAllowed(coords.get(i - 1), coords.get(i), coords.get(i + 1))) {
+                    return false;
+                }
+            }
+            for (int i = 0; i + 1 < coords.size(); i++) {
+                LineString a = line(coords.get(i), coords.get(i + 1));
+                for (int j = i + 2; j + 1 < coords.size(); j++) {
+                    if (!a.intersection(line(coords.get(j), coords.get(j + 1))).isEmpty()) {
+                        return false;
+                    }
+                }
+            }
+            LineString edgeLine = line(edge);
+            @SuppressWarnings("unchecked")
+            List<ForestEdge> near = index.query(edgeLine.getEnvelopeInternal());
+            for (ForestEdge other : near) {
+                if (other.getId().equals(edge.getId()) || sharesNode(edge, other)) {
+                    continue;
+                }
+                if (!edgeLine.intersection(line(other)).isEmpty()) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private List<Terminal> terminals(NetworkDataset dataset, Map<String, ConnectionExit> exits,
@@ -1043,6 +1104,11 @@ public class GridForestPlanner {
                 trees = mergeChambers(trees, dataset, pass, obstacleIndex, specialZones, own,
                         terminalNodeIds);
             }
+            // ADR-0066: привязка новых камер к каноническому `target` (микрозвено).
+            trees = snapExitChambers(trees, obstacleIndex, specialZones, own, terminalCells);
+            // ADR-0067: финальное visibility-спрямление подходов после всех
+            // переносов камер/корней (соединители пересобираются заново).
+            trees = straightenExitApproachesPost(trees, obstacleIndex, terminalCells);
             // ADR-0062: финальный глобальный подбор Ду (после слияния камер).
             trees = optimizeTreeDiameters(trees, specialZones);
             List<ForestTree> optimizedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
@@ -1504,6 +1570,212 @@ public class GridForestPlanner {
     }
 
     /**
+     * ADR-0066: регуляризация выхода терминала. Для терминального ребра:
+     * (1) пробуем заменить ствол до {@code target} путём видимости по вершинам
+     * запретов ({@link #visibilityPath}, касание границы допустимо) — убирает
+     * ступеньки/зигзаги перед {@code target}; принимаем, если вершин меньше и
+     * длина не выросла более чем на {@code forest-exit-micro-m};
+     * (2) иначе локально пробуем заменить суффикс {@code coords[k..target]}
+     * прямым отрезком. Канонический {@code target} и точка подключения
+     * сохраняются. Флаг {@code forest-exit-regularization}.
+     */
+    private List<ForestEdge> straightenExitApproaches(List<ForestEdge> edges,
+                                                      Map<String, Terminal> terminalsById,
+                                                      Set<String> terminalNodes,
+                                                      Map<String, ForestNode> nodes,
+                                                      ObstacleIndex obstacleIndex) {
+        if (!appProperties.isForestExitRegularization() || obstacleIndex == null) {
+            return edges;
+        }
+        List<ForestEdge> result = new ArrayList<>(edges.size());
+        int budget = Math.max(0, appProperties.getForestExitVisibilityMaxAttempts());
+        for (ForestEdge edge : edges) {
+            boolean toTerminal = terminalNodes.contains(edge.getToNodeId());
+            boolean fromTerminal = terminalNodes.contains(edge.getFromNodeId());
+            if ((!toTerminal && !fromTerminal) || edge.getCoordinates().size() < 3) {
+                result.add(edge);
+                continue;
+            }
+            Terminal term = terminalsById.get(toTerminal
+                    ? edge.getToNodeId() : edge.getFromNodeId());
+            if (term == null) {
+                result.add(edge);
+                continue;
+            }
+            List<Coordinate> coords = new ArrayList<>(edge.getCoordinates());
+            boolean reversed = fromTerminal && !toTerminal;
+            if (reversed) {
+                Collections.reverse(coords);
+            }
+            int last = coords.size() - 1;
+            Coordinate point = coords.get(last);
+            boolean hasTail = !term.tail.isEmpty() && last >= 1
+                    && !coords.get(last - 1).equals2D(point);
+            Coordinate target = hasTail ? coords.get(last - 1) : point;
+            List<Coordinate> replacement = null;
+            if (coords.size() >= 4 && hasTail && budget > 0) {
+                budget--;
+                String startNodeId = reversed ? edge.getToNodeId() : edge.getFromNodeId();
+                boolean defect = hasTurnViolation(coords) || hasIntraSelfIntersection(coords);
+                replacement = visibilityExitApproach(coords, target, point, edge, startNodeId,
+                        nodes, edges, obstacleIndex, defect);
+            }
+            if (replacement == null) {
+                replacement = straightenSuffix(coords, target, point, hasTail, edge, edges,
+                        obstacleIndex);
+            }
+            if (replacement != null) {
+                coords = replacement;
+            }
+            if (reversed) {
+                Collections.reverse(coords);
+            }
+            result.add(ForestEdge.builder().id(edge.getId()).fromNodeId(edge.getFromNodeId())
+                    .toNodeId(edge.getToNodeId()).coordinates(coords).flowTph(edge.getFlowTph())
+                    .diameterMm(edge.getDiameterMm()).build());
+        }
+        return result;
+    }
+
+    private List<Coordinate> visibilityExitApproach(List<Coordinate> coords, Coordinate target,
+                                                    Coordinate point, ForestEdge edge,
+                                                    String startNodeId,
+                                                    Map<String, ForestNode> nodes,
+                                                    List<ForestEdge> allEdges,
+                                                    ObstacleIndex obstacleIndex,
+                                                    boolean defect) {
+        Coordinate start = coords.get(0);
+        List<Coordinate> vis = visibilityPath(start, null, target, point, obstacleIndex,
+                start.distance(target));
+        if (vis == null || vis.size() < 2 || vis.size() + 1 > coords.size()) {
+            return null;
+        }
+        List<Coordinate> candidate = new ArrayList<>(vis);
+        candidate.add(point);
+        double candidateLength = polylineLength(candidate);
+        double currentLength = polylineLength(coords);
+        if (candidateLength > currentLength + appProperties.getForestExitMicroM()) {
+            return null;
+        }
+        boolean shorter = candidateLength < currentLength - appProperties.getForestExitMicroM();
+        if (vis.size() + 1 == coords.size() && !defect && !shorter) {
+            return null;
+        }
+        if (!nodeAngleValid(startNodeId, start, vis.get(1), nodes, allEdges, edge.getId())
+                || createsCrossing(edge, candidate, allEdges)) {
+            return null;
+        }
+        return candidate;
+    }
+
+    /** Нарушение угла ≤{@code forest-max-turn-deg} во внутренних вершинах. */
+    private boolean hasTurnViolation(List<Coordinate> coords) {
+        for (int i = 1; i + 1 < coords.size(); i++) {
+            if (!turnAllowed(coords.get(i - 1), coords.get(i), coords.get(i + 1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Самопересечение ломаной (несоседние сегменты). */
+    private boolean hasIntraSelfIntersection(List<Coordinate> coords) {
+        for (int i = 0; i + 1 < coords.size(); i++) {
+            LineString a = line(coords.get(i), coords.get(i + 1));
+            for (int j = i + 2; j + 1 < coords.size(); j++) {
+                if (a.intersection(line(coords.get(j), coords.get(j + 1))).isEmpty()) {
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean nodeAngleValid(String nodeId, Coordinate nodeCoord, Coordinate newNeighbor,
+                                   Map<String, ForestNode> nodes, List<ForestEdge> allEdges,
+                                   String skipEdgeId) {
+        ForestNode node = nodes.get(nodeId);
+        if (node == null) {
+            return true;
+        }
+        List<Coordinate> neighbors = new ArrayList<>();
+        neighbors.add(newNeighbor);
+        for (ForestEdge other : allEdges) {
+            if (other.getId().equals(skipEdgeId)) {
+                continue;
+            }
+            List<Coordinate> coords = other.getCoordinates();
+            if (coords.size() < 2) {
+                continue;
+            }
+            if (other.getFromNodeId().equals(nodeId)) {
+                neighbors.add(coords.get(1));
+            } else if (other.getToNodeId().equals(nodeId)) {
+                neighbors.add(coords.get(coords.size() - 2));
+            }
+        }
+        for (int i = 0; i < neighbors.size(); i++) {
+            for (int j = i + 1; j < neighbors.size(); j++) {
+                if (!nodeAngleOk(node, neighbors.get(i), nodeCoord, neighbors.get(j))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private List<Coordinate> straightenSuffix(List<Coordinate> coords, Coordinate target,
+                                              Coordinate point, boolean hasTail, ForestEdge edge,
+                                              List<ForestEdge> allEdges,
+                                              ObstacleIndex obstacleIndex) {
+        int targetIndex = hasTail ? coords.size() - 2 : coords.size() - 1;
+        for (int k = targetIndex - 2; k >= 0; k--) {
+            Coordinate from = coords.get(k);
+            if (from.equals2D(target)
+                    || obstacleIndex.isInteriorBlocked(line(from, target))) {
+                continue;
+            }
+            if (k - 1 >= 0 && !turnAllowed(coords.get(k - 1), from, target)) {
+                continue;
+            }
+            if (hasTail && !turnAllowed(from, target, point)) {
+                continue;
+            }
+            List<Coordinate> candidate = new ArrayList<>(coords.subList(0, k + 1));
+            candidate.add(target);
+            if (hasTail) {
+                candidate.add(point);
+            }
+            if (createsCrossing(edge, candidate, allEdges)) {
+                continue;
+            }
+            return candidate;
+        }
+        return null;
+    }
+
+    private boolean createsCrossing(ForestEdge edge, List<Coordinate> coords,
+                                    List<ForestEdge> allEdges) {
+        LineString candidate = GeometrySupport.GEOMETRY_FACTORY.createLineString(
+                coords.toArray(new Coordinate[0]));
+        Envelope envelope = candidate.getEnvelopeInternal();
+        for (ForestEdge other : allEdges) {
+            if (other.getId().equals(edge.getId()) || sharesNode(edge, other)) {
+                continue;
+            }
+            LineString otherLine = line(other);
+            if (!envelope.intersects(otherLine.getEnvelopeInternal())) {
+                continue;
+            }
+            if (!candidate.intersection(otherLine).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * E50: свой ОКС не игнорируется — изоляция допустима только на хвосте
      * выхода, который {@link #rebuildCrossing} сохраняет отдельно.
      */
@@ -1835,6 +2107,10 @@ public class GridForestPlanner {
             terminalsById.put(terminal.pointId, terminal);
         }
         Set<String> terminalNodes = new HashSet<>(terminalsById.keySet());
+        // E50-07: детерминированный предотбор терминальных рёбер для фолбэка —
+        // ограничивает число дорогих попыток и не зависит от параллелизма.
+        Set<String> eligibleFallback = eligibleExitFallbackEdges(trees, terminalNodes,
+                terminalsById, obstacleIndex);
         int count = trees.size();
         ForestTree[] refinedTrees = new ForestTree[count];
         @SuppressWarnings("unchecked")
@@ -1845,8 +2121,8 @@ public class GridForestPlanner {
         java.util.stream.IntStream.range(0, count).parallel().forEach(index -> {
             List<String> treeWarnings = new ArrayList<>();
             refinedTrees[index] = refineTree(trees.get(index), pass, obstacleIndex, specialZones,
-                    terminalsById, ownObstacles, graph, terminalNodes, treeWarnings,
-                    timings[index]);
+                    terminalsById, ownObstacles, graph, terminalNodes, eligibleFallback,
+                    treeWarnings, timings[index]);
             localWarnings[index] = treeWarnings;
         });
         long tEdge = 0L;
@@ -1879,13 +2155,73 @@ public class GridForestPlanner {
         return result;
     }
 
+    /**
+     * E50-07: детерминированный отбор терминальных рёбер для visibility-фолбэка.
+     * Критерий — прямой ствол заходит во внутреннюю часть запрета, а перепробег
+     * сеточного ствола лежит в окне
+     * {@code [forest-exit-visibility-min-detour-m, -max-detour-m]} (малый
+     * перепробег — дискретизация сетки; крупный — иная причина, фолбэк
+     * бесполезен). Число рёбер ограничено
+     * {@code forest-exit-visibility-max-attempts} в устойчивом порядке
+     * ({@code trees} → рёбра), поэтому результат не зависит от параллелизма.
+     */
+    private Set<String> eligibleExitFallbackEdges(List<ForestTree> trees, Set<String> terminalNodes,
+                                                  Map<String, Terminal> terminalsById,
+                                                  ObstacleIndex obstacleIndex) {
+        if (!appProperties.isForestExitVisibilityFallback() || obstacleIndex == null) {
+            return Set.of();
+        }
+        int max = appProperties.getForestExitVisibilityMaxAttempts();
+        if (max <= 0) {
+            return Set.of();
+        }
+        double minDetour = appProperties.getForestExitVisibilityMinDetourM();
+        double maxDetour = appProperties.getForestExitVisibilityMaxDetourM();
+        Set<String> eligible = new LinkedHashSet<>();
+        for (ForestTree tree : trees) {
+            for (ForestEdge edge : tree.getEdges()) {
+                if (eligible.size() >= max) {
+                    return eligible;
+                }
+                if (!terminalNodes.contains(edge.getToNodeId())) {
+                    continue;
+                }
+                Terminal terminal = terminalsById.get(edge.getToNodeId());
+                if (terminal == null || terminal.tail.isEmpty()) {
+                    continue;
+                }
+                List<Coordinate> coords = edge.getCoordinates();
+                if (coords.size() < 3) {
+                    continue;
+                }
+                Coordinate start = coords.get(0);
+                Coordinate target = coords.get(coords.size() - 2);
+                double straight = start.distance(target);
+                if (straight < EPS || !obstacleIndex.isInteriorBlocked(line(start, target))) {
+                    continue;
+                }
+                double current = 0.0;
+                for (int i = 0; i + 1 < coords.size() - 1; i++) {
+                    current += coords.get(i).distance(coords.get(i + 1));
+                }
+                double detour = current - straight;
+                if (detour < minDetour || detour > maxDetour) {
+                    continue;
+                }
+                eligible.add(edge.getId());
+            }
+        }
+        return eligible;
+    }
+
     private ForestTree refineTree(ForestTree tree, ObstacleMask pass, ObstacleIndex obstacleIndex,
                                   SpecialZoneIndex specialZones,
                                   Map<String, Terminal> terminalsById,
                                   Map<String, Set<org.locationtech.jts.geom.prep.PreparedGeometry>>
                                           ownObstacles,
                                   ExistingNetworkGraph graph, Set<String> terminalNodes,
-                                  List<String> warnings, long[] timings) {
+                                  Set<String> eligibleExitFallback, List<String> warnings,
+                                  long[] timings) {
         Map<String, ForestNode> nodes = tree.getNodes();
         Map<String, String> parent = parentByRoot(tree);
         List<ForestEdge> edges = new ArrayList<>();
@@ -1930,6 +2266,16 @@ public class GridForestPlanner {
                     refined = fixed;
                 }
             }
+            if (isTerminal && !terminal.tail.isEmpty()
+                    && eligibleExitFallback.contains(edge.getId())) {
+                // E50-07 (ADR-0065): сетка может не прошить узкий свободный
+                // коридор у своего ОКС — точный visibility-фолбэк ствола.
+                List<Coordinate> fallback = visibilityExitFallback(refined, startPrevious,
+                        terminal.point, obstacleIndex);
+                if (fallback != null) {
+                    refined = fallback;
+                }
+            }
             if (!turnsWithinLimit(refined, refined.size() - 2 - (isTerminal ? 2 : 0))) {
                 warnings.add("FOREST_TURN_UNRESOLVED: участок " + edge.getId());
             }
@@ -1969,6 +2315,12 @@ public class GridForestPlanner {
         stageStart = System.nanoTime();
         edges = repairExitJoints(edges, terminalNodes, pass, obstacleIndex, ownObstacles);
         timings[5] = elapsedMs(stageStart);
+        // ADR-0066: visibility-спрямление подхода к канонической точке выхода —
+        // убирает ступеньки/зигзаги перед `target` (после всех ремонтов).
+        stageStart = System.nanoTime();
+        edges = straightenExitApproaches(edges, terminalsById, terminalNodes, nodes,
+                obstacleIndex);
+        timings[5] += elapsedMs(stageStart);
         stageStart = System.nanoTime();
         try {
             edges = maxLengthEnforcer.enforce(edges, tree.getTieInNodeId());
@@ -2172,6 +2524,22 @@ public class GridForestPlanner {
                                     ObstacleMask pass, ObstacleIndex obstacleIndex,
                                     SpecialZoneIndex specialZones,
                                     Map<String, Set<PreparedGeometry>> ownObstacles) {
+        return relocateChamberWith(nodeId, nodes, edges, rootId, dataset, pass, obstacleIndex,
+                specialZones, ownObstacles, null, false);
+    }
+
+    /**
+     * ADR-0066: то же, но с принудительным кандидатом и терминал-осведомлёнными
+     * стыками ({@code terminalAware}) — для привязки камеры к каноническому
+     * {@code target}. Используется отдельным проходом {@code snapExitChambers}.
+     */
+    private boolean relocateChamberWith(String nodeId, Map<String, ForestNode> nodes,
+                                        List<ForestEdge> edges, String rootId,
+                                        NetworkDataset dataset, ObstacleMask pass,
+                                        ObstacleIndex obstacleIndex,
+                                        SpecialZoneIndex specialZones,
+                                        Map<String, Set<PreparedGeometry>> ownObstacles,
+                                        Coordinate forced, boolean terminalAware) {
         ForestNode node = nodes.get(nodeId);
         if (node == null) {
             return false;
@@ -2189,9 +2557,13 @@ public class GridForestPlanner {
         Set<Integer> incidentSet = new HashSet<>(incident);
         List<String> ignoredWarnings = new ArrayList<>();
         List<Stub> stubs = new ArrayList<>();
+        // ADR-0067: для корня стык терминала — канонический `target`: медиана
+        // проекций и стоимость ствола считаются до выхода, а не до первой
+        // сеточной вершины.
+        boolean aware = terminalAware || nodeId.equals(rootId);
         for (int index : incident) {
-            Stub stub = stub(index, edges.get(index), nodeId, ownObstacles, specialZones,
-                    ignoredWarnings);
+            Stub stub = stub(index, edges.get(index), nodeId, aware, nodes, ownObstacles,
+                    specialZones, ignoredWarnings);
             if (stub == null) {
                 return false;
             }
@@ -2202,7 +2574,9 @@ public class GridForestPlanner {
             currentStubSum += stub.oldStubLen;
         }
         boolean isRoot = nodeId.equals(rootId);
-        List<Coordinate> candidates = chamberCandidates(node, stubs, isRoot, dataset, pass);
+        List<Coordinate> candidates = forced != null
+                ? List.of(new Coordinate(forced))
+                : chamberCandidates(node, stubs, isRoot, dataset, pass);
         // Выбор кандидата по дешёвой локальной дельте стоимости стыков; полная
         // пересборка (enforce + оценка S) — только для лучшего кандидата.
         long bestCheap = 0L;
@@ -2233,7 +2607,7 @@ public class GridForestPlanner {
             }
             if (cheap < bestCheap - EPS) {
                 bestCheap = cheap;
-                bestPosition = candidate;
+                bestPosition = move.position != null ? move.position : candidate;
                 bestReplaced = move.replaced;
             }
         }
@@ -2259,6 +2633,111 @@ public class GridForestPlanner {
         edges.addAll(candidateEdges);
         nodes.put(nodeId, node.toBuilder().coordinate(bestPosition).build());
         return true;
+    }
+
+    /**
+     * ADR-0066/E50-08: отдельный проход привязки новых камер к каноническому
+     * {@code target}. Срабатывает, только если камера уже в пределах
+     * {@code forest-exit-snap-m} от точки выхода (микрозвено) — переносит камеру
+     * точно в {@code target}, устраняя дубли/микро-звено и угол на выходе.
+     * Не трогает корни (обязаны остаться на сети) и существующие камеры.
+     */
+    private List<ForestTree> snapExitChambers(List<ForestTree> trees, ObstacleIndex obstacleIndex,
+                                              SpecialZoneIndex specialZones,
+                                              Map<String, Set<PreparedGeometry>> ownObstacles,
+                                              Map<Integer, Terminal> terminalCells) {
+        if (!appProperties.isForestExitRegularization() || obstacleIndex == null) {
+            return trees;
+        }
+        double snap = appProperties.getForestExitSnapM();
+        Map<String, Terminal> terminalsById = new HashMap<>();
+        for (Terminal term : new LinkedHashSet<>(terminalCells.values())) {
+            terminalsById.put(term.pointId, term);
+        }
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
+            List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
+            String rootId = tree.getTieInNodeId();
+            boolean changed = true;
+            while (changed) {
+                changed = false;
+                List<String> chamberIds = new ArrayList<>();
+                for (ForestNode node : nodes.values()) {
+                    if (node.getType() == NodeType.CHAMBER && !node.isExisting()
+                            && !node.getId().equals(rootId)) {
+                        chamberIds.add(node.getId());
+                    }
+                }
+                Collections.sort(chamberIds);
+                for (String nodeId : chamberIds) {
+                    Coordinate target = nearbyTerminalTarget(nodeId, nodes, edges, terminalsById,
+                            snap);
+                    if (target != null && relocateChamberWith(nodeId, nodes, edges, rootId, null,
+                            null, obstacleIndex, specialZones, ownObstacles, target, true)) {
+                        changed = true;
+                    }
+                }
+            }
+            result.add(ForestTree.builder().tieInNodeId(rootId).nodes(nodes).edges(edges).build());
+        }
+        return result;
+    }
+
+    /**
+     * ADR-0067: финальное visibility-спрямление всех терминальных подходов
+     * после переносов камер/корней (соединители пересобираются и могут терять
+     * короткий путь). Не меняет топологию, только геометрию рёбер.
+     */
+    private List<ForestTree> straightenExitApproachesPost(List<ForestTree> trees,
+                                                          ObstacleIndex obstacleIndex,
+                                                          Map<Integer, Terminal> terminalCells) {
+        if (!appProperties.isForestExitRegularization() || obstacleIndex == null) {
+            return trees;
+        }
+        Map<String, Terminal> terminalsById = new HashMap<>();
+        for (Terminal term : new LinkedHashSet<>(terminalCells.values())) {
+            terminalsById.put(term.pointId, term);
+        }
+        Set<String> terminalNodes = terminalsById.keySet();
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            List<ForestEdge> edges = straightenExitApproaches(tree.getEdges(), terminalsById,
+                    terminalNodes, tree.getNodes(), obstacleIndex);
+            result.add(ForestTree.builder().tieInNodeId(tree.getTieInNodeId())
+                    .nodes(tree.getNodes()).edges(edges).build());
+        }
+        return result;
+    }
+
+    /** Ближайший канонический {@code target} терминала в пределах {@code snap} от камеры. */
+    private Coordinate nearbyTerminalTarget(String nodeId, Map<String, ForestNode> nodes,
+                                            List<ForestEdge> edges,
+                                            Map<String, Terminal> terminalsById, double snap) {
+        ForestNode node = nodes.get(nodeId);
+        if (node == null || node.getCoordinate() == null) {
+            return null;
+        }
+        for (ForestEdge edge : edges) {
+            boolean from = edge.getFromNodeId().equals(nodeId);
+            boolean to = edge.getToNodeId().equals(nodeId);
+            if (!from && !to) {
+                continue;
+            }
+            Terminal term = terminalsById.get(from ? edge.getToNodeId() : edge.getFromNodeId());
+            if (term == null || term.tail.isEmpty()) {
+                continue;
+            }
+            List<Coordinate> coords = edge.getCoordinates();
+            if (coords.size() < 3) {
+                continue;
+            }
+            Coordinate target = from ? coords.get(coords.size() - 2) : coords.get(1);
+            if (node.getCoordinate().distance(target) <= snap) {
+                return target;
+            }
+        }
+        return null;
     }
 
     /**
@@ -2377,7 +2856,8 @@ public class GridForestPlanner {
             }
             ForestEdge edge = edges.get(i);
             String nodeId = (edge.getFromNodeId().equals(a) || edge.getToNodeId().equals(a)) ? a : b;
-            Stub stub = stub(i, edge, nodeId, ownObstacles, specialZones, ignoredWarnings);
+            Stub stub = stub(i, edge, nodeId, false, nodes, ownObstacles, specialZones,
+                    ignoredWarnings);
             if (stub == null) {
                 return false;
             }
@@ -2546,7 +3026,8 @@ public class GridForestPlanner {
         return null;
     }
 
-    private Stub stub(int edgeIndex, ForestEdge edge, String nodeId,
+    private Stub stub(int edgeIndex, ForestEdge edge, String nodeId, boolean terminalAware,
+                      Map<String, ForestNode> nodes,
                       Map<String, Set<PreparedGeometry>> ownObstacles,
                       SpecialZoneIndex specialZones, List<String> ignoredWarnings) {
         List<Coordinate> coords = edge.getCoordinates();
@@ -2558,12 +3039,46 @@ public class GridForestPlanner {
             return null;
         }
         String farId = nodeIsFrom ? edge.getToNodeId() : edge.getFromNodeId();
-        Coordinate endpoint = nodeIsFrom ? coords.get(1) : coords.get(coords.size() - 2);
-        Coordinate nextAfter = coords.size() > 2
-                ? (nodeIsFrom ? coords.get(2) : coords.get(coords.size() - 3)) : null;
-        double oldStubLen = nodeIsFrom
-                ? coords.get(0).distance(coords.get(1))
-                : coords.get(coords.size() - 1).distance(coords.get(coords.size() - 2));
+        ForestNode far = nodes == null ? null : nodes.get(farId);
+        boolean terminal = terminalAware && far != null
+                && far.getType() == NodeType.CONNECTION_POINT;
+        Coordinate endpoint;
+        Coordinate nextAfter;
+        int keepIndex;
+        double oldStubLen;
+        if (terminal) {
+            // ADR-0066: стык терминала — канонический `target` (или точка для
+            // внешней точки); хвост `target→point` остаётся отдельной частью.
+            int last = coords.size() - 1;
+            boolean tail = coords.size() >= 3 && (nodeIsFrom
+                    ? !coords.get(last - 1).equals2D(coords.get(last))
+                    : !coords.get(1).equals2D(coords.get(0)));
+            if (nodeIsFrom) {
+                endpoint = tail ? coords.get(last - 1) : coords.get(last);
+                nextAfter = coords.get(last);
+                keepIndex = tail ? last : coords.size();
+                oldStubLen = 0.0;
+                for (int i = 0; i + 1 <= (tail ? last - 1 : last); i++) {
+                    oldStubLen += coords.get(i).distance(coords.get(i + 1));
+                }
+            } else {
+                endpoint = tail ? coords.get(1) : coords.get(0);
+                nextAfter = coords.get(0);
+                keepIndex = tail ? 1 : 0;
+                oldStubLen = 0.0;
+                for (int i = tail ? 1 : 0; i + 1 < coords.size(); i++) {
+                    oldStubLen += coords.get(i).distance(coords.get(i + 1));
+                }
+            }
+        } else {
+            endpoint = nodeIsFrom ? coords.get(1) : coords.get(coords.size() - 2);
+            nextAfter = coords.size() > 2
+                    ? (nodeIsFrom ? coords.get(2) : coords.get(coords.size() - 3)) : null;
+            keepIndex = nodeIsFrom ? 2 : coords.size() - 2;
+            oldStubLen = nodeIsFrom
+                    ? coords.get(0).distance(coords.get(1))
+                    : coords.get(coords.size() - 1).distance(coords.get(coords.size() - 2));
+        }
         Stub stub = new Stub();
         stub.edgeIndex = edgeIndex;
         stub.dn = edge.getDiameterMm();
@@ -2575,9 +3090,23 @@ public class GridForestPlanner {
         stub.endpoint = endpoint;
         stub.nextAfter = nextAfter;
         stub.nodeIsFrom = nodeIsFrom;
+        stub.keepIndex = keepIndex;
+        stub.terminal = terminal;
         // E50: стык камеры — ствол (не хвост выхода), свой ОКС не игнорируется.
         stub.ignored = Set.of();
         return stub;
+    }
+
+    private List<Coordinate> dedupeConsecutive(List<Coordinate> coords) {
+        List<Coordinate> result = new ArrayList<>(coords.size());
+        for (Coordinate coordinate : coords) {
+            if (!result.isEmpty()
+                    && result.get(result.size() - 1).distance(coordinate) < EPS) {
+                continue;
+            }
+            result.add(coordinate);
+        }
+        return result;
     }
 
     private List<Coordinate> chamberCandidates(ForestNode node, List<Stub> stubs, boolean isRoot,
@@ -2717,16 +3246,27 @@ public class GridForestPlanner {
                     return null;
                 }
                 connector = List.of(new Coordinate(candidate), new Coordinate(stub.endpoint));
-            } else if (allowFallback) {
-                List<Coordinate> path = gridPath(pass, obstacleIndex, candidate, null,
-                        stub.endpoint, stub.nextAfter, stub.ignored, 40000);
-                if (path == null || path.size() < 2
-                        || (specialZones != null && !polylineSpecialOk(path, specialZones))) {
+            } else {
+                // ADR-0067: локальный visibility-коннектор (касание границы
+                // допустимо) — прошивает узкие полосы, недоступные gridPath.
+                List<Coordinate> vis = appProperties.isForestExitRegularization()
+                        ? visibilityPath(candidate, null, stub.endpoint, stub.nextAfter,
+                                obstacleIndex, candidate.distance(stub.endpoint))
+                        : null;
+                if (vis != null && vis.size() >= 2
+                        && (specialZones == null || polylineSpecialOk(vis, specialZones))) {
+                    connector = vis;
+                } else if (allowFallback) {
+                    List<Coordinate> path = gridPath(pass, obstacleIndex, candidate, null,
+                            stub.endpoint, stub.nextAfter, stub.ignored, 40000);
+                    if (path == null || path.size() < 2
+                            || (specialZones != null && !polylineSpecialOk(path, specialZones))) {
+                        return null;
+                    }
+                    connector = path;
+                } else {
                     return null;
                 }
-                connector = path;
-            } else {
-                return null;
             }
             connectors.add(connector);
             firstSteps.add(connector.size() >= 2 ? connector.get(1) : stub.endpoint);
@@ -2747,17 +3287,17 @@ public class GridForestPlanner {
             List<Coordinate> connector = connectors.get(s);
             ForestEdge old = edges.get(stub.edgeIndex);
             List<Coordinate> coords = new ArrayList<>();
+            List<Coordinate> oldCoords = old.getCoordinates();
             if (stub.nodeIsFrom) {
-                // старый хвост: [chamber, endpoint, rest...]; новый: connector(candidate..endpoint) + rest
                 coords.addAll(connector);
-                coords.addAll(old.getCoordinates().subList(2, old.getCoordinates().size()));
+                coords.addAll(oldCoords.subList(stub.keepIndex, oldCoords.size()));
             } else {
-                int count = old.getCoordinates().size();
-                coords.addAll(old.getCoordinates().subList(0, count - 2));
+                coords.addAll(oldCoords.subList(0, stub.keepIndex));
                 List<Coordinate> reversed = new ArrayList<>(connector);
                 Collections.reverse(reversed);
                 coords.addAll(reversed);
             }
+            coords = dedupeConsecutive(coords);
             replaced.put(stub.edgeIndex, ForestEdge.builder().id(old.getId())
                     .fromNodeId(rename == null ? old.getFromNodeId()
                             : rename.getOrDefault(old.getFromNodeId(), old.getFromNodeId()))
@@ -2790,6 +3330,7 @@ public class GridForestPlanner {
         move.replaced = replaced;
         move.stubSum = stubSum;
         move.stubLens = stubLens;
+        move.position = candidate;
         return move;
     }
 
@@ -2810,6 +3351,10 @@ public class GridForestPlanner {
         private Coordinate endpoint;
         private Coordinate nextAfter;
         private boolean nodeIsFrom;
+        /** Индекс части ребра, остающейся после стыка (для терминала — хвост). */
+        private int keepIndex;
+        /** Стык терминала: {@code endpoint} — канонический {@code target}/точка. */
+        private boolean terminal;
         private Set<PreparedGeometry> ignored;
     }
 
@@ -2817,6 +3362,8 @@ public class GridForestPlanner {
         private Map<Integer, ForestEdge> replaced;
         private double stubSum;
         private List<Double> stubLens;
+        /** Точка, в которую фактически перенесена камера (с учётом snap). */
+        private Coordinate position;
     }
 
     private boolean rootConnectorTurnsOk(Coordinate q, ForestNode branch, ForestTree tree) {
@@ -3435,6 +3982,172 @@ public class GridForestPlanner {
             return via;
         }
         return null;
+    }
+
+    /**
+     * E50-07 (спайк): visibility-фолбэк терминального ствола. Когда сетка не
+     * прошивает узкий свободный коридор у своего ОКС (клетка 1 м не
+     * представляет полосу уже ячейки), ствол перетрассировывается точным
+     * поиском по вершинам запретных буферов. Касание границы буфера допустимо
+     * ({@link ObstacleIndex#isInteriorBlocked}), канонический хвост
+     * {@code target→point} сохраняется. Возвращает {@code null}, если фолбэк
+     * неприменим или не даёт выигрыша.
+     */
+    List<Coordinate> visibilityExitFallback(List<Coordinate> coords,
+                                            Coordinate startPrevious,
+                                            Coordinate point,
+                                            ObstacleIndex obstacleIndex) {
+        if (!appProperties.isForestExitVisibilityFallback() || obstacleIndex == null
+                || coords.size() < 3) {
+            return null;
+        }
+        Coordinate start = coords.get(0);
+        Coordinate target = coords.get(coords.size() - 2);
+        double straight = start.distance(target);
+        if (straight < EPS || !obstacleIndex.isInteriorBlocked(line(start, target))) {
+            return null;
+        }
+        double current = 0.0;
+        for (int i = 0; i + 1 < coords.size() - 1; i++) {
+            current += coords.get(i).distance(coords.get(i + 1));
+        }
+        double detour = current - straight;
+        if (detour < appProperties.getForestExitVisibilityMinDetourM()
+                || detour > appProperties.getForestExitVisibilityMaxDetourM()) {
+            return null;
+        }
+        log.debug("E50-07 exit visibility fallback attempt: trunk={} straight={}",
+                Math.round(current), Math.round(straight));
+        List<Coordinate> path = visibilityPath(start, startPrevious, target, point, obstacleIndex,
+                straight);
+        if (path == null || path.size() < 2) {
+            log.debug("E50-07 exit visibility fallback: path not found");
+            return null;
+        }
+        double candidate = 0.0;
+        for (int i = 0; i + 1 < path.size(); i++) {
+            candidate += path.get(i).distance(path.get(i + 1));
+        }
+        if (candidate > current - 0.5) {
+            return null;
+        }
+        List<Coordinate> rebuilt = new ArrayList<>(path);
+        rebuilt.add(point);
+        if (!turnsWithinLimit(rebuilt, rebuilt.size() - 3)) {
+            return null;
+        }
+        log.debug("E50-07 exit visibility fallback applied: {} -> {}", Math.round(current),
+                Math.round(candidate));
+        return rebuilt;
+    }
+
+    /**
+     * Видимость-поиск {@code start→target} по вершинам запретных буферов в
+     * окрестности прямого отрезка; рёбра, входящие во внутреннюю часть запрета,
+     * отбрасываются (касание границы допустимо). Угол поворота ≤
+     * {@code forest-max-turn-deg}, включая стыки со стартовым подходом и хвостом
+     * {@code target→point}.
+     */
+    private List<Coordinate> visibilityPath(Coordinate start, Coordinate startPrevious,
+                                            Coordinate target, Coordinate point,
+                                            ObstacleIndex obstacleIndex, double straight) {
+        double expand = Math.max(25.0, 0.2 * straight);
+        Envelope area = new Envelope(start, target);
+        area.expandBy(expand);
+        List<Geometry> obstacles = new ArrayList<>(obstacleIndex.obstaclesIn(area));
+        LineString direct = line(start, target);
+        obstacles.sort(Comparator.comparingDouble(obstacle -> obstacle.distance(direct)));
+
+        List<Coordinate> nodes = new ArrayList<>();
+        nodes.add(start);
+        nodes.add(target);
+        Set<Long> seen = new HashSet<>();
+        seen.add(visibilityKey(start));
+        seen.add(visibilityKey(target));
+        int maxNodes = Math.max(8, appProperties.getForestExitVisibilityMaxNodes());
+        for (Geometry obstacle : obstacles) {
+            for (Coordinate vertex : obstacle.getCoordinates()) {
+                if (!seen.add(visibilityKey(vertex))) {
+                    continue;
+                }
+                nodes.add(vertex);
+                if (nodes.size() >= maxNodes) {
+                    break;
+                }
+            }
+            if (nodes.size() >= maxNodes) {
+                break;
+            }
+        }
+
+        int n = nodes.size();
+        double maxEdge = straight + 2.0 * expand;
+        double[] distance = new double[n];
+        int[] previous = new int[n];
+        boolean[] settled = new boolean[n];
+        Arrays.fill(distance, Double.POSITIVE_INFINITY);
+        Arrays.fill(previous, -1);
+        distance[0] = 0.0;
+        for (int iteration = 0; iteration < n; iteration++) {
+            int current = -1;
+            double best = Double.POSITIVE_INFINITY;
+            for (int i = 0; i < n; i++) {
+                if (!settled[i] && distance[i] < best) {
+                    best = distance[i];
+                    current = i;
+                }
+            }
+            if (current == -1) {
+                break;
+            }
+            if (current == 1) {
+                return reconstructVisibility(nodes, previous);
+            }
+            settled[current] = true;
+            for (int next = 0; next < n; next++) {
+                if (settled[next] || next == current) {
+                    continue;
+                }
+                Coordinate a = nodes.get(current);
+                Coordinate b = nodes.get(next);
+                double edge = a.distance(b);
+                if (edge > maxEdge || obstacleIndex.isInteriorBlocked(line(a, b))) {
+                    continue;
+                }
+                if (current == 0) {
+                    if (!turnAllowed(startPrevious, a, b)) {
+                        continue;
+                    }
+                } else if (!turnAllowed(nodes.get(previous[current]), a, b)) {
+                    continue;
+                }
+                if (next == 1 && !turnAllowed(a, target, point)) {
+                    continue;
+                }
+                double candidate = distance[current] + edge;
+                if (candidate < distance[next]) {
+                    distance[next] = candidate;
+                    previous[next] = current;
+                }
+            }
+        }
+        return null;
+    }
+
+    private List<Coordinate> reconstructVisibility(List<Coordinate> nodes, int[] previous) {
+        List<Coordinate> path = new ArrayList<>();
+        int current = 1;
+        while (current != -1) {
+            path.add(nodes.get(current));
+            current = previous[current];
+        }
+        Collections.reverse(path);
+        return path;
+    }
+
+    private long visibilityKey(Coordinate coordinate) {
+        return Math.round(coordinate.x * 100.0) * 1_000_000_007L
+                + Math.round(coordinate.y * 100.0);
     }
 
     /** Допустимо ли завершение в цели: не тривиальный старт и стык ≤90°. */

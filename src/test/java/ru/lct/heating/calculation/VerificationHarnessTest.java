@@ -48,12 +48,24 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
             properties.setForestRootOptimization(
                     Boolean.parseBoolean(System.getProperty("verify.rootOptimization")));
         }
+        if (System.getProperty("verify.exitVisibilityFallback") != null) {
+            properties.setForestExitVisibilityFallback(
+                    Boolean.parseBoolean(System.getProperty("verify.exitVisibilityFallback")));
+        }
+        if (System.getProperty("verify.exitRegularization") != null) {
+            properties.setForestExitRegularization(
+                    Boolean.parseBoolean(System.getProperty("verify.exitRegularization")));
+        }
 
         ObjectMapper mapper = new ObjectMapper();
         Path result = tempDir.resolve("verify-result.geojson");
         Path summary = tempDir.resolve("verify-summary.json");
         CalculationOutcome outcome = service(properties).calculate(dataset, result, summary);
         assertThat(outcome.getSummary()).isNotNull();
+        String dump = System.getProperty("verify.out", "");
+        if (!dump.isBlank()) {
+            Files.copy(result, Path.of(dump), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
 
         int selfIntersections = countSelfIntersections(result, mapper);
         int turnViolations = countTurnViolations(result, mapper);

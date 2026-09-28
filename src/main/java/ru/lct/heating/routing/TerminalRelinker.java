@@ -273,6 +273,12 @@ public class TerminalRelinker {
                 List<Coordinate> tps = tPoints(edge, target);
                 ctx.stats.addTpoints(tps.size());
                 for (Coordinate p : tps) {
+                    // ADR-0066: T-точку ближе порога к `target` привязываем к
+                    // самому `target` — ветка становится каноническим хвостом.
+                    if (appProperties.isForestExitRegularization()
+                            && p.distance(target) <= appProperties.getForestExitSnapM()) {
+                        p = new Coordinate(target);
+                    }
                     if (p.equals2D(edge.coords.get(0))
                             || p.equals2D(edge.coords.get(edge.coords.size() - 1))) {
                         continue;
@@ -691,8 +697,11 @@ public class TerminalRelinker {
                         Coordinate point, List<Coordinate> tail, String id) {
         List<Coordinate> coords = new ArrayList<>();
         coords.add(from);
-        coords.add(target);
-        if (!target.equals2D(point)) {
+        if (!from.equals2D(target)) {
+            coords.add(target);
+        }
+        if (!target.equals2D(point) && (coords.isEmpty() || !coords.get(coords.size() - 1)
+                .equals2D(point))) {
             coords.add(point);
         }
         return new Edge(id, fromId, toId, coords);

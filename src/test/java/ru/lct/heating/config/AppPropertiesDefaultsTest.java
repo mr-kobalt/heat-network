@@ -36,6 +36,14 @@ class AppPropertiesDefaultsTest {
         assertThat(properties.getTieInChamberExclusionM()).isEqualTo(1.0);
         assertThat(properties.isForestGridIncludeInputBounds()).isTrue();
         assertThat(properties.isForestDiameterOptimizer()).isTrue();
+        assertThat(properties.isForestExitVisibilityFallback()).isTrue();
+        assertThat(properties.getForestExitVisibilityMinDetourM()).isEqualTo(2.0);
+        assertThat(properties.getForestExitVisibilityMaxDetourM()).isEqualTo(10.0);
+        assertThat(properties.getForestExitVisibilityMaxAttempts()).isEqualTo(200);
+        assertThat(properties.getForestExitVisibilityMaxNodes()).isEqualTo(200);
+        assertThat(properties.isForestExitRegularization()).isTrue();
+        assertThat(properties.getForestExitSnapM()).isEqualTo(1.0);
+        assertThat(properties.getForestExitMicroM()).isEqualTo(0.5);
     }
 
     @Test

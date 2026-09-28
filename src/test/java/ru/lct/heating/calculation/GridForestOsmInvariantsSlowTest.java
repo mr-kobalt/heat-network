@@ -64,14 +64,14 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertThat(outcome.getSummary().getScore())
-                .isCloseTo(13.760946722308471, within(1e-6));
+                .isCloseTo(13.679614324110897, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1985.2214941028237, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(278760080L);
+                .isCloseTo(1970.8629960369658, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(277393762L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
         assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
         assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
-        assertThat(turns).isEqualTo(3L);
+        assertThat(turns).isEqualTo(0L);
     }
 
     /**
@@ -92,13 +92,13 @@ class GridForestOsmInvariantsSlowTest extends AbstractCalculationPipelineTest {
 
         assertThat(outcome.getSummary().getUnconnectedOksIds()).isEmpty();
         assertThat(outcome.getSummary().getScore())
-                .isCloseTo(13.760834465602223, within(1e-6));
+                .isCloseTo(13.682035191484873, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1985.1377912007415, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(278765039L);
+                .isCloseTo(1969.6071824949581, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(277614773L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(50000000L);
         assertThat(outcome.getSummary().getExistingChamberTieInCount()).isZero();
         assertThat(outcome.getSummary().getExistingChamberTieInCost()).isZero();
-        assertThat(turns).isEqualTo(3L);
+        assertThat(turns).isEqualTo(0L);
     }
 }

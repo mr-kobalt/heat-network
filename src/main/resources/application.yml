@@ -144,6 +144,16 @@ heating:
     # E25-05b: буферы по фактическому Ду (пересборка индекса и повтор расчёта).
     forest-diameter-aware-buffers: ${HEATING_FOREST_DIAMETER_AWARE_BUFFERS:false}
     forest-diameter-aware-iterations: ${HEATING_FOREST_DIAMETER_AWARE_ITERATIONS:2}
+    # E50-07/ADR-0065: visibility-фолбэк терминального ребра в узком коридоре.
+    forest-exit-visibility-fallback: ${HEATING_FOREST_EXIT_VISIBILITY_FALLBACK:true}
+    forest-exit-visibility-min-detour-m: ${HEATING_FOREST_EXIT_VISIBILITY_MIN_DETOUR_M:2.0}
+    forest-exit-visibility-max-detour-m: ${HEATING_FOREST_EXIT_VISIBILITY_MAX_DETOUR_M:10.0}
+    forest-exit-visibility-max-attempts: ${HEATING_FOREST_EXIT_VISIBILITY_MAX_ATTEMPTS:200}
+    forest-exit-visibility-max-nodes: ${HEATING_FOREST_EXIT_VISIBILITY_MAX_NODES:200}
+    # ADR-0066/E50-08: регуляризация выхода терминала (спрямление, привязка камеры).
+    forest-exit-regularization: ${HEATING_FOREST_EXIT_REGULARIZATION:true}
+    forest-exit-snap-m: ${HEATING_FOREST_EXIT_SNAP_M:1.0}
+    forest-exit-micro-m: ${HEATING_FOREST_EXIT_MICRO_M:0.5}
     # ADR-0062: глобальный оптимизатор Ду на всё дерево (участки + камеры).
     forest-diameter-optimizer: ${HEATING_FOREST_DIAMETER_OPTIMIZER:true}
     forest-diameter-optimizer-max-states: ${HEATING_FOREST_DIAMETER_OPTIMIZER_MAX_STATES:500000}

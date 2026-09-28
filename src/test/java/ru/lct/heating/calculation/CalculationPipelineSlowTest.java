@@ -74,10 +74,17 @@ class CalculationPipelineSlowTest extends AbstractCalculationPipelineTest {
         // (вектор подхода) исправлен. E50-05 (2026-09-26): объединение близких
         // новых камер (`forest-chamber-merge=true`, ремонт углов на кандидата
         // `forest-chamber-merge-repair=true`, без grid-фолбэка) — S 13.5552 → 13.4250.
-        assertThat(outcome.getSummary().getScore()).isCloseTo(13.425000323963804, within(1e-6));
+        // ADR-0065 (2026-09-28): visibility-фолбэк терминального ствола включён по
+        // умолчанию (`forest-exit-visibility-fallback=true`) — S 13.4250 → 13.4204.
+        // ADR-0066 (2026-09-28): регуляризация выхода терминала
+        // (`forest-exit-regularization=true`) — спрямление подхода и привязка камер
+        // к `target`; S 13.4204 → 13.4077. ADR-0067 (2026-09-28): локальные
+        // visibility-коннекторы камер/корней + отбраковка невалидных вариантов —
+        // S 13.4077 → 13.2993.
+        assertThat(outcome.getSummary().getScore()).isCloseTo(13.29925214746317, within(1e-6));
         assertThat(outcome.getSummary().getNewNetworkLengthM())
-                .isCloseTo(1913.0945613212682, within(1e-3));
-        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(274489880L);
+                .isCloseTo(1890.0622718210566, within(1e-3));
+        assertThat(outcome.getSummary().getCalculatedCost()).isEqualTo(272466619L);
         assertThat(outcome.getSummary().getChamberConstructionCost()).isEqualTo(55000000L);
         assertThat(outcome.getWarnings().stream()
                 .filter(warning -> warning.startsWith("TURN_ANGLE_EXCEEDS_90")).count())
