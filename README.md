@@ -1,112 +1,134 @@
 # Heating Routing Service
 
-Сервис моделирования трасс подключения перспективных объектов капитального
-строительства (ОКС) к существующей тепловой сети. Кейс «Лидеры цифровой
-трансформации» 2026.
+Сервис автоматического построения трасс подключения перспективных объектов
+капитального строительства (ОКС) к существующей тепловой сети. Кейс «Лидеры
+цифровой трансформации» 2026.
 
-Сервис обрабатывает один совмещённый GeoJSON, автоматически выбирает точки
-врезки, строит новую сеть (с общими участками для нескольких ОКС), считает
-расходы и условные диаметры, определяет реконструкцию существующей сети,
-рассчитывает стоимость, формирует до трёх вариантов и выгружает результат
-в GeoJSON.
+Сервис принимает один совмещённый GeoJSON, автоматически выбирает места
+присоединения через тепловые камеры, строит новую сеть (с общими участками для
+нескольких ОКС), считает расходы и подбирает условные диаметры (Ду) совместно с
+предельной длиной по путям, учитывает пространственные ограничения и
+спецпроходы, рассчитывает стоимость, формирует до трёх вариантов и выгружает
+результат в GeoJSON.
 
-Сервис headless (без UI) и работает офлайн; оценивается корректность GeoJSON
-и расчёта, а не визуализация (см. [протокол встречи](source/) и
-[docs/index.md](docs/index.md)).
+Сервис **headless** (без UI) и работает **офлайн**; оценивается корректность
+GeoJSON и расчёта, а не визуализация (см. [docs/index.md](docs/index.md)).
 
-> Текущий статус: **M1 — рабочий прототип**. Реализованы потоковый ввод
-> GeoJSON, диагностика, граф существующей сети, конфигурируемые ограничения,
-> частичная маршрутизация, подбор Ду и стоимость, выгрузка GeoJSON, REST API
-> и PostgreSQL. Добавлен опциональный фронтенд-визуализатор. Дальше — M2
-> (совместные стволы, реконструкция, варианты). См.
-> [дорожную карту](docs/04-delivery/roadmap.md).
-
-## Документация
-
-Начните с [docs/index.md](docs/index.md). Кратко:
-- [Устав](docs/01-project/charter.md) — зачем и что делаем.
-- [Требования](docs/01-project/requirements.md) — FR/NFR.
-- [Правила расчёта](docs/02-domain/calculation-rules.md) — таблицы и формулы.
-- [Архитектура](docs/03-architecture/overview.md) и [алгоритм](docs/03-architecture/algorithm.md).
-- [Дорожная карта](docs/04-delivery/roadmap.md) и [backlog](docs/04-delivery/backlog.md).
-
-## Стек
-
-Java 11 · Spring Boot 2.6.3 · Maven · PostgreSQL 18 + PostGIS ·
-springdoc-openapi-ui 1.7.0 · docker-compose · JTS.
+> Статус: **M2 (обязательная 2D-задача, ТП v2) реализована**; дополнительно
+> реализован необязательный режим глубины **M4** (ADR-0073). Ведётся подготовка
+> к финальной сдаче **M5**. См. [дорожную карту](docs/04-delivery/roadmap.md).
 
 ## Быстрый старт
 
-Требуется [devenv](https://devenv.sh), Nix и docker/podman (для БД).
+Есть три равнозначных способа; для проверки достаточно первого.
+
+### Только Docker (ничего ставить не нужно, кроме Docker)
 
 ```bash
-devenv shell         # оболочка с Java 11, Maven, Node/pnpm
-
-db-up                # PostgreSQL + PostGIS из docker-compose
-build                # сборка
-test                 # тесты
-run                  # запуск сервиса (http://localhost:8080)
-verify               # полная проверка
+docker compose up --build -d      # app + PostgreSQL/PostGIS
+# API:        http://localhost:8080
+# Swagger UI: http://localhost:8080/swagger-ui.html
+# Health:     http://localhost:8080/actuator/health
+docker compose down
 ```
 
-Проверка окружения:
+### Make + JDK 11 (без nix/devenv)
+
+Maven подтягивается автоматически через Maven Wrapper (`./mvnw`).
 
 ```bash
-devenv test
+make db-up        # PostgreSQL + PostGIS из docker-compose
+make build        # сборка jar
+make test         # быстрые тесты
+make run          # запуск сервиса (http://localhost:8080)
+make verify       # полная проверка
+make down         # остановить и удалить стек
 ```
 
-Запуск через Docker (без локального тулчейна):
+Полный список команд: `make help`.
+
+### devenv (Nix)
 
 ```bash
-docker compose up --build
+devenv shell      # Java 11, Maven, Node/pnpm, make, pdftotext/pandoc
+devenv test       # smoke окружения
+dev               # БД + приложение + визуализатор (Ctrl+C — стоп)
 ```
 
-- API: http://localhost:8080
-- Swagger UI: http://localhost:8080/swagger-ui.html
-- Health: http://localhost:8080/actuator/health
-- Info: http://localhost:8080/api/v1/info
+devenv-скрипты (`build`, `test`, `dev`, `db-up`, `fe-up`, …) — тонкие обёртки
+над соответствующими целями `make`.
 
 ### Локальный запуск приложения
 
 БД поднимается только через docker-compose (ADR-0017) на TCP `localhost:5432`
-(БД/пользователь `heating`); `devenv` БД не запускает.
+(БД/пользователь `heating`); devenv БД не запускает.
 
 ```bash
-db-up                       # docker compose up -d db
-run                         # mvn spring-boot:run из оболочки devenv
+make db-up
+make run
 ```
+
+## Команды (Makefile)
+
+| Команда | Назначение |
+|---------|------------|
+| `make help` | Список команд |
+| `make compile` / `build` | Компиляция / сборка jar без тестов |
+| `make test` / `test-slow` | Быстрые / полные (slow) тесты |
+| `make verify` | Полная проверка Maven |
+| `make run` | Локальный запуск сервиса |
+| `make fe-install` / `fe-dev` / `fe-build` / `fe-test` | Визуализатор (опционально) |
+| `make db-up` / `db-down` / `db-logs` | Контейнер БД |
+| `make up` / `fe-up` / `stop` / `down` / `ps` | Docker-стек (app+db, опц. frontend) |
+| `make compose-config` | Проверка `docker-compose.yml` |
+| `make dev` | БД + приложение + визуализатор |
+| `make deploy` | Развёртывание стека (app + db + визуализатор) |
 
 ## Фронтенд-визуализатор (опционально)
 
 Отдельное SPA для проверки результата: карта, параметры объектов, сравнение
-вариантов. Не входит в оцениваемую поставку (ADR-0013).
+вариантов, просмотр промежуточных этапов алгоритма. **Не входит в оцениваемую
+поставку** (ADR-0013).
 
 ```bash
-pnpm --dir frontend install
-pnpm --dir frontend dev      # http://localhost:5173 (proxy /api → :8080)
-pnpm --dir frontend build
+make fe-install
+make fe-dev        # http://localhost:5173 (proxy /api → :8080)
+make fe-build
+make fe-test
 ```
 
 Через Docker (весь стек app + db + визуализатор):
 
 ```bash
-fe-up        # docker compose --profile frontend up --build -d
-stop         # остановить контейнеры (без удаления)
-down         # остановить и удалить стек
+make fe-up         # docker compose --profile frontend up --build -d
+make stop          # остановить контейнеры (без удаления)
+make down          # остановить и удалить стек
 ```
 
 Визуализатор: http://localhost:8081, сервис: http://localhost:8080.
 
-Визуализатор умеет открыть GeoJSON результата напрямую (без backend) и
-запустить расчёт через API. Дополнительный режим с учётом глубины запускается
-как `POST /api/v1/datasets/{id}/runs?mode=depth` (ADR-0073, отдельный набор
-вариантов). При расчёте через сервис запуск помечается
-`?trace=true`, и визуализатор показывает промежуточные этапы алгоритма
-(`grid-forest`) вкладками: «Вход → Сеть → Ограничения → Выходы → Сетка →
-Деревья (#проход) → Переподключение → Refine → Итог» (ADR-0036/0037/0038); проходы поиска
-доступны из заголовка «Деревья» и возвращаются как отдельные варианты. Данные
-этапов — `GET /api/v1/runs/{id}/stages[/{stageId}]`. Офлайн-подложка PMTiles —
-см. `frontend/public/basemap/README.md`.
+Визуализатор открывает GeoJSON результата напрямую (без backend) и запускает
+расчёт через API, в том числе дополнительный режим глубины
+`POST /api/v1/datasets/{id}/runs?mode=depth` (ADR-0073). При расчёте через
+сервис доступна постадийная трассировка (`?trace=true`) с вкладками этапов
+(ADR-0036…0038); данные этапов — `GET /api/v1/runs/{id}/stages[/{stageId}]`.
+Офлайн-подложка PMTiles — `frontend/public/basemap/README.md`.
+
+## Документация
+
+Начните с [docs/index.md](docs/index.md). Ключевое:
+
+- [Устав](docs/01-project/charter.md), [требования](docs/01-project/requirements.md).
+- [Правила расчёта](docs/02-domain/calculation-rules.md), [модель данных](docs/02-domain/data-model.md).
+- [Архитектура](docs/03-architecture/overview.md), [алгоритм](docs/03-architecture/algorithm.md), [ADR](docs/03-architecture/adr/README.md).
+- [Дорожная карта](docs/04-delivery/roadmap.md), [backlog](docs/04-delivery/backlog.md).
+- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [структура презентации](docs/06-submission/presentation-outline.md).
+
+## Стек
+
+Java 11 · Spring Boot 2.6.3 · Maven (Wrapper) · PostgreSQL 16 + PostGIS ·
+springdoc-openapi-ui 1.7.0 · docker-compose · JTS · Proj4J.
+Визуализатор: React 18 + TypeScript + Vite + MapLibre (LTS).
 
 ## Структура репозитория
 
@@ -116,20 +138,25 @@ src/main/resources/             # application*.yml, schema.sql
 src/test/                       # тесты
 frontend/                       # опциональный визуализатор (React/MapLibre)
 docs/                           # проектная документация
-devenv.nix                      # среда разработки
-pom.xml                         # сборка Maven
+source/                         # ТЗ, ТП v2, разъяснения, датасеты, регламенты
+scripts/                        # генераторы наборов и утилиты
+Makefile                        # единый интерфейс команд
+mvnw / .mvn/                    # Maven Wrapper
+devenv.nix                      # среда разработки (опционально)
 Dockerfile / docker-compose.yml # контейнеризация
+.github/workflows/ci.yml        # CI: backend + frontend + compose
 ```
 
 ## Исходные материалы
 
-См. папку [`source/`](source/):
+См. папку [`source/`](source/): описание кейса, ТП v2, разъяснения, протокол
+встречи, основной датасет, регламенты конкурса и шаблон презентации. Состав и
+приоритет источников — в [docs/index.md](docs/index.md).
 
-- `2. ДИТ.pdf` — описание кейса.
-- `Техническое приложение.docx` — правила и форматы.
-- `data_example.geojson` — образец набора (неполный, см.
-  [анализ](docs/05-data/sample-dataset-analysis.md)).
-- `Протокол встречи 16.09.2026.md` — ответы организатора на вопросы участников.
+## Лицензия и данные
+
+Расчёт полностью офлайн, без обращения к внешним сервисам. Секреты и большие
+датасеты в репозиторий не коммитятся.
 
 ## История изменений
 
@@ -144,4 +171,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-22 | ADR-0036: opt-in поэтапная трассировка (`?trace=true`, API `/runs/{id}/stages`) и вкладки этапов в визуализаторе | команда |
 | 2026-09-29 | ADR-0073: дополнительный режим глубины `?mode=depth` | команда |
 | 2026-09-29 | Визуализатор: выбор режима `2D/Глубина` (ADR-0073), запоминание в localStorage | команда |
-| 2026-09-22 | ADR-0037: буферы по мин. Ду, выход ОКС по внешнему контуру своей компоненты (узкий промежуток, выбор по достижимости), кандидаты врезки 1 м, границы сетки по всему входу, варианты по проходам | команда |
+| 2026-09-29 | M5: Makefile (единый интерфейс), Maven Wrapper, CI, devenv-обёртки; актуализирован README; регламенты конкурса и пакет сдачи | команда |

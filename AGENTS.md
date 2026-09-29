@@ -31,21 +31,22 @@ springdoc-openapi-ui 1.7.0 · JTS · docker-compose. Ubuntu Server 22.
 
 ## Команды
 
+Единый интерфейс — корневой `Makefile` (`make help`). devenv-скрипты и
+`./mvnw` — обёртки; устанавливать nix не обязательно.
+
 ```bash
-devenv shell                       # Java 11 + Maven + Node/pnpm
-dev                                # dev-режим: db-up + run + fe-dev (Ctrl+C — стоп)
-db-up                              # PostgreSQL + PostGIS (docker-compose)
-mvn -B -DskipTests compile         # компиляция
-mvn -B test                        # быстрые тесты (slow исключены, ~секунды)
-mvn -B test -Dsurefire.excludedGroups= -Dgroups=slow  # полный набор (slow)
-mvn -B verify                      # полная проверка
-devenv test                        # smoke окружения
-docker compose config              # если менялась инфраструктура
-fe-up                              # весь стек app+db+frontend в Docker
-stop                               # остановить контейнеры (без удаления)
-down                               # остановить и удалить стек (podman-safe)
-pnpm --dir frontend dev            # визуализатор (dev)
-pnpm --dir frontend build          # сборка визуализатора
+make help                          # список команд
+make compile / build / test / verify
+make test-slow                     # полный набор (slow)
+make run                           # локальный запуск сервиса
+make dev                           # БД + приложение + визуализатор (Ctrl+C — стоп)
+make db-up / db-down / db-logs     # PostgreSQL + PostGIS (docker-compose)
+make up / fe-up / stop / down / ps # Docker-стек (app+db, опц. frontend)
+make compose-config                # если менялась инфраструктура
+make fe-install / fe-dev / fe-build / fe-test
+make deploy                        # развёртывание стека
+./mvnw -B test                     # Maven Wrapper (без установленного Maven)
+devenv shell / devenv test         # окружение nix (опционально)
 pnpm --dir frontend basemap:prepare # локальная карта Москвы и области (PMTiles)
 ```
 
@@ -140,3 +141,4 @@ pnpm --dir frontend basemap:prepare # локальная карта Москвы
 | 2026-09-29 | E59: предупреждения убраны из интерфейса и API; таймер расчёта в уведомлениях и прогресс-бар на вкладке «Данные» | команда |
 | 2026-09-29 | E8-03: реплика + детект/предотвращение меж-тайловой степени; `forest-decomposition` → superseded (ADR-0071) | команда |
 | 2026-09-29 | ADR-0073/E9 (M4): режим глубины `mode=2d|depth`, вертикальный пост-слой `DepthProfileBuilder`, `depth_start`/`depth_end`, `Kгл`, техузлы границ; E9-05/E9-06 — следующие | команда |
+| 2026-09-29 | M5: единый `Makefile` + `./mvnw` + CI; devenv-скрипты делегируют в `make`; в devenv добавлены `poppler-utils`/`pandoc`/`python3`/`make`; README/команды обновлены | команда |

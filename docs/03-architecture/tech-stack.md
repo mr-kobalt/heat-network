@@ -35,34 +35,34 @@
 | MockMvc | Тесты веб-слоя |
 | Testcontainers 1.16.3 (`postgresql`) | Интеграция с реальным PostgreSQL/PostGIS |
 
-## 4. Среда разработки (devenv)
+## 4. Сборка, запуск и среда разработки
 
-devenv отвечает **только за тулчейн** (Java 11, Maven, Node/pnpm);
-PostgreSQL/PostGIS поднимается единственным способом — контейнером `db`
-из docker-compose (ADR-0017).
+**Единый интерфейс команд — корневой `Makefile`** (`make help`). Он не требует
+nix/devenv: достаточно GNU make, JDK 11 (Maven подтягивается через
+**Maven Wrapper** `./mvnw`) и docker/podman для БД/стека. Ключевые цели:
+`compile`, `build`, `test`, `test-slow`, `verify`, `run`, `dev`, `db-*`,
+`up`/`fe-up`/`stop`/`down`/`ps`, `fe-*`, `compose-config`, `deploy`.
 
-Управляется `devenv.nix` / `devenv.yaml` / `devenv.lock`:
-
-- `languages.java` с `pkgs.jdk11`;
-- `languages.maven`;
-- `languages.javascript` (Node 22 + pnpm) для визуализатора;
-- пакеты `git`, `jq`, `curl`, `unzip`;
-- скрипты `build`, `test`, `verify`, `run`, `fe-dev`, `fe-build`,
-  `db-up`, `db-down`, `db-logs`, `up`, `down`, `stop`, `fe-up`, `fe-logs`;
-- `down`/`stop` учитывают особенность podman-compose: сначала `stop`,
-  затем `down --remove-orphans`;
-- `devenv test` — быстрый smoke (Java 11, Maven, Node).
+**devenv** (опционально) отвечает за тулчейн и даёт тонкие обёртки над `make`:
+`languages.java` (`pkgs.jdk11`), `languages.maven`, `languages.javascript`
+(Node 22 + pnpm), пакеты `git`, `jq`, `curl`, `unzip`, `gnumake`,
+`poppler-utils` (`pdftotext` — чтение PDF), `pandoc` (`.docx`), `python3`.
+PostgreSQL/PostGIS поднимается только контейнером `db` из docker-compose
+(ADR-0017). `devenv test` — быстрый smoke (Java 11, Maven, Node, Make,
+`pdftotext`).
 
 Команды:
 
 ```bash
-devenv shell       # оболочка с toolchain
-db-up              # PostgreSQL + PostGIS из docker-compose
-build | test | verify | run
-fe-dev | fe-build
-fe-up              # весь стек (app + db + frontend) в Docker
-stop | down        # остановить / остановить и удалить
+make help                          # список команд
+make db-up && make run             # БД + сервис
+make dev                           # БД + приложение + визуализатор
+make fe-up                         # весь стек (app + db + frontend) в Docker
+devenv shell                       # то же окружение через Nix (опционально)
 ```
+
+**CI** — GitHub Actions (`.github/workflows/ci.yml`): backend (`./mvnw -B verify`,
+JDK 11), frontend (pnpm test/build, Node 22) и проверка `docker compose config`.
 
 ## 5. Профили Spring
 
@@ -126,3 +126,4 @@ Node.js 22 + pnpm 11 добавляются через devenv.
 | 2026-09-19 | Скрипт `stop`; `down` через stop + `down --remove-orphans` (podman-compose) | команда |
 | 2026-09-29 | Визуализатор: `react-markdown`/`remark-gfm` (раздел «Документация»), встроенный Swagger UI, контекст сборки — корень репозитория (ADR-0072) | команда |
 | 2026-09-29 | Документация: дерево каталогов и ToC, якоря через `rehype-slug`/`github-slugger` (ADR-0072) | команда |
+| 2026-09-29 | M5: единый `Makefile`, Maven Wrapper, CI; devenv-скрипты — обёртки над `make`; добавлены `poppler-utils`/`pandoc`/`python3`/`make` | команда |
