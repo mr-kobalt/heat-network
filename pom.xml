@@ -27,6 +27,10 @@
         <jts.version>1.19.0</jts.version>
         <proj4j.version>1.3.0</proj4j.version>
         <testcontainers.version>1.16.3</testcontainers.version>
+        <!-- SnakeYAML 1.29 (из SB 2.6.3) падает на application.yml в зависимости
+             от выравнивания многобайтных UTF-8 в буфере (StreamReader.peek).
+             Патч-версия 1.30 устраняет дефект; API совместим. -->
+        <snakeyaml.version>1.30</snakeyaml.version>
         <!-- Полный набор (тег slow) исключён по умолчанию; запуск:
              mvn test -Dsurefire.excludedGroups= -Dgroups=slow -->
         <surefire.excludedGroups>slow</surefire.excludedGroups>

@@ -98,7 +98,7 @@ class ForestResultBuilderDepthTest {
                 .build();
         NetworkDataset dataset = NetworkDataset.builder()
                 .sources(List.of()).networkSegments(List.of()).heatChambers(List.of())
-                .oksFutures(List.of()).connectionPoints(List.of(point)).oksExisting(List.of())
+                .connectionPoints(List.of(point))
                 .restrictions(List.of()).build();
 
         return builder.build(planning, dataset, gasZone(), new ObstacleIndex(List.of()),

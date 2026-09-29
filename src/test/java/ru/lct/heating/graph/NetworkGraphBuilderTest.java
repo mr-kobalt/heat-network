@@ -32,8 +32,7 @@ class NetworkGraphBuilderTest {
                 .networkSegments(List.of(left, right))
                 .restrictions(List.of())
                 .connectionPoints(List.of())
-                .oksFutures(List.of())
-                .oksExisting(List.of())
+                
                 .build();
 
         ExistingNetworkGraph graph = builder.build(dataset);
@@ -51,8 +50,7 @@ class NetworkGraphBuilderTest {
                 .networkSegments(List.of())
                 .restrictions(List.of())
                 .connectionPoints(List.of())
-                .oksFutures(List.of())
-                .oksExisting(List.of())
+                
                 .build();
 
         ExistingNetworkGraph graph = builder.build(dataset);

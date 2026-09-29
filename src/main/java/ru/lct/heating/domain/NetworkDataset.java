@@ -16,13 +16,7 @@ public class NetworkDataset {
     List<SourceObject> sources;
     List<NetworkSegment> networkSegments;
     List<HeatChamberObject> heatChambers;
-    List<OksFutureObject> oksFutures;
     List<OksConnectionPointObject> connectionPoints;
-    List<OksExistingObject> oksExisting;
     List<RestrictionObject> restrictions;
     Envelope bounds;
-
-    public Optional<SourceObject> firstSource() {
-        return sources.stream().findFirst();
-    }
 }

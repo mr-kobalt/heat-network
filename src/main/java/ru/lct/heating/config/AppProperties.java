@@ -13,25 +13,12 @@ public class AppProperties {
     private int workerThreads = 1;
     private int defaultDiameterMm = 400;
     private double roundingToleranceM = 0.01;
-    /** Радиус кластеризации точек подключения (ADR-0019). */
-    private double clusterRadiusM = 500.0;
-    /** Сколько ближайших кандидатов врезки рассматривается при выборе. */
-    private int tieInCandidates = 6;
     /** Шаг сэмплирования существующей сети кандидатами врезки, м (ADR-0037). */
     private double tieInSampleStepM = 1.0;
     /** Радиус исключения кандидатов врезки вблизи существующих камер, м (ADR-0037). */
     private double tieInChamberExclusionM = 1.0;
     /** Радиус предпочтения существующей камеры при врезке (FR-22, FR-71). */
     private double chamberTieInRadiusM = 10.0;
-    /** Штраф за поворот при маршрутизации, м (FR-28, FR-57: минимизация углов). */
-    private double turnPenaltyM = 0.0;
-    /**
-     * Политика финального вывода к точке подключения ОКС (ADR-0024).
-     * По умолчанию — ближайший допустимый перпендикуляр к внешней границе.
-     */
-    private OksApproachPolicy oksApproachPolicy = OksApproachPolicy.PERPENDICULAR_NEAREST;
-    /** Запас точки стыковки за границей буфера ОКС, м (ADR-0024). */
-    private double oksExitClearanceM = 1.0;
     /**
      * ADR-0040: фильтрация выходов-кандидатов ОКС — отбрасывать хвосты,
      * проходящие через соседние компоненты своего ОКС, повторно входящие в
@@ -136,13 +123,7 @@ public class AppProperties {
     private boolean oksOwningIncludeBoundary = true;
     /** ADR-0037: границы сетки включают bbox всех входных объектов. */
     private boolean forestGridIncludeInputBounds = true;
-    /**
-     * E8-15c: пространственная декомпозиция — радиус связности точек
-     * подключения (union-find), м. Точки в пределах радиуса образуют кластер;
-     * каждый кластер решается на своей локальной сетке.
-     */
-    private double forestClusterRadiusM = 3000.0;
-    /** E8-15c: запас локального bbox кластера (сеть/врезки), м. */
+    /** Запас тайла при партиционировании, если {@code forest-partition-margin-m} не задан, м. */
     private double forestClusterMarginM = 2000.0;
     /**
      * E8-15d2c: тайл партиционирования входа, м (0 — партиционирование
@@ -158,13 +139,6 @@ public class AppProperties {
      * прогона (каждый тайл — локальная сетка).
      */
     private boolean forestPreserveCanonicalExits = false;
-    /**
-     * E8-15c: включать пространственную декомпозицию. По умолчанию выключено:
-     * локальная дискретизация кластера может изменить канонический выход
-     * (FR-43/E43), поэтому режим предназначен для очень крупных наборов и
-     * требует отдельной валидации. {@code false} — единая сетка по всему входу.
-     */
-    private boolean forestDecomposition = false;
     /**
      * E25/ADR-0045: строгий обход спецпроходов — полоса минимального расстояния
      * вокруг спецобъекта непроходима, пересечение только через «ворота»
@@ -315,7 +289,6 @@ public class AppProperties {
     private double depthCloseCrossingM = 5.0;
     /** ADR-0036: предел пикселей растровой диагностики сетки при трассировке. */
     private int traceGridMaxPixels = 2048 * 2048;
-    private int maxRunHistory = 50;
     private List<String> allowedOrigins = new ArrayList<>(
             List.of("http://localhost:5173", "http://localhost:8081"));
 }

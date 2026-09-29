@@ -20,9 +20,7 @@ class AppPropertiesEnvBindingTest {
 
     /** Поля, которые намеренно не задаются извне (значения зафиксированы в коде). */
     private static final Set<String> NOT_CONFIGURABLE = Set.of(
-            "defaultDiameterMm", "roundingToleranceM", "clusterRadiusM", "tieInCandidates",
-            "chamberTieInRadiusM", "turnPenaltyM", "oksApproachPolicy", "oksExitClearanceM",
-            "maxRunHistory");
+            "defaultDiameterMm", "roundingToleranceM", "chamberTieInRadiusM");
 
     @Test
     void everyConfigurableFieldHasYamlKey() throws Exception {

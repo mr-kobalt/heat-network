@@ -141,12 +141,10 @@ class VariantGeneratorTest {
                 .sources(List.of(source))
                 .networkSegments(List.of(segment))
                 .heatChambers(List.of())
-                .oksFutures(List.of())
                 .connectionPoints(List.of(
                         point("a", 100, 100, 10.0),
                         point("b", 500, 100, 20.0),
                         point("c", 1500, 100, 30.0)))
-                .oksExisting(List.of())
                 .restrictions(List.of())
                 .build();
     }

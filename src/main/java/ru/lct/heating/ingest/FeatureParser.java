@@ -11,8 +11,6 @@ import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkSegment;
 import ru.lct.heating.domain.ObjectType;
 import ru.lct.heating.domain.OksConnectionPointObject;
-import ru.lct.heating.domain.OksExistingObject;
-import ru.lct.heating.domain.OksFutureObject;
 import ru.lct.heating.domain.RestrictionObject;
 import ru.lct.heating.domain.SourceObject;
 
@@ -95,12 +93,9 @@ public class FeatureParser {
                         .geometry((Point) geometry)
                         .build());
             case OKS_FUTURE:
-                return parsed(type, id, OksFutureObject.builder()
-                        .id(id)
-                        .flowTph(number(properties, "flow_tph"))
-                        .heatLoad(number(properties, "heat_load"))
-                        .geometry(geometry)
-                        .build());
+            case OKS_EXISTING:
+                // Устаревшие типы (ТП v2): не входят в модель — молча игнорируются.
+                return Optional.empty();
             case OKS_CONNECTION_POINT:
                 if (!(geometry instanceof Point)) {
                     return wrongGeometry(warnings, id, type, geometry);
@@ -110,11 +105,6 @@ public class FeatureParser {
                         .flowTph(number(properties, "flow_tph"))
                         .numericId(isNumeric(properties, "id"))
                         .geometry((Point) geometry)
-                        .build());
-            case OKS_EXISTING:
-                return parsed(type, id, OksExistingObject.builder()
-                        .id(id)
-                        .geometry(geometry)
                         .build());
             case RESTRICTION:
                 String restrictionType = text(properties, "restriction_type");

@@ -86,7 +86,6 @@ abstract class AbstractCalculationPipelineTest {
         EnvelopeCatalog envelopes = new EnvelopeCatalog(tables);
         CostModel costModel = new CostModel(catalog, new CostProperties());
         RestrictionRuleResolver resolver = new RestrictionRuleResolver(rules());
-        appProperties.setTurnPenaltyM(30.0);
         LineStringSimplifier simplifier = new LineStringSimplifier();
         ru.lct.heating.routing.OksApproachResolver approachResolver =
                 new ru.lct.heating.routing.OksApproachResolver(resolver, envelopes, catalog,

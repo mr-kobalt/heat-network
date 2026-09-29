@@ -15,8 +15,6 @@ import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.domain.NetworkSegment;
 import ru.lct.heating.domain.OksConnectionPointObject;
-import ru.lct.heating.domain.OksExistingObject;
-import ru.lct.heating.domain.OksFutureObject;
 import ru.lct.heating.domain.RestrictionObject;
 import ru.lct.heating.domain.SourceObject;
 
@@ -85,15 +83,8 @@ public class IngestService {
                 case HEAT_CHAMBER:
                     heatChambers.add((HeatChamberObject) parsed.getObject());
                     break;
-                case OKS_FUTURE:
-                    // E8-15d2b: устаревший тип (ТЗ v2) — не удерживаем в памяти;
-                    // в countsByType учтён, алгоритмом не используется.
-                    break;
                 case OKS_CONNECTION_POINT:
                     connectionPoints.add((OksConnectionPointObject) parsed.getObject());
-                    break;
-                case OKS_EXISTING:
-                    // E8-15d2b: устаревший тип — не удерживаем в памяти.
                     break;
                 case RESTRICTION:
                     restrictions.add((RestrictionObject) parsed.getObject());
@@ -117,14 +108,8 @@ public class IngestService {
             if (object instanceof HeatChamberObject) {
                 return ((HeatChamberObject) object).getGeometry();
             }
-            if (object instanceof OksFutureObject) {
-                return ((OksFutureObject) object).getGeometry();
-            }
             if (object instanceof OksConnectionPointObject) {
                 return ((OksConnectionPointObject) object).getGeometry();
-            }
-            if (object instanceof OksExistingObject) {
-                return ((OksExistingObject) object).getGeometry();
             }
             if (object instanceof RestrictionObject) {
                 return ((RestrictionObject) object).getGeometry();
@@ -149,9 +134,7 @@ public class IngestService {
                     .sources(sources)
                     .networkSegments(networkSegments)
                     .heatChambers(heatChambers)
-                    .oksFutures(List.of())
                     .connectionPoints(connectionPoints)
-                    .oksExisting(List.of())
                     .restrictions(restrictions)
                     .bounds(bounds)
                     .build();

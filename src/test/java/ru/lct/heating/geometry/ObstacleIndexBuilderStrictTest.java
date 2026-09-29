@@ -83,8 +83,7 @@ class ObstacleIndexBuilderStrictTest {
                 .networkSegments(List.of())
                 .heatChambers(List.of())
                 .sources(List.of())
-                .oksFutures(List.of())
-                .oksExisting(List.of())
+                
                 .build();
     }
 

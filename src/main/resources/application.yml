@@ -55,20 +55,11 @@ heating:
     default-diameter-mm: 400
     # FR-58: округление расстояний вверх при отклонении не более допуска.
     rounding-tolerance-m: 0.01
-    # ADR-0019: кластеризация ОКС и число рассматриваемых кандидатов врезки.
-    cluster-radius-m: 500.0
-    tie-in-candidates: 6
     # ADR-0037: сэмплирование сети кандидатами врезки и радиус исключения у камер.
     tie-in-sample-step-m: ${HEATING_TIE_IN_SAMPLE_STEP_M:1.0}
     tie-in-chamber-exclusion-m: ${HEATING_TIE_IN_CHAMBER_EXCLUSION_M:1.0}
     # FR-22/FR-71: в пределах радиуса врезаемся в существующую камеру.
     chamber-tie-in-radius-m: 10.0
-    # FR-28/FR-57: штраф за поворот при маршрутизации (минимизация поворотов), м.
-    turn-penalty-m: 30.0
-    # ADR-0024: вывод к точке ОКС — ближайший допустимый перпендикуляр к внешней
-    # грани + запас точки стыковки за границей буфера отступа.
-    oks-approach-policy: PERPENDICULAR_NEAREST
-    oks-exit-clearance-m: 1.0
     # ADR-0027: алгоритм трассировки по умолчанию (см. GET /api/v1/algorithms).
     routing-algorithm: ${HEATING_ROUTING_ALGORITHM:grid-forest}
     # ADR-0034: поиск пути по сетке (ячейка и бюджет клеток).
@@ -120,9 +111,7 @@ heating:
     oks-owning-include-boundary: ${HEATING_OKS_OWNING_INCLUDE_BOUNDARY:true}
     # ADR-0037: границы сетки включают bbox всех входных объектов.
     forest-grid-include-input-bounds: ${HEATING_FOREST_GRID_INCLUDE_INPUT_BOUNDS:true}
-    # E8-15c: пространственная декомпозиция точек подключения (кластеры).
-    forest-decomposition: ${HEATING_FOREST_DECOMPOSITION:false}
-    forest-cluster-radius-m: ${HEATING_FOREST_CLUSTER_RADIUS_M:3000.0}
+    # Запас тайла партиционирования, если forest-partition-margin-m не задан.
     forest-cluster-margin-m: ${HEATING_FOREST_CLUSTER_MARGIN_M:2000.0}
     # E8-15d2c: пространственное партиционирование входа (0 — выключено).
     forest-partition-tile-m: ${HEATING_FOREST_PARTITION_TILE_M:0.0}
@@ -266,12 +255,9 @@ heating:
       tram_tracks: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75, special-zone-buffer-m: 3.0}
       # ADR-0073, таблица 4: вертикальные габариты для режима глубины
       # (глубина до верха габарита / высота габарита, м).
-      gas_pipeline: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.25,
-                     vertical-top-depth-m: 2.8, vertical-height-m: 0.4}
-      power_cable: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.15,
-                    vertical-top-depth-m: 2.7, vertical-height-m: 0.2}
-      heat_network: {mode: SPECIAL, min-distance-m: 1.0, k-special: 1.05,
-                     vertical-top-depth-m: 3.0, vertical-height-m: 0.45}
+      gas_pipeline: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.25, vertical-top-depth-m: 2.8, vertical-height-m: 0.4}
+      power_cable: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.15, vertical-top-depth-m: 2.7, vertical-height-m: 0.2}
+      heat_network: {mode: SPECIAL, min-distance-m: 1.0, k-special: 1.05, vertical-top-depth-m: 3.0, vertical-height-m: 0.45}
 
 logging:
   level:

@@ -238,98 +238,14 @@ public class GridForestPlanner {
         if (terminals.isEmpty()) {
             return List.of(result(List.of(), baseUnconnected));
         }
-        // E8-15c: пространственная декомпозиция — каждый кластер точек решается
-        // на своей локальной сетке (рабочий набор ограничен кластером). По
-        // умолчанию выключено (см. {@code forest-decomposition}).
-        // Устарело в пользу партиционирования входа (ADR-0071, E8-15d2c): может
-        // менять канонический выход (FR-43). Не развивать.
-        List<List<Terminal>> clusters = appProperties.isForestDecomposition()
-                ? clusterTerminals(terminals) : List.of(terminals);
-        if (clusters.size() > 1) {
-            log.warn("forest-decomposition устарел (ADR-0071): используйте "
-                    + "партиционирование входа (forest-partition-tile-m)");
+        List<TieInCandidate> allTies = rawTieCandidates(dataset, terminals, graph);
+        if (allTies.isEmpty()) {
+            warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
+            baseUnconnected.addAll(terminalIds);
+            return List.of(result(List.of(), baseUnconnected));
         }
-        if (clusters.size() <= 1) {
-            List<TieInCandidate> allTies = rawTieCandidates(dataset, terminals, graph);
-            if (allTies.isEmpty()) {
-                warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
-                baseUnconnected.addAll(terminalIds);
-                return List.of(result(List.of(), baseUnconnected));
-            }
-            return withBaseUnconnected(planSingle(dataset, graph, obstacleIndex, specialZones,
-                    warnings, exits, trace, terminals, allTies, true, Map.of(), null),
-                    baseUnconnected);
-        }
-        log.info("Decomposition: terminals={} clusters={} radius={}m", terminals.size(),
-                clusters.size(), appProperties.getForestClusterRadiusM());
-        // E8-15d2a: врезки генерируются локально по bbox кластера (не по всей сети).
-        TieInCandidateProvider.TieInIndex tieIndex = candidateProvider.index(dataset);
-        List<List<ForestPlanningResult>> plansByCluster = new ArrayList<>();
-        TreeSet<Integer> globalPasses = new TreeSet<>();
-        Map<String, Integer> chamberUsage = new HashMap<>();
-        int clusterIndex = 0;
-        for (List<Terminal> cluster : clusters) {
-            clusterIndex++;
-            List<ForestPlanningResult> results = planSingle(dataset, graph, obstacleIndex,
-                    specialZones, warnings, exits, trace, cluster, List.of(), false, chamberUsage,
-                    tieIndex);
-            plansByCluster.add(results);
-            for (ForestPlanningResult planning : results) {
-                globalPasses.add(planning.getPassNumber());
-            }
-            countChamberUsage(results, chamberUsage);
-            log.info("Decomposition cluster {}/{}: terminals={} plans={}", clusterIndex,
-                    clusters.size(), cluster.size(), results.size());
-        }
-        // Каждый глобальный проход собирает ВСЕ кластеры: у кластера без данного
-        // прохода берётся ближайший (по номеру) доступный, чтобы вариант покрывал
-        // все точки подключения.
-        List<ForestPlanningResult> merged = new ArrayList<>();
-        Set<String> signatures = new HashSet<>();
-        for (int pass : globalPasses) {
-            List<ForestTree> trees = new ArrayList<>();
-            List<String> unconnected = new ArrayList<>();
-            for (int clusterIdx = 0; clusterIdx < plansByCluster.size(); clusterIdx++) {
-                ForestPlanningResult planning = chooseForPass(plansByCluster.get(clusterIdx), pass);
-                if (planning == null) {
-                    continue;
-                }
-                trees.addAll(namespaceTrees(planning.getTrees(), "c" + clusterIdx + "_"));
-                unconnected.addAll(planning.getUnconnectedConnectionPointIds());
-            }
-            // E8-15c: меж-кластерные пересечения — глобальный ремонт на локальной
-            // маске (пропуск, если охват слишком велик для одной сетки).
-            trees = repairMergedCrossings(trees, obstacleIndex, warnings);
-            if (appProperties.isForestExitRegularization() && !treesGeometryValid(trees)) {
-                warnings.add("VARIANT_GEOMETRY_FILTERED: merged pass=" + pass);
-                continue;
-            }            if (!signatures.add(signature(trees))) {
-                continue;
-            }
-            if (merged.size() >= MAX_PLANS) {
-                break;
-            }
-            merged.add(ForestPlanningResult.builder().trees(trees)
-                    .unconnectedConnectionPointIds(unconnected).passNumber(pass).build());
-        }
-        if (merged.isEmpty()) {
-            merged.add(result(List.of(), new ArrayList<>(terminalIds)));
-        }
-        return withBaseUnconnected(merged, baseUnconnected);
-    }
-
-    /** План кластера для глобального прохода {@code pass} (или ближайший по номеру). */
-    private ForestPlanningResult chooseForPass(List<ForestPlanningResult> results, int pass) {
-        ForestPlanningResult best = null;
-        int bestDistance = Integer.MAX_VALUE;
-        for (ForestPlanningResult planning : results) {
-            int distance = Math.abs(planning.getPassNumber() - pass);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = planning;
-            }
-        }
-        return best;
+        return withBaseUnconnected(planSingle(dataset, graph, obstacleIndex, specialZones,
+                warnings, exits, trace, terminals, allTies), baseUnconnected);
     }
 
     /** E8-15c: добавить к неconnected результатам общие (без терминала) точки. */
@@ -349,106 +265,7 @@ public class GridForestPlanner {
         return merged;
     }
 
-    /**
-     * E8-15c: union-find кластеризация точек подключения по радиусу
-     * {@code forest-cluster-radius-m}. Связные компоненты — кластеры; порядок
-     * детерминирован (по минимальному индексу точки).
-     */
-    private List<List<Terminal>> clusterTerminals(List<Terminal> terminals) {
-        int n = terminals.size();
-        double radius = appProperties.getForestClusterRadiusM();
-        int[] parent = new int[n];
-        for (int i = 0; i < n; i++) {
-            parent[i] = i;
-        }
-        if (radius > 0 && n > 1) {
-            double radius2 = radius * radius;
-            for (int i = 0; i < n; i++) {
-                Coordinate a = terminals.get(i).point;
-                for (int j = i + 1; j < n; j++) {
-                    Coordinate b = terminals.get(j).point;
-                    double dx = a.x - b.x;
-                    double dy = a.y - b.y;
-                    if (dx * dx + dy * dy <= radius2) {
-                        union(parent, i, j);
-                    }
-                }
-            }
-        }
-        Map<Integer, List<Terminal>> byRoot = new TreeMap<>();
-        for (int i = 0; i < n; i++) {
-            byRoot.computeIfAbsent(find(parent, i), key -> new ArrayList<>()).add(terminals.get(i));
-        }
-        return new ArrayList<>(byRoot.values());
-    }
-
-    private static int find(int[] parent, int x) {
-        while (parent[x] != x) {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        return x;
-    }
-
-    private static void union(int[] parent, int a, int b) {
-        int ra = find(parent, a);
-        int rb = find(parent, b);
-        if (ra != rb) {
-            parent[Math.max(ra, rb)] = Math.min(ra, rb);
-        }
-    }
-    /** E8-15c: учесть новые врезки в существующие камеры после кластера. */
-    private void countChamberUsage(List<ForestPlanningResult> results,
-                                   Map<String, Integer> chamberUsage) {
-        for (ForestPlanningResult planning : results) {
-            for (ForestTree tree : planning.getTrees()) {
-                ForestNode root = tree.getNodes().get(tree.getTieInNodeId());
-                if (root != null && root.isExisting()) {
-                    chamberUsage.merge(root.getId(), 1, Integer::sum);
-                }
-            }
-        }
-    }
-
-    /**
-     * E8-15c: префикс id новых узлов/рёбер кластера — иначе при слиянии
-     * деревьев разных кластеров id вида {@code ch_0}/{@code e_1_0_0} совпадают.
-     * Существующие узлы сохраняют id (ссылаются на объекты входа).
-     */
-    private List<ForestTree> namespaceTrees(List<ForestTree> trees, String prefix) {
-        List<ForestTree> result = new ArrayList<>(trees.size());
-        for (ForestTree tree : trees) {
-            Map<String, String> idMap = new HashMap<>();
-            Map<String, ForestNode> nodes = new LinkedHashMap<>();
-            for (ForestNode node : tree.getNodes().values()) {
-                // Существующие узлы и точки подключения сохраняют id (ссылки на
-                // объекты входа); префиксуются только новые камеры/тех. узлы.
-                boolean keepId = node.isExisting()
-                        || node.getType() == NodeType.CONNECTION_POINT;
-                String newId = keepId ? node.getId() : prefix + node.getId();
-                idMap.put(node.getId(), newId);
-                nodes.put(newId, node.toBuilder().id(newId).build());
-            }
-            List<ForestEdge> edges = new ArrayList<>(tree.getEdges().size());
-            for (ForestEdge edge : tree.getEdges()) {
-                edges.add(ForestEdge.builder().id(prefix + edge.getId())
-                        .fromNodeId(idMap.getOrDefault(edge.getFromNodeId(), edge.getFromNodeId()))
-                        .toNodeId(idMap.getOrDefault(edge.getToNodeId(), edge.getToNodeId()))
-                        .coordinates(edge.getCoordinates()).flowTph(edge.getFlowTph())
-                        .diameterMm(edge.getDiameterMm()).build());
-            }
-            result.add(ForestTree.builder()
-                    .tieInNodeId(idMap.getOrDefault(tree.getTieInNodeId(), tree.getTieInNodeId()))
-                    .nodes(nodes).edges(edges).build());
-        }
-        return result;
-    }
-
-    /**
-     * Один кластер/набор терминалов: полный поиск по сетке. {@code includeInputBounds}
-     * — включать bounds всего входа (единичный набор); иначе bbox локальный
-     * (кластер) с запасом {@code forest-cluster-margin-m}.
-     */
+    /** Один набор терминалов: полный поиск по сетке. */
     private List<ForestPlanningResult> planSingle(NetworkDataset dataset,
                                                   ExistingNetworkGraph graph,
                                                   ObstacleIndex obstacleIndex,
@@ -456,10 +273,7 @@ public class GridForestPlanner {
                                                   List<String> warnings,
                                                   Map<String, ConnectionExit> exits,
                                                   StageTrace trace, List<Terminal> terminals,
-                                                  List<TieInCandidate> ties,
-                                                  boolean includeInputBounds,
-                                                  Map<String, Integer> chamberUsage,
-                                                  TieInCandidateProvider.TieInIndex tieIndex) {
+                                                  List<TieInCandidate> ties) {
         Set<String> terminalIds = new HashSet<>();
         for (Terminal terminal : terminals) {
             terminalIds.add(terminal.pointId);
@@ -472,33 +286,9 @@ public class GridForestPlanner {
         long start = System.nanoTime();
         double cell = appProperties.getForestGridCellM() > 0
                 ? appProperties.getForestGridCellM() : 2.0;
-        Envelope bounds;
-        List<TieInCandidate> localTies;
-        if (includeInputBounds) {
-            if (ties.isEmpty()) {
-                warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
-                baseUnconnected.addAll(terminalIds);
-                return List.of(result(List.of(), baseUnconnected));
-            }
-            bounds = bounds(dataset, terminals, ties, cell);
-            localTies = ties;
-        } else {
-            bounds = new Envelope();
-            List<Coordinate> anchors = new ArrayList<>(terminals.size());
-            for (Terminal terminal : terminals) {
-                bounds.expandToInclude(terminal.target);
-                anchors.add(terminal.target);
-            }
-            bounds.expandBy(Math.max(appProperties.getForestClusterMarginM(), cell * 2.0));
-            // E8-15d2a: врезки кластера — только по сегментам/камерам в его bbox.
-            localTies = candidateProvider.localCandidates(dataset, anchors, bounds, tieIndex);
-            if (localTies.isEmpty()) {
-                baseUnconnected.addAll(terminalIds);
-                return List.of(result(List.of(), baseUnconnected));
-            }
-        }
-        // E26/E8-15c: правило 10 м с учётом занятости камер предыдущими кластерами.
-        localTies = preferExistingChambers(dataset, graph, localTies, chamberUsage);
+        Envelope bounds = bounds(dataset, terminals, ties, cell);
+        // E26: правило 10 м — предпочесть существующие камеры с запасом примыканий.
+        List<TieInCandidate> localTies = preferExistingChambers(dataset, graph, ties, Map.of());
         if (localTies.isEmpty()) {
             baseUnconnected.addAll(terminalIds);
             return List.of(result(List.of(), baseUnconnected));
@@ -3860,47 +3650,6 @@ public class GridForestPlanner {
             }
         }
         return false;
-    }
-
-    /**
-     * E8-15c: глобальный ремонт меж-кластерных пересечений. Маска строится по
-     * bbox слитых деревьев; если охват больше {@code forest-grid-max-cells} —
-     * ремонт пропускается с предупреждением (декомпозиция рассчитана на
-     * пространственно разнесённые кластеры).
-     */
-    private List<ForestTree> repairMergedCrossings(List<ForestTree> trees,
-                                                   ObstacleIndex obstacleIndex,
-                                                   List<String> warnings) {
-        if (trees.size() < 2 || obstacleIndex == null) {
-            return trees;
-        }
-        Envelope envelope = new Envelope();
-        for (ForestTree tree : trees) {
-            for (ForestEdge edge : tree.getEdges()) {
-                for (Coordinate coordinate : edge.getCoordinates()) {
-                    envelope.expandToInclude(coordinate);
-                }
-            }
-        }
-        if (envelope.isNull()) {
-            return trees;
-        }
-        double cell = appProperties.getForestGridCellM() > 0
-                ? appProperties.getForestGridCellM() : 1.0;
-        GridShape shape = gridShape();
-        long cells = (long) shape.columns(envelope.getWidth(), cell)
-                * shape.rows(envelope.getHeight(), cell);
-        if (cells > appProperties.getForestGridMaxCells()) {
-            warnings.add("FOREST_GLOBAL_REPAIR_SKIPPED: cells=" + cells);
-            return trees;
-        }
-        envelope.expandBy(Math.max(cell * 2.0, 10.0));
-        ObstacleMask mask = maskBuilder.buildPassability(obstacleIndex, envelope, cell,
-                Long.MAX_VALUE / 4, warnings, shape);
-        if (mask == null) {
-            return trees;
-        }
-        return repairGlobalCrossings(trees, mask, obstacleIndex, warnings);
     }
 
     /**

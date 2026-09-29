@@ -62,8 +62,7 @@ class ObstacleIndexBuilderDiameterTest {
                 .networkSegments(List.of())
                 .heatChambers(List.of())
                 .sources(List.of())
-                .oksFutures(List.of())
-                .oksExisting(List.of())
+                
                 .build();
     }
 

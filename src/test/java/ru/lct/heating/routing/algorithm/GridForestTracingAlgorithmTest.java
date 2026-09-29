@@ -362,8 +362,7 @@ class GridForestTracingAlgorithmTest {
                 .networkSegments(segments)
                 .heatChambers(List.of())
                 .connectionPoints(points)
-                .oksFutures(List.of())
-                .oksExisting(List.of())
+                
                 .restrictions(restrictions)
                 .build();
     }

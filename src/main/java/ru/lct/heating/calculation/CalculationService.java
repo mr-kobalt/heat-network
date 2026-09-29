@@ -352,9 +352,7 @@ public class CalculationService {
                 .sources(dataset.getSources())
                 .networkSegments(dataset.getNetworkSegments())
                 .heatChambers(kept)
-                .oksFutures(dataset.getOksFutures())
                 .connectionPoints(dataset.getConnectionPoints())
-                .oksExisting(dataset.getOksExisting())
                 .restrictions(dataset.getRestrictions())
                 .bounds(dataset.getBounds())
                 .build();
