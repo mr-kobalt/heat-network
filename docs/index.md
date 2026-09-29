@@ -54,7 +54,8 @@ flowchart LR
 ### 06. Сдача (M5)
 - [Чек-лист сдачи](06-submission/checklist.md) — форма, сроки, критерии.
 - [Пояснительная записка](06-submission/explanatory-note.md) — для жюри.
-- [Презентация (источник)](06-submission/presentation.md) и [структура/сборка](06-submission/presentation-outline.md).
+- [Презентация (PDF)](06-submission/sudoers-lct2026.pdf) · [заметки](06-submission/sudoers-lct2026-notes.pdf) · [источник](06-submission/presentation.md) · [структура/сборка](06-submission/presentation-outline.md).
+- [Пример результата](06-submission/sample/sample-summary.json).
 - [Скриншоты визуализатора](06-submission/screenshots/README.md).
 - [Лицензии сторонних компонентов](06-submission/licenses.md).
 
@@ -165,3 +166,4 @@ flowchart LR
 | 2026-09-29 | M5: скриншоты визуализатора, make-цели подложки (`fe-basemap*`) и `licenses`, лицензионный отчёт и `THIRD_PARTY_NOTICES` | команда |
 | 2026-09-29 | Презентация: источник `presentation.md`, `make presentation` (pandoc + тема организатора), структура в `presentation-outline.md` | команда |
 | 2026-09-29 | Презентация: основной формат PDF (HTML→Chromium), тема `presentation-theme.css` + Montserrat (OFL), `presentation-notes`/`presentation-pptx` | команда |
+| 2026-09-29 | Сдача: PDF презентации и пример результата в репозитории; ссылки в карте | команда |

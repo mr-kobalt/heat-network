@@ -19,6 +19,18 @@ GeoJSON и расчёта, а не визуализация (см. [docs/index.m
 > (документация, презентация PDF, Swagger) готов; остаются прогон на проверочном
 > наборе и репетиция. См. [дорожную карту](docs/04-delivery/roadmap.md).
 
+## Проверка за 5 минут
+
+1. `docker compose up --build -d` — сервис и БД (офлайн, без внешней сети).
+2. Swagger UI: http://localhost:8080/swagger-ui.html.
+3. Загрузить `source/Датасет скорректированный.geojson`, запустить расчёт,
+   скачать результат (пример команд — в разделе «Пример через API (curl)»).
+4. Проверить: все точки подключены, у вариантов есть длина, стоимость и `S`.
+
+Материалы сдачи: [презентация (PDF)](docs/06-submission/sudoers-lct2026.pdf) ·
+[пример результата](docs/06-submission/sample/) ·
+[чек-лист сдачи](docs/06-submission/checklist.md).
+
 ## Как работает алгоритм
 
 Основной алгоритм — единый поиск по сетке `grid-forest` (ADR-0034):
@@ -217,7 +229,7 @@ make down          # остановить и удалить стек
 - [Правила расчёта](docs/02-domain/calculation-rules.md), [модель данных](docs/02-domain/data-model.md).
 - [Архитектура](docs/03-architecture/overview.md), [алгоритм](docs/03-architecture/algorithm.md), [ADR](docs/03-architecture/adr/README.md).
 - [Дорожная карта](docs/04-delivery/roadmap.md), [backlog](docs/04-delivery/backlog.md).
-- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [презентация](docs/06-submission/presentation.md) (`make presentation`), [скриншоты](docs/06-submission/screenshots/README.md), [лицензии](docs/06-submission/licenses.md) / [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
+- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [презентация (PDF)](docs/06-submission/sudoers-lct2026.pdf) / [источник](docs/06-submission/presentation.md) (`make presentation`), [пример результата](docs/06-submission/sample/), [скриншоты](docs/06-submission/screenshots/README.md), [лицензии](docs/06-submission/licenses.md) / [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
 
 ## Стек
 
@@ -279,3 +291,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-29 | Презентация: источник `presentation.md` (расширенный технический дек), сборка `make presentation` (pandoc + тема организатора) | команда |
 | 2026-09-29 | Презентация: основной формат PDF (HTML→Chromium, тема Montserrat/палитра ЛЦТ), `presentation-notes` с заметками, `presentation-pptx` | команда |
 | 2026-09-29 | Финальная вычитка: статус M5, лицензия/данные, ссылки; подготовка репозитория к публикации | команда |
+| 2026-09-29 | Сдача: раздел «Проверка за 5 минут», ссылки на PDF презентации и пример результата | команда |

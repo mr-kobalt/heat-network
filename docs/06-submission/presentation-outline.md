@@ -12,6 +12,11 @@ make presentation-pptx     # запасной формат pptx (pandoc)
 make presentation-all      # PDF + notes + pptx
 ```
 
+Готовые файлы для сдачи лежат в репозитории рядом с этим документом:
+[sudoers-lct2026.pdf](sudoers-lct2026.pdf) и
+[sudoers-lct2026-notes.pdf](sudoers-lct2026-notes.pdf) (пересобираются
+`make presentation-notes`).
+
 Сборка (`scripts/build-presentation.mjs`): `pandoc` собирает HTML
 (`--section-divs`, один `#` = слайд, `::: notes` = заметки), затем **Chromium**
 печатает PDF (`@page` 13,333×7,5 in, без колонтитулов). Тема — 
@@ -67,3 +72,4 @@ make presentation-all      # PDF + notes + pptx
 | 2026-09-29 | Источник вынесен в `presentation.md`; сборка `make presentation` (pandoc + тема организатора) | команда |
 | 2026-09-29 | Основной формат — PDF (HTML→Chromium), тема `presentation-theme.css` + Montserrat; `presentation-notes`/`presentation-pptx` | команда |
 | 2026-09-29 | Слайды без внутренних кодов (ADR/FR/NFR/E); заметки — готовый текст речи (~7 мин) | команда |
+| 2026-09-29 | Собранные PDF добавлены в репозиторий (`sudoers-lct2026.pdf`, `-notes.pdf`) | команда |
