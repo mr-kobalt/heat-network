@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import ru.lct.heating.calculation.CalculationMode;
 import ru.lct.heating.calculation.RunService;
 import ru.lct.heating.persistence.CalculationRunEntity;
 
@@ -36,8 +37,10 @@ public class RunController {
     public ResponseEntity<RunResponse> create(
             @PathVariable UUID datasetId,
             @RequestParam(name = "algorithm", required = false) String algorithm,
-            @RequestParam(name = "trace", required = false, defaultValue = "false") boolean trace) {
-        CalculationRunEntity run = runService.create(datasetId, algorithm, trace);
+            @RequestParam(name = "trace", required = false, defaultValue = "false") boolean trace,
+            @RequestParam(name = "mode", required = false) String mode) {
+        CalculationRunEntity run = runService.create(datasetId, algorithm, trace,
+                CalculationMode.fromParameter(mode));
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(apiMapper.toRunResponse(run));
     }
 

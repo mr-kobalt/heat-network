@@ -122,6 +122,14 @@ public class SpecialZoneIndex {
      * препятствия (без пересечения) специальным проходом не считается.</p>
      */
     public List<SpecialSpan> spans(LineString route, List<String> warnings) {
+        return merge(rawSpans(route, warnings));
+    }
+
+    /**
+     * Спецпроходы по отдельным зонам без объединения — с типом ограничения и
+     * вертикальным габаритом (ADR-0073: режим глубины).
+     */
+    public List<SpecialSpan> rawSpans(LineString route, List<String> warnings) {
         List<SpecialSpan> raw = new ArrayList<>();
         if (zones.isEmpty()) {
             return raw;
@@ -166,10 +174,13 @@ public class SpecialZoneIndex {
                         .startDistanceM(inZone[0])
                         .endDistanceM(inZone[1])
                         .kSpecial(zone.getKSpecial())
+                        .restrictionType(zone.getRestrictionType())
+                        .verticalTopDepthM(zone.getVerticalTopDepthM())
+                        .verticalHeightM(zone.getVerticalHeightM())
                         .build());
             }
         }
-        return merge(raw);
+        return raw;
     }
 
     /**

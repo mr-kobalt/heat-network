@@ -16,6 +16,13 @@ public class RestrictionRule {
     private Double angleMinDeg;
     private Double kSpecial;
     private Double specialZoneBufferM;
+    /**
+     * ADR-0073 (ТП v2 §4, таблица 4): глубина до верха условного габарита
+     * коммуникации, м. {@code null} — вертикальный учёт не задан.
+     */
+    private Double verticalTopDepthM;
+    /** ADR-0073: высота условного габарита коммуникации, м. */
+    private Double verticalHeightM;
     private List<DistanceBand> distanceBands = new ArrayList<>();
 
     /**

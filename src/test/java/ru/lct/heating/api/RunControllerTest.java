@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
+import ru.lct.heating.calculation.CalculationMode;
 import ru.lct.heating.calculation.RunService;
 import ru.lct.heating.persistence.CalculationRunEntity;
 
@@ -33,14 +34,15 @@ class RunControllerTest {
         UUID datasetId = UUID.randomUUID();
         CalculationRunEntity run = new CalculationRunEntity();
         run.setId(UUID.randomUUID());
-        when(runService.create(datasetId, "grid-forest", false)).thenReturn(run);
+        when(runService.create(datasetId, "grid-forest", false, CalculationMode.TWO_D))
+                .thenReturn(run);
         when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
 
         mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId)
                         .param("algorithm", "grid-forest"))
                 .andExpect(status().isAccepted());
 
-        verify(runService).create(datasetId, "grid-forest", false);
+        verify(runService).create(datasetId, "grid-forest", false, CalculationMode.TWO_D);
     }
 
     @Test
@@ -48,13 +50,13 @@ class RunControllerTest {
         UUID datasetId = UUID.randomUUID();
         CalculationRunEntity run = new CalculationRunEntity();
         run.setId(UUID.randomUUID());
-        when(runService.create(datasetId, null, false)).thenReturn(run);
+        when(runService.create(datasetId, null, false, CalculationMode.TWO_D)).thenReturn(run);
         when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
 
         mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId))
                 .andExpect(status().isAccepted());
 
-        verify(runService).create(eq(datasetId), isNull(), eq(false));
+        verify(runService).create(eq(datasetId), isNull(), eq(false), eq(CalculationMode.TWO_D));
     }
 
     @Test
@@ -62,7 +64,8 @@ class RunControllerTest {
         UUID datasetId = UUID.randomUUID();
         CalculationRunEntity run = new CalculationRunEntity();
         run.setId(UUID.randomUUID());
-        when(runService.create(datasetId, "grid-forest", true)).thenReturn(run);
+        when(runService.create(datasetId, "grid-forest", true, CalculationMode.TWO_D))
+                .thenReturn(run);
         when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
 
         mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId)
@@ -70,6 +73,29 @@ class RunControllerTest {
                         .param("trace", "true"))
                 .andExpect(status().isAccepted());
 
-        verify(runService).create(datasetId, "grid-forest", true);
+        verify(runService).create(datasetId, "grid-forest", true, CalculationMode.TWO_D);
+    }
+
+    @Test
+    void passesDepthModeParameter() throws Exception {
+        UUID datasetId = UUID.randomUUID();
+        CalculationRunEntity run = new CalculationRunEntity();
+        run.setId(UUID.randomUUID());
+        when(runService.create(datasetId, null, false, CalculationMode.DEPTH)).thenReturn(run);
+        when(apiMapper.toRunResponse(run)).thenReturn(RunResponse.builder().build());
+
+        mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId)
+                        .param("mode", "depth"))
+                .andExpect(status().isAccepted());
+
+        verify(runService).create(datasetId, null, false, CalculationMode.DEPTH);
+    }
+
+    @Test
+    void unknownModeRejected() throws Exception {
+        UUID datasetId = UUID.randomUUID();
+        mockMvc.perform(post("/api/v1/datasets/{datasetId}/runs", datasetId)
+                        .param("mode", "3d"))
+                .andExpect(status().isBadRequest());
     }
 }

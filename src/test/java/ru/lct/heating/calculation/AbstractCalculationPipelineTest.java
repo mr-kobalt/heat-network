@@ -100,7 +100,9 @@ abstract class AbstractCalculationPipelineTest {
         TracingAlgorithmRegistry registry = new TracingAlgorithmRegistry(
                 List.of(new GridForestTracingAlgorithm(forestPlanner)), appProperties);
         VariantGenerator variantGenerator = new VariantGenerator(
-                new ForestResultBuilder(crs, costModel, new SpecialSpanSplitter(), appProperties));
+                new ForestResultBuilder(crs, costModel, new SpecialSpanSplitter(),
+                        new ru.lct.heating.depth.DepthProfileBuilder(appProperties, envelopes),
+                        appProperties));
 
         return new CalculationService(ingest, new NetworkGraphBuilder(),
                 new ObstacleIndexBuilder(resolver, envelopes, catalog, appProperties,
@@ -788,9 +790,19 @@ abstract class AbstractCalculationPipelineTest {
         rules.put("railway", prohibited(1.0));
         rules.put("road", special(1.5, 45.0, 1.60, 3.0));
         rules.put("tram_tracks", special(1.5, 45.0, 1.75, 3.0));
-        rules.put("gas_pipeline", special(2.0, null, 1.25, null));
-        rules.put("power_cable", special(2.0, null, 1.15, null));
-        rules.put("heat_network", special(1.0, null, 1.05, null));
+        // ADR-0073 (таблица 4): вертикальные габариты для режима глубины.
+        RestrictionRule gas = special(2.0, null, 1.25, null);
+        gas.setVerticalTopDepthM(2.8);
+        gas.setVerticalHeightM(0.4);
+        rules.put("gas_pipeline", gas);
+        RestrictionRule cable = special(2.0, null, 1.15, null);
+        cable.setVerticalTopDepthM(2.7);
+        cable.setVerticalHeightM(0.2);
+        rules.put("power_cable", cable);
+        RestrictionRule heat = special(1.0, null, 1.05, null);
+        heat.setVerticalTopDepthM(3.0);
+        heat.setVerticalHeightM(0.45);
+        rules.put("heat_network", heat);
         properties.setRules(rules);
         properties.setFallback(prohibited(1.0));
         return properties;

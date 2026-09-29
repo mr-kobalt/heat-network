@@ -33,6 +33,7 @@ public class ApiMapper {
                 .datasetId(entity.getDatasetId())
                 .status(entity.getStatus())
                 .algorithm(entity.getAlgorithm())
+                .mode(entity.getMode())
                 .traced(entity.isTrace())
                 .createdAt(entity.getCreatedAt())
                 .startedAt(entity.getStartedAt())

@@ -27,6 +27,9 @@ public class CalculationRunEntity {
     /** ADR-0036: запрошена поэтапная трассировка для визуализации. */
     private boolean trace;
 
+    /** ADR-0073: режим расчёта — {@code 2d} или {@code depth}. */
+    private String mode;
+
     private Instant createdAt;
 
     private Instant startedAt;

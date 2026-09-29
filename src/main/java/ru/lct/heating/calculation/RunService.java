@@ -59,6 +59,15 @@ public class RunService {
      */
     @Transactional
     public CalculationRunEntity create(UUID datasetId, String algorithmId, boolean trace) {
+        return create(datasetId, algorithmId, trace, CalculationMode.TWO_D);
+    }
+
+    /**
+     * @param mode режим расчёта 2d|depth (ADR-0073)
+     */
+    @Transactional
+    public CalculationRunEntity create(UUID datasetId, String algorithmId, boolean trace,
+                                       CalculationMode mode) {
         datasetService.require(datasetId);
         TracingAlgorithm algorithm = algorithmRegistry.require(algorithmId);
         CalculationRunEntity run = new CalculationRunEntity();
@@ -67,6 +76,7 @@ public class RunService {
         run.setStatus(RunStatus.PENDING.name());
         run.setAlgorithm(algorithm.id());
         run.setTrace(trace);
+        run.setMode((mode == null ? CalculationMode.TWO_D : mode).parameter());
         run.setProgress(0);
         run.setCreatedAt(Instant.now());
         runRepository.save(run);

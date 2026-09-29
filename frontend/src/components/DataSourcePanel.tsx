@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Badge,
   Button,
   Divider,
   Group,
   Progress,
+  SegmentedControl,
   Stack,
   Text,
 } from '@mantine/core';
 import { Dropzone } from '@mantine/dropzone';
 import { IconDownload, IconFileDownload, IconFileImport, IconUpload } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { parseFeatureCollection } from '../types';
+import { calculationModeLabel, parseFeatureCollection } from '../types';
 import { useStore } from '../store';
 import { fetchAlgorithms, fetchResultBlob } from '../api/client';
 import { runDataset } from '../runDataset';
@@ -32,6 +34,9 @@ export function DataSourcePanel() {
   const runError = useStore((state) => state.runError);
   const runId = useStore((state) => state.runId);
   const result = useStore((state) => state.result);
+  const calculationMode = useStore((state) => state.calculationMode);
+  const setCalculationMode = useStore((state) => state.setCalculationMode);
+  const lastRunMode = useStore((state) => state.lastRunMode);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -145,6 +150,31 @@ export function DataSourcePanel() {
       </Group>
 
       <Divider label="рассчитать" labelPosition="center" my={4} />
+      <Group gap={6} wrap="nowrap" align="center" justify="space-between">
+        <Group gap={6} wrap="nowrap" align="center">
+          <SegmentedControl
+            size="xs"
+            disabled={runBusy}
+            data={[
+              { value: '2d', label: '2D' },
+              { value: 'depth', label: 'Глубина' },
+            ]}
+            value={calculationMode}
+            onChange={(value) => setCalculationMode(value as typeof calculationMode)}
+          />
+          <Text size="sm">Режим</Text>
+        </Group>
+        {lastRunMode && (
+          <Badge
+            variant="light"
+            color={lastRunMode === 'depth' ? 'teal' : 'gray'}
+            size="sm"
+            radius="sm"
+          >
+            {calculationModeLabel(lastRunMode)}
+          </Badge>
+        )}
+      </Group>
       {algorithmsError && (
         <Text size="sm" c="red">
           Не удалось получить список алгоритмов: {String(algorithmsError)}

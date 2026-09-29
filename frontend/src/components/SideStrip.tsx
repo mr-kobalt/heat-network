@@ -1,6 +1,7 @@
 import { ActionIcon, Divider, FileButton, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { IconUpload } from '@tabler/icons-react';
 import { RESULT_STAGE, useStore } from '../store';
+import { calculationModeLabel } from '../types';
 import { stageIcon } from './stageIcons';
 import { runDataset } from '../runDataset';
 
@@ -21,6 +22,8 @@ export function SideStrip() {
   const activeStage = useStore((state) => state.activeStage);
   const setActiveStage = useStore((state) => state.setActiveStage);
   const runBusy = useStore((state) => state.runBusy);
+  const calculationMode = useStore((state) => state.calculationMode);
+  const runTitle = `Загрузить и рассчитать · ${calculationModeLabel(calculationMode)}`;
 
   const orderedVariants = [...variants].sort(
     (a, b) => (variantScore[a] ?? Number.POSITIVE_INFINITY)
@@ -50,8 +53,8 @@ export function SideStrip() {
             size="lg"
             loading={runBusy}
             disabled={runBusy}
-            aria-label="Загрузить и рассчитать"
-            title="Загрузить и рассчитать"
+            aria-label={runTitle}
+            title={runTitle}
           >
             <IconUpload size={20} />
           </ActionIcon>

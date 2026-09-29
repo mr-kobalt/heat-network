@@ -118,6 +118,26 @@ export type GridMask = {
   terminalCells: Array<[number, number]>;
 };
 
+/** Режим расчёта (ADR-0073): обязательный 2D или с учётом глубины. */
+export type CalculationMode = '2d' | 'depth';
+
+/** Подпись режима расчёта для интерфейса. */
+export function calculationModeLabel(mode: CalculationMode): string {
+  return mode === 'depth' ? 'Глубина' : '2D';
+}
+
+/** Режим по данным результата: глубина, если заполнены глубины участков. */
+export function inferCalculationMode(
+  features: Array<{ properties: FeatureProperties }>,
+): CalculationMode {
+  const hasDepth = features.some((feature) => {
+    const properties = feature.properties;
+    return properties.object_type === 'heat_network'
+      && (properties.depth_start != null || properties.depth_end != null);
+  });
+  return hasDepth ? 'depth' : '2d';
+}
+
 /** Типы объектов выходного GeoJSON (ТП v2 §7). */
 export function isResultFeature(objectType: string | undefined): boolean {
   return (

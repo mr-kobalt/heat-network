@@ -1,13 +1,22 @@
 import { create } from 'zustand';
 import {
+  CalculationMode,
   DatasetInfo,
   FeatureCollection,
   GeoFeature,
   GridMask,
   StageDescriptor,
   StageManifest,
+  inferCalculationMode,
 } from './types';
 import type { BasemapId } from './map/style';
+
+/** Ключ localStorage для запоминания выбранного режима расчёта (ADR-0073). */
+const CALCULATION_MODE_KEY = 'visualizer.calculationMode';
+
+function readCalculationMode(): CalculationMode {
+  return localStorage.getItem(CALCULATION_MODE_KEY) === 'depth' ? 'depth' : '2d';
+}
 
 /** Итоговая вкладка (результат) — вне этапов. */
 export const RESULT_STAGE = 'result';
@@ -67,6 +76,10 @@ type State = {
   realPipeScale: boolean;
   algorithms: AlgorithmInfo[];
   selectedAlgorithm: string | null;
+  /** ADR-0073: выбранный режим расчёта (2D или с учётом глубины). */
+  calculationMode: CalculationMode;
+  /** Режим последнего завершённого/загруженного результата. */
+  lastRunMode: CalculationMode | null;
   /** ADR-0036: трассировка этапов доступна для текущего запуска. */
   runId: string | null;
   traced: boolean;
@@ -106,6 +119,8 @@ type State = {
   toggleRealPipeScale: () => void;
   setAlgorithms: (algorithms: AlgorithmInfo[]) => void;
   setSelectedAlgorithm: (algorithm: string | null) => void;
+  setCalculationMode: (mode: CalculationMode) => void;
+  setLastRunMode: (mode: CalculationMode | null) => void;
   setStages: (runId: string, manifest: StageManifest) => void;
   setActiveStage: (stage: string) => void;
   setTreePass: (pass: number) => void;
@@ -141,6 +156,8 @@ export const useStore = create<State>((set) => ({
   realPipeScale: false,
   algorithms: [],
   selectedAlgorithm: null,
+  calculationMode: readCalculationMode(),
+  lastRunMode: null,
   runId: null,
   traced: false,
   stages: [],
@@ -204,6 +221,7 @@ export const useStore = create<State>((set) => ({
       passToVariant,
       variantScore,
       activeVariant,
+      lastRunMode: result ? inferCalculationMode(result.features) : null,
       selected: null,
       selectedAnchor: null,
       runId: null,
@@ -251,6 +269,11 @@ export const useStore = create<State>((set) => ({
       return { algorithms, selectedAlgorithm: preferred?.id ?? null };
     }),
   setSelectedAlgorithm: (algorithm) => set({ selectedAlgorithm: algorithm }),
+  setCalculationMode: (mode) => {
+    localStorage.setItem(CALCULATION_MODE_KEY, mode);
+    set({ calculationMode: mode });
+  },
+  setLastRunMode: (mode) => set({ lastRunMode: mode }),
   setStages: (runId, manifest) =>
     set((state) => {
       const activeVariantPass = state.activeVariant

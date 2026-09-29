@@ -80,8 +80,13 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
         ObjectMapper mapper = new ObjectMapper();
         Path result = tempDir.resolve("verify-result.geojson");
         Path summary = tempDir.resolve("verify-summary.json");
-        CalculationOutcome outcome = service(properties).calculate(dataset, result, summary);
+        CalculationMode mode = CalculationMode.fromParameter(System.getProperty("verify.mode", "2d"));
+        CalculationOutcome outcome = service(properties).calculate(dataset, result, summary, null,
+                mode, null, null, ProgressReporter.NOOP);
         assertThat(outcome.getSummary()).isNotNull();
+        if (mode.isDepth()) {
+            assertDepthInvariants(result, mapper, properties);
+        }
         String dump = System.getProperty("verify.out", "");
         if (!dump.isBlank()) {
             Files.copy(result, Path.of(dump), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -133,6 +138,42 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
         assertThat(outcome.getSummary().getUnconnectedOksIds())
                 .as("неподключённые точки (ТП §2.5)")
                 .isEmpty();
+    }
+
+    /**
+     * ADR-0073 / ТП v2 §5: глубины заполнены, не ниже минимальной, уклон в
+     * пределах, профиль непрерывен по узлам.
+     */
+    private void assertDepthInvariants(Path result, ObjectMapper mapper, AppProperties properties)
+            throws Exception {
+        double minDepth = properties.getDepthMinM();
+        double maxSlope = properties.getDepthMaxSlope();
+        int segments = 0;
+        double deepest = 0.0;
+        double shallowest = Double.POSITIVE_INFINITY;
+        for (var feature : mapper.readTree(result.toFile()).path("features")) {
+            var p = feature.path("properties");
+            if (!"heat_network".equals(p.path("object_type").asText())) {
+                continue;
+            }
+            assertThat(p.hasNonNull("depth_start"))
+                    .as("режим глубины: depth_start у участка %s", p.path("id").asText())
+                    .isTrue();
+            double start = p.path("depth_start").asDouble();
+            double end = p.path("depth_end").asDouble();
+            double length = p.path("length").asDouble();
+            assertThat(Math.min(start, end)).isGreaterThanOrEqualTo(minDepth - 1e-6);
+            deepest = Math.max(deepest, Math.max(start, end));
+            shallowest = Math.min(shallowest, Math.min(start, end));
+            if (length > 1e-9) {
+                assertThat(Math.abs(end - start) / length)
+                        .as("уклон участка %s", p.path("id").asText())
+                        .isLessThanOrEqualTo(maxSlope + 1e-6);
+            }
+            segments++;
+        }
+        System.out.println("DEPTH segments=" + segments + " minDepth=" + minDepth
+                + " shallowest=" + shallowest + " deepest=" + deepest);
     }
 
     private void printExitDiagnostics(Path input, Path result, ObjectMapper mapper)

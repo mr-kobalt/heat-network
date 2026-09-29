@@ -1,7 +1,7 @@
 import { notifications } from '@mantine/notifications';
 import { useStore } from './store';
 import type { RunStatus } from './store';
-import { parseFeatureCollection } from './types';
+import { calculationModeLabel, parseFeatureCollection } from './types';
 import { fetchStages, runAndFetch } from './api/client';
 import type { DatasetResponse, RunResponse } from './api/client';
 import { formatDuration, stageLabel, STATUS_LABELS } from './runStages';
@@ -17,10 +17,11 @@ export async function runDataset(file: File): Promise<void> {
   if (store.runBusy) {
     return;
   }
+  const modeLabel = calculationModeLabel(store.calculationMode);
   store.beginRun();
   notifications.show({
     id: RUN_NOTICE_ID,
-    title: 'Расчёт',
+    title: `Расчёт · ${modeLabel}`,
     message: 'В очереди',
     color: 'indigo',
     loading: true,
@@ -32,7 +33,7 @@ export async function runDataset(file: File): Promise<void> {
     // Показываем входные данные (ОКС, существующая сеть) вместе с результатом.
     const parsedInput = parseFeatureCollection(JSON.parse(await file.text()));
     useStore.getState().setInput(parsedInput);
-    const run = await runAndFetch(file, store.selectedAlgorithm, {
+    const run = await runAndFetch(file, store.selectedAlgorithm, store.calculationMode, {
       onDataset: (dataset: DatasetResponse) => {
         useStore.getState().setDatasetInfo(dataset);
       },
@@ -46,6 +47,7 @@ export async function runDataset(file: File): Promise<void> {
       },
     });
     useStore.getState().setResult(run.result);
+    useStore.getState().setLastRunMode(run.mode);
     if (run.traced && run.runId) {
       try {
         const manifest = await fetchStages(run.runId);
@@ -66,7 +68,7 @@ export async function runDataset(file: File): Promise<void> {
     useStore.getState().finishRun('FAILED', message);
     notifications.update({
       id: RUN_NOTICE_ID,
-      title: 'Ошибка расчёта',
+      title: `Ошибка расчёта · ${modeLabel}`,
       message: `${message} · ${elapsedLabel()}`,
       color: 'red',
       loading: false,
@@ -93,7 +95,7 @@ function showRunningNotice(report: RunResponse): void {
     : `${stageLabel(report.stage)} · ${Math.round(report.progress ?? 0)}% · ${elapsedLabel()}`;
   notifications.update({
     id: RUN_NOTICE_ID,
-    title: 'Расчёт',
+    title: `Расчёт · ${calculationModeLabel(useStore.getState().calculationMode)}`,
     message,
     loading: true,
     color: 'indigo',
@@ -108,7 +110,7 @@ function showFinishedNotice(status: RunStatus): void {
   const total = formatDuration((runFinishedAt ?? Date.now()) - (runStartedAt ?? Date.now()));
   notifications.update({
     id: RUN_NOTICE_ID,
-    title: 'Расчёт завершён',
+    title: `Расчёт завершён · ${calculationModeLabel(useStore.getState().calculationMode)}`,
     message: `${STATUS_LABELS[status]} · ${total}`,
     color: 'green',
     loading: false,

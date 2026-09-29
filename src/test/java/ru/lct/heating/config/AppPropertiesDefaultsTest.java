@@ -47,6 +47,15 @@ class AppPropertiesDefaultsTest {
     }
 
     @Test
+    void depthModeDefaultsMatchTpV2() {
+        assertThat(properties.getDepthNormalM()).isEqualTo(3.0);
+        assertThat(properties.getDepthMinM()).isEqualTo(0.7);
+        assertThat(properties.getDepthMaxSlope()).isEqualTo(0.10);
+        assertThat(properties.getDepthVerticalClearanceM()).isEqualTo(0.2);
+        assertThat(properties.getDepthCloseCrossingM()).isEqualTo(5.0);
+    }
+
+    @Test
     void storageDefaultsToAutoToKeepPostgisSpillAvailable() {
         assertThat(properties.getForestGridStorage()).isEqualTo("auto");
     }

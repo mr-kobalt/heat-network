@@ -1,4 +1,4 @@
-import type { FeatureCollection, GridMask, StageManifest } from '../types';
+import type { CalculationMode, FeatureCollection, GridMask, StageManifest } from '../types';
 import { parseFeatureCollection } from '../types';
 
 /**
@@ -32,6 +32,8 @@ export interface RunResponse {
   datasetId: string;
   status: 'PENDING' | 'RUNNING' | 'DONE' | 'PARTIAL' | 'FAILED';
   algorithm?: string;
+  /** ADR-0073: режим расчёта — {@code 2d} или {@code depth}. */
+  mode?: CalculationMode;
   traced?: boolean;
   stage?: string | null;
   progress?: number | null;
@@ -70,6 +72,7 @@ export async function createRun(
   datasetId: string,
   algorithm?: string | null,
   trace = false,
+  mode?: CalculationMode | null,
 ): Promise<RunResponse> {
   const params = new URLSearchParams();
   if (algorithm) {
@@ -77,6 +80,9 @@ export async function createRun(
   }
   if (trace) {
     params.set('trace', 'true');
+  }
+  if (mode === 'depth') {
+    params.set('mode', 'depth');
   }
   const query = params.toString() ? `?${params.toString()}` : '';
   const response = await fetch(`${baseUrl}/api/v1/datasets/${datasetId}/runs${query}`, {
@@ -127,6 +133,8 @@ export interface RunFetchResult {
   dataset: DatasetResponse;
   traced: boolean;
   status: RunResponse['status'];
+  /** ADR-0073: фактический режим расчёта (с сервера; fallback — запрошенный). */
+  mode: CalculationMode;
 }
 
 /** Хуки хода расчёта (ADR-0057). */
@@ -144,12 +152,13 @@ export interface RunHooks {
 export async function runAndFetch(
   file: File,
   algorithm: string | null | undefined,
+  mode: CalculationMode | null | undefined,
   hooks: RunHooks = {},
 ): Promise<RunFetchResult> {
   hooks.onUpload?.();
   const dataset = await uploadDataset(file);
   hooks.onDataset?.(dataset);
-  const created = await createRun(dataset.id, algorithm, true);
+  const created = await createRun(dataset.id, algorithm, true, mode);
   let run = created;
   hooks.onRun?.(run);
   while (run.status === 'PENDING' || run.status === 'RUNNING') {
@@ -168,5 +177,6 @@ export async function runAndFetch(
     dataset,
     traced: Boolean(run.traced),
     status: run.status,
+    mode: run.mode === 'depth' ? 'depth' : '2d',
   };
 }

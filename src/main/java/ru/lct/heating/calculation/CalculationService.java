@@ -126,8 +126,8 @@ public class CalculationService {
     public CalculationOutcome calculate(Path inputFile, Path resultFile, Path summaryFile,
                                         String algorithmId, Path warningsFile, Path stagesDir)
             throws IOException {
-        return calculate(inputFile, resultFile, summaryFile, algorithmId, warningsFile, stagesDir,
-                ProgressReporter.NOOP);
+        return calculate(inputFile, resultFile, summaryFile, algorithmId, CalculationMode.TWO_D,
+                warningsFile, stagesDir, ProgressReporter.NOOP);
     }
 
     /**
@@ -137,6 +137,17 @@ public class CalculationService {
     public CalculationOutcome calculate(Path inputFile, Path resultFile, Path summaryFile,
                                         String algorithmId, Path warningsFile, Path stagesDir,
                                         ProgressReporter reporter) throws IOException {
+        return calculate(inputFile, resultFile, summaryFile, algorithmId, CalculationMode.TWO_D,
+                warningsFile, stagesDir, reporter);
+    }
+
+    /**
+     * @param mode режим расчёта: 2D или с учётом глубины (ADR-0073, ТП v2 §5).
+     *             Наборы вариантов режимов не смешиваются.
+     */
+    public CalculationOutcome calculate(Path inputFile, Path resultFile, Path summaryFile,
+                                        String algorithmId, CalculationMode mode, Path warningsFile,
+                                        Path stagesDir, ProgressReporter reporter) throws IOException {
         ProgressReporter progress = monotonic(reporter == null
                 ? ProgressReporter.NOOP : reporter);
         long totalStart = System.nanoTime();
@@ -157,17 +168,17 @@ public class CalculationService {
                     inputFile, partitionDir, tileM, margin, warnings);
             if (plan.isSingle()) {
                 variants = runPipeline(ingestFile(plan.singleInput(), warnings), algorithm,
-                        warnings, trace, progress);
+                        warnings, trace, progress, mode);
             } else {
                 if (stagesDir != null) {
                     warnings.add("TRACE_DISABLED_FOR_PARTITIONS: трассировка этапов "
                             + "не поддерживается в режиме партиционирования");
                 }
-                variants = calculatePartitioned(plan, algorithm, warnings, progress);
+                variants = calculatePartitioned(plan, algorithm, warnings, progress, mode);
             }
         } else {
             variants = runPipeline(ingestFile(inputFile, warnings), algorithm, warnings, trace,
-                    progress);
+                    progress, mode);
         }
         progress.report("generate", 90);
 
@@ -244,7 +255,7 @@ public class CalculationService {
     /** Стадии конвейера для одного набора: граф → ограничения → выходы → лес. */
     private List<VariantResult> runPipeline(IngestResult ingestResult, TracingAlgorithm algorithm,
                                             List<String> warnings, StageTrace trace,
-                                            ProgressReporter progress) {
+                                            ProgressReporter progress, CalculationMode mode) {
         NetworkDataset dataset = ingestResult.getDataset();
         long stage = System.nanoTime();
         ExistingNetworkGraph graph = graphBuilder.build(dataset);
@@ -275,7 +286,7 @@ public class CalculationService {
 
         stage = System.nanoTime();
         List<VariantResult> variants = generateVariants(dataset, obstacleIndex, graph, specialZones,
-                warnings, exits, algorithm, trace);
+                warnings, exits, algorithm, trace, mode);
         log.info("Stage generate: {} ms; algorithm={} variants={}", elapsedMs(stage),
                 algorithm.id(), variants.size());
         return variants;
@@ -285,7 +296,8 @@ public class CalculationService {
     private List<VariantResult> calculatePartitioned(DatasetPartitioner.PartitionPlan plan,
                                                      TracingAlgorithm algorithm,
                                                      List<String> warnings,
-                                                     ProgressReporter progress) throws IOException {
+                                                     ProgressReporter progress,
+                                                     CalculationMode mode) throws IOException {
         List<List<VariantResult>> perPartition = new ArrayList<>();
         Map<String, Integer> chamberUsage = new HashMap<>();
         int index = 0;
@@ -302,7 +314,7 @@ public class CalculationService {
             IngestResult localized = IngestResult.builder().dataset(dataset)
                     .diagnostics(ingestResult.getDiagnostics()).build();
             List<VariantResult> variants = runPipeline(localized, algorithm, warnings,
-                    StageTrace.disabled(), progress);
+                    StageTrace.disabled(), progress, mode);
             Set<String> keepIds = inputNodeIds(dataset);
             perPartition.add(namespaceVariants(variants, "p" + index + "_", keepIds));
             countExistingChamberUsage(variants, dataset, chamberUsage);
@@ -513,9 +525,10 @@ public class CalculationService {
                                                  SpecialZoneIndex specialZones,
                                                  List<String> warnings,
                                                  Map<String, ConnectionExit> exits,
-                                                 TracingAlgorithm algorithm, StageTrace trace) {
+                                                 TracingAlgorithm algorithm, StageTrace trace,
+                                                 CalculationMode mode) {
         List<VariantResult> variants = variantGenerator.generate(dataset, obstacleIndex, graph,
-                specialZones, warnings, exits, algorithm, trace);
+                specialZones, warnings, exits, algorithm, trace, mode);
         int appliedDn = 0;
         if (appProperties.isForestDiameterAwareBuffers()) {
             int usedDn = maxDiameterMm(variants);
@@ -523,7 +536,7 @@ public class CalculationService {
             for (int i = 0; i < iterations && usedDn > 0; i++) {
                 ObstacleIndex index = obstacleIndexBuilder.buildAtDiameter(dataset, usedDn, warnings);
                 List<VariantResult> candidate = variantGenerator.generate(dataset, index, graph,
-                        specialZones, warnings, exits, algorithm, trace);
+                        specialZones, warnings, exits, algorithm, trace, mode);
                 int candidateDn = maxDiameterMm(candidate);
                 variants = candidate;
                 appliedDn = usedDn;
@@ -540,7 +553,7 @@ public class CalculationService {
         // допустимого маршрута).
         if (appProperties.isForestSpecialStrict() && appProperties.getForestGateRetries() > 0) {
             variants = retryWithFinerGates(dataset, graph, specialZones, warnings, exits, algorithm,
-                    trace, variants, appliedDn);
+                    trace, variants, appliedDn, mode);
         }
         return variants;
     }
@@ -550,7 +563,8 @@ public class CalculationService {
                                                     List<String> warnings,
                                                     Map<String, ConnectionExit> exits,
                                                     TracingAlgorithm algorithm, StageTrace trace,
-                                                    List<VariantResult> best, int appliedDn) {
+                                                    List<VariantResult> best, int appliedDn,
+                                                    CalculationMode mode) {
         int bestUnconnected = unconnectedCount(best);
         double step = appProperties.getSpecialGateStepM();
         int retries = appProperties.getForestGateRetries();
@@ -559,7 +573,7 @@ public class CalculationService {
             ObstacleIndex index = obstacleIndexBuilder.buildWithGateStep(dataset,
                     appliedDn > 0 ? appliedDn : null, step, warnings);
             List<VariantResult> candidate = variantGenerator.generate(dataset, index, graph,
-                    specialZones, warnings, exits, algorithm, trace);
+                    specialZones, warnings, exits, algorithm, trace, mode);
             int unconnected = unconnectedCount(candidate);
             log.info("Stage generate (gate {}/{}): step={} unconnected={}", attempt + 1, retries,
                     step, unconnected);

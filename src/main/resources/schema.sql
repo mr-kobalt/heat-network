@@ -31,3 +31,6 @@ ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS trace BOOLEAN NOT NULL DEFA
 -- ADR-0057: прогресс расчёта по этапам (идемпотентно).
 ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS stage VARCHAR(32);
 ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS progress INTEGER;
+
+-- ADR-0073: режим расчёта 2d|depth (идемпотентно).
+ALTER TABLE calculation_run ADD COLUMN IF NOT EXISTS mode VARCHAR(16);

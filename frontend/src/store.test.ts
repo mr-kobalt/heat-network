@@ -3,6 +3,7 @@ import { useStore } from './store';
 
 describe('store', () => {
   beforeEach(() => {
+    localStorage.clear();
     useStore.setState({
       input: null,
       result: null,
@@ -12,6 +13,8 @@ describe('store', () => {
       selectedAnchor: null,
       algorithms: [],
       selectedAlgorithm: null,
+      calculationMode: '2d',
+      lastRunMode: null,
     });
   });
 
@@ -43,6 +46,49 @@ describe('store', () => {
       { id: 'b', description: 'B', defaultAlgorithm: true },
     ]);
     expect(useStore.getState().selectedAlgorithm).toBe('a');
+  });
+
+  it('selects and persists the calculation mode', () => {
+    expect(useStore.getState().calculationMode).toBe('2d');
+    useStore.getState().setCalculationMode('depth');
+    expect(useStore.getState().calculationMode).toBe('depth');
+    expect(localStorage.getItem('visualizer.calculationMode')).toBe('depth');
+    useStore.getState().setCalculationMode('2d');
+    expect(localStorage.getItem('visualizer.calculationMode')).toBe('2d');
+  });
+
+  it('infers the depth mode from the result and records the last run mode', () => {
+    useStore.getState().setLastRunMode('depth');
+    expect(useStore.getState().lastRunMode).toBe('depth');
+
+    useStore.getState().setResult({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: null,
+          properties: {
+            object_type: 'heat_network',
+            variant_id: 'v1',
+            depth_start: 3.0,
+            depth_end: 2.42,
+          },
+        },
+      ],
+    });
+    expect(useStore.getState().lastRunMode).toBe('depth');
+
+    useStore.getState().setResult({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: null,
+          properties: { object_type: 'heat_network', variant_id: 'v1', depth_start: null },
+        },
+      ],
+    });
+    expect(useStore.getState().lastRunMode).toBe('2d');
   });
 
   it('defaults to the OSM basemap and switches it', () => {

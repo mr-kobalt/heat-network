@@ -55,6 +55,8 @@ class VariantGeneratorTest {
                 new CellStoreFactory(appProperties, null), appProperties, approachResolver());
         ForestResultBuilder resultBuilder = new ForestResultBuilder(
                 new ru.lct.heating.ingest.CrsTransformer(), costModel, new SpecialSpanSplitter(),
+                new ru.lct.heating.depth.DepthProfileBuilder(appProperties,
+                        new EnvelopeCatalog(tables())),
                 appProperties);
         VariantGenerator generator = new VariantGenerator(resultBuilder);
         TracingAlgorithm algorithm = new GridForestTracingAlgorithm(planner);

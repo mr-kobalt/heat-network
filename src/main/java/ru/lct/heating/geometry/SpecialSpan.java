@@ -13,6 +13,12 @@ public class SpecialSpan {
     double startDistanceM;
     double endDistanceM;
     double kSpecial;
+    /** Тип ограничения (ADR-0073: вертикальный учёт в режиме глубины). */
+    String restrictionType;
+    /** ADR-0073: глубина до верха габарита коммуникации, м (или null). */
+    Double verticalTopDepthM;
+    /** ADR-0073: высота габарита коммуникации, м (или null). */
+    Double verticalHeightM;
 
     public double lengthM() {
         return endDistanceM - startDistanceM;

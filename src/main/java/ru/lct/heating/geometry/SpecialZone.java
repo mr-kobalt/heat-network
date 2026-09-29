@@ -16,6 +16,10 @@ public class SpecialZone {
     Double angleMinDeg;
     /** Радиус зоны вокруг оси: {@code zoneBufferM + halfPairWidth}, м (E32). */
     double bufferM;
+    /** ADR-0073: глубина до верха условного габарита коммуникации, м (или null). */
+    Double verticalTopDepthM;
+    /** ADR-0073: высота условного габарита коммуникации, м (или null). */
+    Double verticalHeightM;
     Geometry axis;
     Geometry zone;
 }

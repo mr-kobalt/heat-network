@@ -51,6 +51,36 @@ describe('createRun', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('adds the depth mode parameter (ADR-0073)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'run-1' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createRun('dataset-1', 'grid-forest', true, 'depth');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/datasets/dataset-1/runs?algorithm=grid-forest&trace=true&mode=depth',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('omits the mode parameter for 2D', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'run-1' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createRun('dataset-1', null, false, '2d');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/datasets/dataset-1/runs',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });
 
 describe('stage endpoints', () => {

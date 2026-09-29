@@ -102,6 +102,71 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
         assertGridForestResult(resultFile, outcome, objectMapper);
     }
 
+    /**
+     * ADR-0073: режим глубины идёт отдельным запуском; без вертикальных
+     * ограничений профиль остаётся на обычной отметке 3,0 м, стоимость не
+     * меняется, а {@code depth_start}/{@code depth_end} заполняются.
+     */
+    @Test
+    void depthModeWritesFlatProfileOnFixtureWithoutVerticalObstacles() throws Exception {
+        assumeTrue(Files.exists(SAMPLE), "Фикстур pipeline-small.geojson недоступен");
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        Path resultFile = tempDir.resolve("depth-result.geojson");
+        Path summaryFile = tempDir.resolve("depth-summary.json");
+
+        CalculationOutcome depth = service(permissiveExitProperties()).calculate(SAMPLE, resultFile,
+                summaryFile, null, CalculationMode.DEPTH, null, null, ProgressReporter.NOOP);
+
+        assertThat(depth.getSummary()).isNotNull();
+        JsonNode root = objectMapper.readTree(resultFile.toFile());
+        boolean sawDepth = false;
+        for (JsonNode feature : root.path("features")) {
+            JsonNode properties = feature.path("properties");
+            if ("heat_network".equals(properties.path("object_type").asText())
+                    && properties.hasNonNull("depth_start")) {
+                sawDepth = true;
+                assertThat(properties.path("depth_start").asDouble()).isEqualTo(3.0);
+                assertThat(properties.path("depth_end").asDouble()).isEqualTo(3.0);
+            }
+        }
+        assertThat(sawDepth).as("режим глубины заполняет depth_start/depth_end").isTrue();
+    }
+
+    /**
+     * ADR-0073: газопровод с вертикальным габаритом заставляет профиль уйти выше
+     * обычной отметки 3,0 м (связка GeoJSON → спецзона → профиль → вывод).
+     */
+    @Test
+    void depthModeDeviatesAroundVerticalObstacle() throws Exception {
+        Path sample = Path.of("src", "test", "resources", "datasets", "depth-small.geojson");
+        assumeTrue(Files.exists(sample), "Фикстур depth-small.geojson недоступен");
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        Path resultFile = tempDir.resolve("depth-deviation.geojson");
+        Path summaryFile = tempDir.resolve("depth-deviation-summary.json");
+
+        service(permissiveExitProperties()).calculate(sample, resultFile, summaryFile, null,
+                CalculationMode.DEPTH, null, null, ProgressReporter.NOOP);
+
+        double shallowest = Double.POSITIVE_INFINITY;
+        boolean sawDepth = false;
+        for (JsonNode feature : objectMapper.readTree(resultFile.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())
+                    || !properties.hasNonNull("depth_start")) {
+                continue;
+            }
+            sawDepth = true;
+            shallowest = Math.min(shallowest,
+                    Math.min(properties.path("depth_start").asDouble(),
+                            properties.path("depth_end").asDouble()));
+        }
+        assertThat(sawDepth).isTrue();
+        assertThat(shallowest).as("обход газопровода выше обычной отметки").isLessThan(3.0 - 1e-6);
+        assertThat(shallowest).isGreaterThanOrEqualTo(0.7 - 1e-6);
+    }
+
     private void assertGridForestResult(Path resultFile, CalculationOutcome outcome,
                                         ObjectMapper objectMapper) throws Exception {
         assertThat(Files.exists(resultFile)).isTrue();

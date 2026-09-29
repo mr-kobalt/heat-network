@@ -52,7 +52,8 @@ public class RunExecutor {
             Path stagesDir = run.isTrace() ? storageService.runStageDir(runId) : null;
             CalculationOutcome outcome = calculationService.calculate(
                     storageService.datasetFile(run.getDatasetId()), resultFile, summaryFile,
-                    run.getAlgorithm(), warningsFile, stagesDir, (stage, progress) -> {
+                    run.getAlgorithm(), CalculationMode.fromParameter(run.getMode()),
+                    warningsFile, stagesDir, (stage, progress) -> {
                         run.setStage(stage);
                         run.setProgress(progress);
                         runRepository.save(run);

@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
+import ru.lct.heating.calculation.CalculationMode;
 import ru.lct.heating.domain.NetworkDataset;
 import ru.lct.heating.geometry.ObstacleIndex;
 import ru.lct.heating.geometry.SpecialZoneIndex;
@@ -44,6 +45,15 @@ public class VariantGenerator {
                                         ExistingNetworkGraph graph, SpecialZoneIndex specialZones,
                                         List<String> warnings, Map<String, ConnectionExit> exits,
                                         TracingAlgorithm algorithm, StageTrace trace) {
+        return generate(dataset, obstacleIndex, graph, specialZones, warnings, exits, algorithm,
+                trace, CalculationMode.TWO_D);
+    }
+
+    public List<VariantResult> generate(NetworkDataset dataset, ObstacleIndex obstacleIndex,
+                                        ExistingNetworkGraph graph, SpecialZoneIndex specialZones,
+                                        List<String> warnings, Map<String, ConnectionExit> exits,
+                                        TracingAlgorithm algorithm, StageTrace trace,
+                                        CalculationMode mode) {
         List<VariantResult> variants = new ArrayList<>();
         for (ForestPlanningResult planning : algorithm.plan(dataset, graph, obstacleIndex,
                 specialZones, warnings, exits, trace)) {
@@ -51,7 +61,7 @@ public class VariantGenerator {
                 break;
             }
             variants.add(resultBuilder.build(planning, dataset, specialZones, obstacleIndex,
-                    warnings, "v" + (variants.size() + 1), 0, planning.getPassNumber()));
+                    warnings, "v" + (variants.size() + 1), 0, planning.getPassNumber(), mode));
         }
         variants.sort(Comparator.comparingDouble(variant -> variant.getSummary().getScore()));
         List<VariantResult> ranked = new ArrayList<>();

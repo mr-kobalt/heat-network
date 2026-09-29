@@ -173,6 +173,14 @@ heating:
     forest-chamber-tie-in-rules: ${HEATING_FOREST_CHAMBER_TIE_IN_RULES:true}
     # ADR-0036: предел пикселей растровой диагностики сетки (прореживание).
     trace-grid-max-pixels: ${HEATING_TRACE_GRID_MAX_PIXELS:4194304}
+    # ADR-0073 / ТП v2 §5: режим с учётом глубины (mode=depth).
+    depth-normal-m: ${HEATING_DEPTH_NORMAL_M:3.0}
+    depth-min-m: ${HEATING_DEPTH_MIN_M:0.7}
+    depth-max-slope: ${HEATING_DEPTH_MAX_SLOPE:0.10}
+    # Допущение: вертикальный зазор до коммуникации (ТП чисел не задаёт), м.
+    depth-vertical-clearance-m: ${HEATING_DEPTH_VERTICAL_CLEARANCE_M:0.2}
+    # Допущение вместо NQ-05: «близкие» пересечения не возвращаются на 3,0 м, м.
+    depth-close-crossing-m: ${HEATING_DEPTH_CLOSE_CROSSING_M:5.0}
     allowed-origins:
       - http://localhost:5173
       - http://localhost:8081
@@ -256,9 +264,14 @@ heating:
       railway: {mode: PROHIBITED, min-distance-m: 1.0}
       road: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.60, special-zone-buffer-m: 3.0}
       tram_tracks: {mode: SPECIAL, min-distance-m: 1.5, angle-min-deg: 45, k-special: 1.75, special-zone-buffer-m: 3.0}
-      gas_pipeline: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.25}
-      power_cable: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.15}
-      heat_network: {mode: SPECIAL, min-distance-m: 1.0, k-special: 1.05}
+      # ADR-0073, таблица 4: вертикальные габариты для режима глубины
+      # (глубина до верха габарита / высота габарита, м).
+      gas_pipeline: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.25,
+                     vertical-top-depth-m: 2.8, vertical-height-m: 0.4}
+      power_cable: {mode: SPECIAL, min-distance-m: 2.0, k-special: 1.15,
+                    vertical-top-depth-m: 2.7, vertical-height-m: 0.2}
+      heat_network: {mode: SPECIAL, min-distance-m: 1.0, k-special: 1.05,
+                     vertical-top-depth-m: 3.0, vertical-height-m: 0.45}
 
 logging:
   level:

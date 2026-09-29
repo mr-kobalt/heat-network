@@ -294,6 +294,25 @@ public class AppProperties {
      * степени ≤4. Включено по умолчанию (обязательная часть ТП v2 §2.4).
      */
     private boolean forestChamberTieInRules = true;
+    /**
+     * ADR-0073 (ТП v2 §5): режим с учётом глубины. Обычная глубина до верхней
+     * границы расчётного габарита новой сети, м.
+     */
+    private double depthNormalM = 3.0;
+    /** ADR-0073: минимальная глубина (до верхней границы габарита), м. */
+    private double depthMinM = 0.7;
+    /** ADR-0073: максимальный уклон профиля, м/м (≤ 0,10). */
+    private double depthMaxSlope = 0.10;
+    /**
+     * ADR-0073: вертикальный зазор между габаритом новой сети и коммуникацией
+     * (допущение: ТП v2 чисел не задаёт), м.
+     */
+    private double depthVerticalClearanceM = 0.2;
+    /**
+     * ADR-0073: критерий «близких» препятствий (допущение вместо NQ-05): ближе
+     * этого зазора профиль между препятствиями не возвращается на 3,0 м, м.
+     */
+    private double depthCloseCrossingM = 5.0;
     /** ADR-0036: предел пикселей растровой диагностики сетки при трассировке. */
     private int traceGridMaxPixels = 2048 * 2048;
     private int maxRunHistory = 50;

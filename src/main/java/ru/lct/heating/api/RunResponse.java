@@ -13,6 +13,8 @@ public class RunResponse {
     UUID datasetId;
     String status;
     String algorithm;
+    /** ADR-0073: режим расчёта — {@code 2d} или {@code depth}. */
+    String mode;
     boolean traced;
     Instant createdAt;
     Instant startedAt;
