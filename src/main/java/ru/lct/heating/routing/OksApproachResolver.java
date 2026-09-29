@@ -61,12 +61,65 @@ public class OksApproachResolver {
     private final DiameterCatalog diameters;
     private final AppProperties appProperties;
 
+    /** E8-15d1: кэш индексов последнего набора (точек, oks, запретов). */
+    private NetworkDataset cachedDataset;
+    private Context cachedContext;
+
     public OksApproachResolver(RestrictionRuleResolver rules, EnvelopeCatalog envelopes,
                                DiameterCatalog diameters, AppProperties appProperties) {
         this.rules = rules;
         this.envelopes = envelopes;
         this.diameters = diameters;
         this.appProperties = appProperties;
+    }
+
+    /**
+     * E8-15d1: индексы набора — точки по id, `oks`-полигоны (STRtree), список
+     * неспециальных ограничений и кэш {@code prohibited} по Ду. Иначе на каждую
+     * точку перебираются все ограничения/точки (O(точки × ограничения)).
+     */
+    private static final class Context {
+        private final Map<String, OksConnectionPointObject> pointsById = new HashMap<>();
+        private final List<RestrictionObject> oksRestrictions = new ArrayList<>();
+        private final Map<RestrictionObject, Integer> oksOrder =
+                new java.util.IdentityHashMap<>();
+        private final org.locationtech.jts.index.strtree.STRtree oksIndex =
+                new org.locationtech.jts.index.strtree.STRtree();
+        private final List<RestrictionObject> prohibitedRestrictions = new ArrayList<>();
+        private final Map<Integer, List<Prohibited>> prohibitedByDn = new HashMap<>();
+    }
+
+    private synchronized Context context(NetworkDataset dataset) {
+        if (dataset == cachedDataset && cachedContext != null) {
+            return cachedContext;
+        }
+        Context context = new Context();
+        if (dataset.getConnectionPoints() != null) {
+            for (OksConnectionPointObject point : dataset.getConnectionPoints()) {
+                context.pointsById.put(point.getId(), point);
+            }
+        }
+        if (dataset.getRestrictions() != null) {
+            for (RestrictionObject restriction : dataset.getRestrictions()) {
+                if (restriction.getGeometry() == null) {
+                    continue;
+                }
+                RestrictionRule rule = rules.resolve(restriction.getRestrictionType());
+                if ("oks".equals(restriction.getRestrictionType())) {
+                    context.oksOrder.put(restriction, context.oksRestrictions.size());
+                    context.oksRestrictions.add(restriction);
+                    context.oksIndex.insert(restriction.getGeometry().getEnvelopeInternal(),
+                            restriction);
+                }
+                if (!rule.isSpecial()) {
+                    context.prohibitedRestrictions.add(restriction);
+                }
+            }
+        }
+        context.oksIndex.build();
+        cachedDataset = dataset;
+        cachedContext = context;
+        return context;
     }
 
     /**
@@ -123,16 +176,15 @@ public class OksApproachResolver {
         if (dataset.getConnectionPoints() == null || pointId == null) {
             return List.of();
         }
-        for (OksConnectionPointObject point : dataset.getConnectionPoints()) {
-            if (pointId.equals(point.getId())) {
-                Double flow = point.getFlowTph();
-                if (flow == null || flow <= 0.0 || point.getGeometry() == null) {
-                    return List.of();
-                }
-                return exitCandidates(point, dataset, flow);
-            }
+        OksConnectionPointObject point = context(dataset).pointsById.get(pointId);
+        if (point == null) {
+            return List.of();
         }
-        return List.of();
+        Double flow = point.getFlowTph();
+        if (flow == null || flow <= 0.0 || point.getGeometry() == null) {
+            return List.of();
+        }
+        return exitCandidates(point, dataset, flow);
     }
 
     private List<ConnectionExit> exitCandidates(OksConnectionPointObject connectionPoint,
@@ -515,41 +567,44 @@ public class OksApproachResolver {
     }
 
     private RestrictionObject owningRestriction(NetworkDataset dataset, Point point) {
-        if (dataset.getRestrictions() == null) {
+        Context context = context(dataset);
+        if (context.oksRestrictions.isEmpty()) {
             return null;
         }
-        for (RestrictionObject restriction : dataset.getRestrictions()) {
-            if (!"oks".equals(restriction.getRestrictionType())
-                    || restriction.getGeometry() == null) {
-                continue;
-            }
+        @SuppressWarnings("unchecked")
+        List<RestrictionObject> candidates = context.oksIndex.query(point.getEnvelopeInternal());
+        RestrictionObject best = null;
+        int bestOrder = Integer.MAX_VALUE;
+        for (RestrictionObject restriction : candidates) {
             // ADR-0035: точка подключения часто лежит на границе ОКС, где
             // contains() ложно; covers() учитывает и границу.
             boolean owns = appProperties.isOksOwningIncludeBoundary()
                     ? restriction.getGeometry().covers(point)
                     : restriction.getGeometry().contains(point);
             if (owns) {
-                return restriction;
+                int order = context.oksOrder.getOrDefault(restriction, Integer.MAX_VALUE);
+                if (order < bestOrder) {
+                    bestOrder = order;
+                    best = restriction;
+                }
             }
         }
-        return null;
+        return best;
     }
 
     private List<Prohibited> prohibited(NetworkDataset dataset, int designDiameterMm,
                                         double halfWidth) {
-        List<Prohibited> result = new ArrayList<>();
-        if (dataset.getRestrictions() == null) {
-            return result;
-        }
-        for (RestrictionObject restriction : dataset.getRestrictions()) {
-            RestrictionRule rule = rules.resolve(restriction.getRestrictionType());
-            if (rule.isSpecial() || restriction.getGeometry() == null) {
-                continue;
+        Context context = context(dataset);
+        return context.prohibitedByDn.computeIfAbsent(designDiameterMm, dn -> {
+            List<Prohibited> result = new ArrayList<>(context.prohibitedRestrictions.size());
+            for (RestrictionObject restriction : context.prohibitedRestrictions) {
+                RestrictionRule rule = rules.resolve(restriction.getRestrictionType());
+                double distance = rule.minDistanceForDn(dn)
+                        + envelopes.halfPairWidthM(dn);
+                result.add(new Prohibited(restriction, distance));
             }
-            double distance = rule.minDistanceForDn(designDiameterMm) + halfWidth;
-            result.add(new Prohibited(restriction, distance));
-        }
-        return result;
+            return result;
+        });
     }
 
     private Candidate nearestBoundaryCandidate(Coordinate p, Geometry own,

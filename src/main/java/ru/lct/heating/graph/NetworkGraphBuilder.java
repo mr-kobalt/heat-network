@@ -1,12 +1,12 @@
 package ru.lct.heating.graph;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Envelope;
+import org.locationtech.jts.index.strtree.STRtree;
 import org.springframework.stereotype.Component;
 import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkDataset;
@@ -17,6 +17,9 @@ import ru.lct.heating.domain.SourceObject;
  * Топология существующей сети по геометрии (ТП v2, FR-10, FR-12):
  * участки индексируются, для камер считается число существующих примыканий.
  * Проходная линия, разделённая камерой, даёт два примыкания (разъяснение 12).
+ *
+ * <p>E8-15d1: примыкания ищутся через STRtree по камерам — иначе
+ * O(участки × камеры), что при крупных наборах неприемлемо (NFR-08).</p>
  */
 @Component
 public class NetworkGraphBuilder {
@@ -39,6 +42,14 @@ public class NetworkGraphBuilder {
             }
         }
 
+        STRtree chamberIndex = new STRtree();
+        for (HeatChamberObject chamber : chambers.values()) {
+            if (chamber.getGeometry() != null) {
+                chamberIndex.insert(new Envelope(chamber.getGeometry().getCoordinate()), chamber);
+            }
+        }
+        chamberIndex.build();
+
         Map<String, Integer> attachments = new LinkedHashMap<>();
         for (String chamberId : chambers.keySet()) {
             attachments.put(chamberId, 0);
@@ -48,8 +59,8 @@ public class NetworkGraphBuilder {
                 continue;
             }
             Coordinate[] coordinates = segment.getGeometry().getCoordinates();
-            attach(coordinates[0], chambers, attachments);
-            attach(coordinates[coordinates.length - 1], chambers, attachments);
+            attach(coordinates[0], chamberIndex, attachments);
+            attach(coordinates[coordinates.length - 1], chamberIndex, attachments);
         }
 
         List<SourceObject> sources = dataset.getSources() == null
@@ -67,20 +78,16 @@ public class NetworkGraphBuilder {
                 .build();
     }
 
-    private void attach(Coordinate endpoint, Map<String, HeatChamberObject> chambers,
+    private void attach(Coordinate endpoint, STRtree chamberIndex,
                         Map<String, Integer> attachments) {
-        Set<String> matched = new HashSet<>();
-        for (Map.Entry<String, HeatChamberObject> entry : chambers.entrySet()) {
-            HeatChamberObject chamber = entry.getValue();
-            if (chamber.getGeometry() == null) {
-                continue;
-            }
+        Envelope envelope = new Envelope(endpoint);
+        envelope.expandBy(ATTACH_TOLERANCE_M);
+        @SuppressWarnings("unchecked")
+        List<HeatChamberObject> candidates = chamberIndex.query(envelope);
+        for (HeatChamberObject chamber : candidates) {
             if (endpoint.distance(chamber.getGeometry().getCoordinate()) <= ATTACH_TOLERANCE_M) {
-                matched.add(entry.getKey());
+                attachments.merge(chamber.getId(), 1, Integer::sum);
             }
-        }
-        for (String chamberId : matched) {
-            attachments.merge(chamberId, 1, Integer::sum);
         }
     }
 }

@@ -115,18 +115,32 @@ public class TieInCandidateProvider {
         if (exclusion <= 0.0 || chamberCoordinates.isEmpty()) {
             return candidates;
         }
+        // E8-15d1: STRtree по камерам — иначе O(кандидаты × камеры).
+        org.locationtech.jts.index.strtree.STRtree chamberIndex =
+                new org.locationtech.jts.index.strtree.STRtree();
+        for (Coordinate chamber : chamberCoordinates) {
+            chamberIndex.insert(new org.locationtech.jts.geom.Envelope(chamber), chamber);
+        }
+        chamberIndex.build();
         List<TieInCandidate> filtered = new ArrayList<>(candidates.size());
         for (TieInCandidate candidate : candidates) {
             if ("heat_chamber".equals(candidate.getExistingObjectType())
-                    || !nearChamber(candidate.getCoordinate(), chamberCoordinates, exclusion)) {
+                    || !nearChamber(candidate.getCoordinate(), chamberIndex, exclusion)) {
                 filtered.add(candidate);
             }
         }
         return filtered;
     }
 
-    private boolean nearChamber(Coordinate coordinate, List<Coordinate> chambers, double radius) {
-        for (Coordinate chamber : chambers) {
+    private boolean nearChamber(Coordinate coordinate,
+                                org.locationtech.jts.index.strtree.STRtree chamberIndex,
+                                double radius) {
+        org.locationtech.jts.geom.Envelope envelope =
+                new org.locationtech.jts.geom.Envelope(coordinate);
+        envelope.expandBy(radius);
+        @SuppressWarnings("unchecked")
+        List<Coordinate> candidates = chamberIndex.query(envelope);
+        for (Coordinate chamber : candidates) {
             if (coordinate.distance(chamber) <= radius) {
                 return true;
             }

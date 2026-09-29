@@ -1,10 +1,14 @@
 package ru.lct.heating.geometry;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
+import org.locationtech.jts.index.strtree.STRtree;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import ru.lct.heating.config.AppProperties;
@@ -87,6 +91,19 @@ public class ObstacleIndexBuilder {
         // «ворот», чтобы наложение полос не блокировало пересечение.
         List<Geometry> strictGeometries = new ArrayList<>();
         List<Double> strictWidths = new ArrayList<>();
+        // E8-15d1: индекс точек подключения — иначе oksDiameterMm перебирает все
+        // точки на каждый `oks`-полигон (O(oks × точки)).
+        STRtree pointIndex = new STRtree();
+        if (dataset.getConnectionPoints() != null) {
+            for (OksConnectionPointObject point : dataset.getConnectionPoints()) {
+                if (point.getGeometry() != null && point.getFlowTph() != null
+                        && point.getFlowTph() > 0.0) {
+                    pointIndex.insert(point.getGeometry().getEnvelopeInternal(), point);
+                }
+            }
+        }
+        pointIndex.build();
+        Map<Double, Integer> dnByFlow = new HashMap<>();
 
         for (RestrictionObject restriction : dataset.getRestrictions()) {
             RestrictionRule rule = rules.resolve(restriction.getRestrictionType());
@@ -110,7 +127,7 @@ public class ObstacleIndexBuilder {
             }
             int dn = uniformDn != null ? uniformDn
                     : ("oks".equals(restriction.getRestrictionType())
-                            ? oksDiameterMm(dataset, restriction, globalDn) : globalDn);
+                            ? oksDiameterMm(restriction, globalDn, pointIndex, dnByFlow) : globalDn);
             double distance = rule.minDistanceForDn(dn) + envelopes.halfPairWidthM(dn);
             Geometry geometry = restriction.getGeometry();
             prohibited.add(distance > 0 ? geometry.buffer(distance) : geometry);
@@ -137,20 +154,25 @@ public class ObstacleIndexBuilder {
         return diameters.rows().get(0).getDn();
     }
 
-    /** Ду `oks`-полигона: минимум по накрытым точкам подключения, иначе глобальный. */
-    private int oksDiameterMm(NetworkDataset dataset, RestrictionObject oks, int fallback) {
+    /**
+     * Ду `oks`-полигона: минимум по накрытым точкам подключения, иначе глобальный.
+     * E8-15d1: точки берутся из STRtree по габаритам полигона.
+     */
+    private int oksDiameterMm(RestrictionObject oks, int fallback, STRtree pointIndex,
+                              Map<Double, Integer> dnByFlow) {
+        if (oks.getGeometry() == null) {
+            return fallback;
+        }
         int best = Integer.MAX_VALUE;
-        if (dataset.getConnectionPoints() != null) {
-            for (OksConnectionPointObject point : dataset.getConnectionPoints()) {
-                if (point.getGeometry() == null || point.getFlowTph() == null
-                        || point.getFlowTph() <= 0.0) {
-                    continue;
-                }
-                if (!oks.getGeometry().covers(point.getGeometry())) {
-                    continue;
-                }
-                best = Math.min(best, designDiameterMm(point.getFlowTph()));
+        Envelope envelope = oks.getGeometry().getEnvelopeInternal();
+        @SuppressWarnings("unchecked")
+        List<OksConnectionPointObject> candidates = pointIndex.query(envelope);
+        for (OksConnectionPointObject point : candidates) {
+            if (!oks.getGeometry().covers(point.getGeometry())) {
+                continue;
             }
+            best = Math.min(best, dnByFlow.computeIfAbsent(point.getFlowTph(),
+                    this::designDiameterMm));
         }
         return best == Integer.MAX_VALUE ? fallback : best;
     }
