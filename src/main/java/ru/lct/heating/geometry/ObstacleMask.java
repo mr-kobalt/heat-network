@@ -240,9 +240,4 @@ public final class ObstacleMask {
                 coarseWidth, coarseHeight, freedCoarse, blockedCells - cleared, buildMs, shape);
     }
 
-    public String describe() {
-        return "cell=" + cell + " fine=" + width + "x" + height
-                + " coarse=" + coarseWidth + "x" + coarseHeight + " factor=" + coarseFactor
-                + " blocked=" + blockedCells + " build=" + buildMs + "ms";
-    }
 }

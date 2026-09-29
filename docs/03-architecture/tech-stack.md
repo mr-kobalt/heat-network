@@ -127,3 +127,4 @@ Node.js 22 + pnpm 11 добавляются через devenv.
 | 2026-09-29 | Визуализатор: `react-markdown`/`remark-gfm` (раздел «Документация»), встроенный Swagger UI, контекст сборки — корень репозитория (ADR-0072) | команда |
 | 2026-09-29 | Документация: дерево каталогов и ToC, якоря через `rehype-slug`/`github-slugger` (ADR-0072) | команда |
 | 2026-09-29 | M5: единый `Makefile`, Maven Wrapper, CI; devenv-скрипты — обёртки над `make`; добавлены `poppler-utils`/`pandoc`/`python3`/`make` | команда |
+| 2026-09-29 | SnakeYAML 1.29 → 1.30 (ADR-0074): дефект `StreamReader` при разборе `application.yml` с UTF-8 | команда |

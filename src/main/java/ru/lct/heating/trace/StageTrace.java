@@ -125,10 +125,6 @@ public final class StageTrace {
         return grid;
     }
 
-    public List<Integer> treePasses() {
-        return List.copyOf(passStages.getOrDefault(TREES, List.of()));
-    }
-
     /** База стадии → номера проходов, для которых записаны снимки. */
     public Map<String, List<Integer>> passStages() {
         return Collections.unmodifiableMap(passStages);

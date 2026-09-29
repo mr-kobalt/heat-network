@@ -35,7 +35,6 @@ import ru.lct.heating.geometry.ObstacleMask;
 import ru.lct.heating.geometry.ObstacleMaskBuilder;
 import ru.lct.heating.geometry.GridShape;
 import ru.lct.heating.geometry.HexGridShape;
-import ru.lct.heating.geometry.SpecialSpan;
 import ru.lct.heating.geometry.SpecialZone;
 import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.geometry.SquareGridShape;
@@ -1531,6 +1530,7 @@ public class GridForestPlanner {
         dnEstimate.mergeMax(chain.end, dn);
     }
 
+    /** Дешёвая оценка стоимости/`S` плана по рёбрам (для выбора лучшего прохода). */
     private double estimateScore(List<ForestTree> trees, List<String> unconnected,
                                  Map<String, Double> terminalFlow, SpecialZoneIndex specialZones) {
         long cost = 0L;
@@ -2141,6 +2141,11 @@ public class GridForestPlanner {
         return list == null || list.isEmpty() ? null : list.get(0);
     }
 
+    /**
+     * Вырастить дерево от клетки-источника к терминалам по готовой топологии
+     * сетки: извлечение рёбер, расход, контракция, ориентация, refine и
+     * постобработка (камеры, слияние, выходы).
+     */
     private ForestTree buildTree(int treeIndex, int root, TiePoint tie, List<Integer> topology,
                                  Map<Integer, String> ids, ObstacleMask pass,
                                  Map<Integer, List<Integer>> children,
@@ -2330,6 +2335,10 @@ public class GridForestPlanner {
         return eligible;
     }
 
+    /**
+     * Ремонт геометрии дерева после relink: углы в узлах, упрощение, выпрямление
+     * спецучастков, самопересечения, стыки выхода и предельная длина.
+     */
     private ForestTree refineTree(ForestTree tree, ObstacleMask pass, ObstacleIndex obstacleIndex,
                                   SpecialZoneIndex specialZones,
                                   Map<String, Terminal> terminalsById,
@@ -2624,6 +2633,10 @@ public class GridForestPlanner {
         return new ArrayList<>(Arrays.asList(result));
     }
 
+    /**
+     * Оптимизация положения новых камер (ADR-0051): сдвиг к медиане соседних
+     * вершин и прямая перепрокладка стыков; принимается строгое улучшение `S`.
+     */
     private ForestTree optimizeChamberTree(ForestTree tree, NetworkDataset dataset, ObstacleMask pass,
                                            ObstacleIndex obstacleIndex,
                                            SpecialZoneIndex specialZones,
@@ -2946,6 +2959,11 @@ public class GridForestPlanner {
                 && !id.equals(rootId);
     }
 
+    /**
+     * Попытка объединить две новые камеры, соединённые ребром `shared`
+     * (Steiner-vertex merge, E50-05): степень после слияния ≤ предельной и `S`
+     * строго улучшается; иначе — отказ.
+     */
     private boolean tryMerge(int edgeIndex, Map<String, ForestNode> nodes, List<ForestEdge> edges,
                              String rootId, NetworkDataset dataset, ObstacleMask pass,
                              ObstacleIndex obstacleIndex, SpecialZoneIndex specialZones,
@@ -3446,6 +3464,11 @@ public class GridForestPlanner {
         return new Coordinate(x, y);
     }
 
+    /**
+     * Переместить камеру в кандидатную точку и перепрокладывать стыки
+     * (visibility/gridPath при блокировке). Возвращает перемещение или
+     * {@code null}, если валидная перепрокладка не найдена.
+     */
     private ChamberMove tryChamberMove(Coordinate candidate, List<Stub> stubs, List<ForestEdge> edges,
                                        Set<Integer> incidentSet, ObstacleIndex obstacleIndex,
                                        SpecialZoneIndex specialZones, ObstacleMask pass,
@@ -5041,6 +5064,7 @@ public class GridForestPlanner {
         }
     }
 
+    /** Минимальный Ду номенклатуры, вмещающий расход (ТП v2 §2.3). */
     private int selectDiameter(double flow) {
         try {
             return diameters.select(flow).getDn();

@@ -8,8 +8,6 @@ import lombok.Data;
 @Data
 public class EnvelopeRow {
     private int dn;
-    private double outerDiameterM;
-    private double clearanceM;
     private double pairWidthM;
     private double heightM;
 }

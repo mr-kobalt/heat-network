@@ -214,24 +214,24 @@ heating:
   # ТП v2, таблица 1: расчётные габариты пары труб (наружный диаметр оболочки,
   # просвет, ширина пары, высота). Используются при проверке расстояний (FR-59).
   envelopes:
-    - {dn: 50,   outer-diameter-m: 0.125, clearance-m: 0.150, pair-width-m: 0.400, height-m: 0.125}
-    - {dn: 65,   outer-diameter-m: 0.140, clearance-m: 0.150, pair-width-m: 0.430, height-m: 0.140}
-    - {dn: 80,   outer-diameter-m: 0.160, clearance-m: 0.150, pair-width-m: 0.470, height-m: 0.160}
-    - {dn: 100,  outer-diameter-m: 0.180, clearance-m: 0.150, pair-width-m: 0.510, height-m: 0.180}
-    - {dn: 125,  outer-diameter-m: 0.225, clearance-m: 0.150, pair-width-m: 0.600, height-m: 0.225}
-    - {dn: 150,  outer-diameter-m: 0.250, clearance-m: 0.150, pair-width-m: 0.650, height-m: 0.250}
-    - {dn: 200,  outer-diameter-m: 0.315, clearance-m: 0.250, pair-width-m: 0.880, height-m: 0.315}
-    - {dn: 250,  outer-diameter-m: 0.400, clearance-m: 0.250, pair-width-m: 1.050, height-m: 0.400}
-    - {dn: 300,  outer-diameter-m: 0.450, clearance-m: 0.250, pair-width-m: 1.150, height-m: 0.450}
-    - {dn: 400,  outer-diameter-m: 0.560, clearance-m: 0.250, pair-width-m: 1.370, height-m: 0.560}
-    - {dn: 500,  outer-diameter-m: 0.710, clearance-m: 0.250, pair-width-m: 1.670, height-m: 0.710}
-    - {dn: 600,  outer-diameter-m: 0.800, clearance-m: 0.250, pair-width-m: 1.850, height-m: 0.800}
-    - {dn: 700,  outer-diameter-m: 0.900, clearance-m: 0.250, pair-width-m: 2.050, height-m: 0.900}
-    - {dn: 800,  outer-diameter-m: 1.000, clearance-m: 0.250, pair-width-m: 2.250, height-m: 1.000}
-    - {dn: 900,  outer-diameter-m: 1.100, clearance-m: 0.250, pair-width-m: 2.450, height-m: 1.100}
-    - {dn: 1000, outer-diameter-m: 1.200, clearance-m: 0.250, pair-width-m: 2.650, height-m: 1.200}
-    - {dn: 1200, outer-diameter-m: 1.425, clearance-m: 0.250, pair-width-m: 3.100, height-m: 1.425}
-    - {dn: 1400, outer-diameter-m: 1.600, clearance-m: 0.250, pair-width-m: 3.450, height-m: 1.600}
+    - {dn: 50,   pair-width-m: 0.400, height-m: 0.125}
+    - {dn: 65,   pair-width-m: 0.430, height-m: 0.140}
+    - {dn: 80,   pair-width-m: 0.470, height-m: 0.160}
+    - {dn: 100,  pair-width-m: 0.510, height-m: 0.180}
+    - {dn: 125,  pair-width-m: 0.600, height-m: 0.225}
+    - {dn: 150,  pair-width-m: 0.650, height-m: 0.250}
+    - {dn: 200,  pair-width-m: 0.880, height-m: 0.315}
+    - {dn: 250,  pair-width-m: 1.050, height-m: 0.400}
+    - {dn: 300,  pair-width-m: 1.150, height-m: 0.450}
+    - {dn: 400,  pair-width-m: 1.370, height-m: 0.560}
+    - {dn: 500,  pair-width-m: 1.670, height-m: 0.710}
+    - {dn: 600,  pair-width-m: 1.850, height-m: 0.800}
+    - {dn: 700,  pair-width-m: 2.050, height-m: 0.900}
+    - {dn: 800,  pair-width-m: 2.250, height-m: 1.000}
+    - {dn: 900,  pair-width-m: 2.450, height-m: 1.100}
+    - {dn: 1000, pair-width-m: 2.650, height-m: 1.200}
+    - {dn: 1200, pair-width-m: 3.100, height-m: 1.425}
+    - {dn: 1400, pair-width-m: 3.450, height-m: 1.600}
   # ТП v2, таблица 2: конфигурируемые правила ограничений (ADR-0009).
   restrictions:
     fallback:

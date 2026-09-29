@@ -29,7 +29,4 @@ public class RestrictionRuleResolver {
         return restrictionType != null && properties.getRules().containsKey(restrictionType);
     }
 
-    public List<String> knownTypes() {
-        return new ArrayList<>(properties.getRules().keySet());
-    }
 }

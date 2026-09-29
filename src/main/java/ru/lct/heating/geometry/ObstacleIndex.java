@@ -112,10 +112,6 @@ public class ObstacleIndex {
         return result;
     }
 
-    public boolean isPointBlocked(Point point) {
-        return !obstaclesContaining(point).isEmpty();
-    }
-
     public List<Geometry> obstaclesIn(Envelope envelope) {
         @SuppressWarnings("unchecked")
         List<PreparedGeometry> candidates = tree.query(envelope);

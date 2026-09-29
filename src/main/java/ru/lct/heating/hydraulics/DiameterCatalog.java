@@ -1,6 +1,5 @@
 package ru.lct.heating.hydraulics;
 
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -58,13 +57,6 @@ public class DiameterCatalog {
                 "Расход " + flowTph + " т/ч превышает пропускную способность максимального Ду");
     }
 
-    public Optional<DiameterRow> byDn(int dn) {
-        if (dn >= 0 && dn < byDnIndex.length && byDnIndex[dn] != null) {
-            return Optional.of(byDnIndex[dn]);
-        }
-        return Optional.empty();
-    }
-
     public DiameterRow requireByDn(int dn) {
         DiameterRow row = dn >= 0 && dn < byDnIndex.length ? byDnIndex[dn] : null;
         if (row == null) {
@@ -119,19 +111,6 @@ public class DiameterCatalog {
                 "Нет Ду ≥ " + dn + " для расхода " + flowTph + " и длины " + runLengthM);
     }
 
-    /** Все известные Ду (возрастание) — для предвычисления таблиц (E8). */
-    public int[] dns() {
-        int[] result = new int[rows.size()];
-        for (int i = 0; i < rows.size(); i++) {
-            result[i] = rows.get(i).getDn();
-        }
-        return result;
-    }
-
-    public int maxDn() {
-        return maxDn;
-    }
-
     /**
      * Таблица {@code newCostPerM} по индексу Ду (руб./м). Стоимость нового
      * строительства монотонна по Ду, поэтому в горячем цикле достаточно
@@ -143,6 +122,6 @@ public class DiameterCatalog {
 
     @Override
     public String toString() {
-        return "DiameterCatalog" + Arrays.toString(dns());
+        return "DiameterCatalog" + rows;
     }
 }

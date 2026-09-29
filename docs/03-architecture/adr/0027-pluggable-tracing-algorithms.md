@@ -21,9 +21,9 @@
 2. **Реестр** `TracingAlgorithmRegistry` (Spring собирает все бины
    `TracingAlgorithm`): дубликаты `id` запрещены (fail-fast); доступны
    `available()`, `require(id)` (неизвестный id → 400), `defaultAlgorithm()`.
-3. **Дефолт** — конфиг `heating.app.routing-algorithm` (по умолчанию `mst`).
-   Базовый алгоритм вынесен в `MstTracingAlgorithm` (id `mst`, поведение
-   прежнее: MST по точкам, 3 радиуса кластеризации).
+3. **Дефолт** — конфиг `heating.app.routing-algorithm` (по умолчанию
+   `grid-forest`). Устаревший `mst` удалён (ADR-0074); механизм подключения
+   алгоритмов сохраняется.
 4. **API**:
    - `GET /api/v1/algorithms` → `[{id, description, defaultAlgorithm}]`;
    - `POST /api/v1/datasets/{id}/runs?algorithm=<id>` — необязательный

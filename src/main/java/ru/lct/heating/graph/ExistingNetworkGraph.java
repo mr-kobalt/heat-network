@@ -29,10 +29,6 @@ public class ExistingNetworkGraph {
         return Optional.ofNullable(segments.get(id));
     }
 
-    public Optional<HeatChamberObject> chamber(String id) {
-        return Optional.ofNullable(chambers.get(id));
-    }
-
     public int chamberAttachments(String chamberId) {
         return chamberAttachments.getOrDefault(chamberId, 0);
     }

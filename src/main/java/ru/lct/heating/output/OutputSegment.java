@@ -1,6 +1,5 @@
 package ru.lct.heating.output;
 
-import java.util.List;
 import lombok.Builder;
 import lombok.Value;
 import org.locationtech.jts.geom.LineString;

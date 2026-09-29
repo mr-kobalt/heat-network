@@ -43,7 +43,7 @@
 | [0021](0021-chamber-connection-no-reconstruction.md) | Присоединение через камеру, отказ от реконструкции | accepted |
 | [0022](0022-diameter-and-max-length-per-path.md) | Выбор Ду и предельной длины по непрерывным путям | accepted |
 | [0023](0023-final-approach-oks-polygon.md) | Финальный прямой участок к точке в полигоне ОКС | accepted |
-| [0024](0024-oks-approach-policy.md) | Политика вывода к точке ОКС (колодцы, П-формы, теснота) | accepted (для mst; новый алгоритм — ADR-0032) |
+| [0024](0024-oks-approach-policy.md) | Политика вывода к точке ОКС (колодцы, П-формы, теснота) | superseded by [0032](0032-canonical-oks-exit.md) |
 | [0025](0025-routing-turns-and-performance.md) | Маршрутизация ТП 2.1: повороты ≤90°, сглаживание, бюджет времени | accepted |
 | [0026](0026-continuous-tie-in.md) | Непрерывная точка врезки в существующую сеть | accepted (частично) |
 | [0027](0027-pluggable-tracing-algorithms.md) | Подключаемые алгоритмы трассировки (выбор через API) | accepted |
@@ -51,7 +51,7 @@
 | [0029](0029-map-legend-compass-and-restriction-zones.md) | Условные обозначения, компас и зоны ограничений в визуализаторе | accepted |
 | [0030](0030-graph-paper-basemap.md) | Подложка «чертёжная бумага» (миллиметровка) | accepted |
 | [0031](0031-unified-forest.md) | Единый лес: рост от сети по графу видимости | superseded by [0034](0034-grid-path-search.md) (построение графа) |
-| [0032](0032-canonical-oks-exit.md) | Каноническая точка выхода из полигона ОКС | accepted (mst временно на ADR-0024) |
+| [0032](0032-canonical-oks-exit.md) | Каноническая точка выхода из полигона ОКС | accepted |
 | [0033](0033-obstacle-mask.md) | Валидация запретов: консервативная маска и PostGIS-фоллбэк | accepted (Фаза A; PostGIS — отдельная задача) |
 | [0034](0034-grid-path-search.md) | Поиск пути по сетке (единый лес) | accepted (алгоритм `grid-forest`, по умолчанию) |
 | [0035](0035-terminal-cell-selection.md) | Присоединение терминалов: выбор клетки входа, граница ОКС, переприсоединение (T-врезка) | accepted (выбор клетки/мультивход — superseded by [0037](0037-buffers-exits-candidates-variants.md)) |
@@ -86,12 +86,13 @@
 | [0065](0065-exit-visibility-fallback.md) | Visibility-фолбэк терминального ствола (E50-07) | accepted (дефолт on) |
 | [0066](0066-exit-regularization.md) | Регуляризация выхода терминала (E50-08) | accepted (дефолт on) |
 | [0067](0067-visibility-connectors-and-variant-validity.md) | Локальные visibility-коннекторы и валидность вариантов | accepted (дефолт on) |
-| [0068](0068-spatial-decomposition.md) | Пространственная декомпозиция точек подключения | accepted (дефолт off) |
+| [0068](0068-spatial-decomposition.md) | Пространственная декомпозиция точек подключения | superseded by [0071](0071-input-partitioning.md) |
 | [0069](0069-network-corridor-cost-discount.md) | Cost-aware коридор вдоль существующей сети в `grid-forest` | proposed (дефолт off) |
 | [0070](0070-cluster-junction-centroid.md) | Кластерный junction-центроид (два механизма, выбор по A/B) | proposed (дефолт off) |
 | [0071](0071-input-partitioning.md) | Потоковое партиционирование входа (тайлы/JSONL) | accepted (дефолт off) |
 | [0072](0072-web-docs-swagger-and-run-state.md) | Веб-доступ к документации и Swagger, диагностика расчёта, сохранение состояния | accepted |
 | [0073](0073-depth-mode-2-5d.md) | Режим с учётом глубины (2.5D): отдельный режим, профиль, Kгл | accepted |
+| [0074](0074-remove-obsolete-subsystems.md) | Удаление устаревших подсистем (mst, decomposition, oks_future/existing) | accepted |
 
 ## Шаблон
 
@@ -173,4 +174,5 @@
 | 2026-09-29 | В индекс добавлен ADR-0071 (потоковое партиционирование входа, E8-15d2c1) | команда |
 | 2026-09-29 | Добавлен ADR-0072 (разделы «Документация»/«API» в визуализаторе, сохранение состояния расчёта, endpoint предупреждений, фактический `traced`) | команда |
 | 2026-09-29 | Добавлен ADR-0073 (режим глубины 2.5D: отдельный режим `mode=depth`, вертикальный пост-слой, профиль, `Kгл`) | команда |
+| 2026-09-29 | Добавлен ADR-0074 (удаление устаревших подсистем: mst, decomposition, oks_future/existing); ADR-0024/0068 → superseded | команда |
 | 2026-09-29 | Добавлен раздел «Как читать индекс» (ключевые ADR, статусы) для упрощения восприятия | команда |

@@ -241,22 +241,6 @@ public class TieInCandidateProvider {
         return false;
     }
 
-    /** Минимальное расстояние от точки до существующей сети (по проекциям). */
-    public double distanceToNetwork(NetworkDataset dataset, Coordinate coordinate) {
-        double best = Double.POSITIVE_INFINITY;
-        if (dataset.getNetworkSegments() == null) {
-            return best;
-        }
-        for (NetworkSegment segment : dataset.getNetworkSegments()) {
-            if (segment.getGeometry() == null) {
-                continue;
-            }
-            best = Math.min(best, segment.getGeometry().distance(
-                    GeometrySupport.GEOMETRY_FACTORY.createPoint(coordinate)));
-        }
-        return best;
-    }
-
     private void put(Map<String, TieInCandidate> unique, TieInCandidate candidate) {
         unique.putIfAbsent(key(candidate), candidate);
     }
