@@ -49,6 +49,10 @@
     fe-build.exec = "make fe-build";
     fe-test.exec = "make fe-test";
     fe-preview.exec = "make fe-preview";
+    fe-basemap.exec = "make fe-basemap";
+    fe-basemap-placeholder.exec = "make fe-basemap-placeholder";
+    fe-basemap-style.exec = "make fe-basemap-style";
+    fe-assets.exec = "make fe-assets";
     db-up.exec = "make db-up";
     db-down.exec = "make db-down";
     db-logs.exec = "make db-logs";

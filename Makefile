@@ -91,6 +91,21 @@ fe-test: ## Тесты визуализатора (vitest)
 fe-preview: ## Сборка и предпросмотр визуализатора без Docker
 	$(PNPM) --dir $(FRONTEND) build && $(PNPM) --dir $(FRONTEND) preview
 
+.PHONY: fe-basemap
+fe-basemap: ## Офлайн-подложка: PMTiles + глифы + спрайты (BBOX/MAXZOOM/PROTOMAPS_DATE)
+	$(PNPM) --dir $(FRONTEND) basemap:prepare
+
+.PHONY: fe-basemap-placeholder
+fe-basemap-placeholder: ## Быстрая подложка (placeholder, z<=6) без полного экстракта
+	bash $(FRONTEND)/scripts/fetch-basemap.sh --placeholder-only
+
+.PHONY: fe-basemap-style
+fe-basemap-style: ## Пересобрать стили подложки из @protomaps/basemaps
+	$(PNPM) --dir $(FRONTEND) basemap:style
+
+.PHONY: fe-assets
+fe-assets: fe-basemap fe-basemap-style ## Подложка и стили (офлайн-карта)
+
 ##@ База данных (PostgreSQL + PostGIS, docker-compose)
 
 .PHONY: db-up
@@ -138,6 +153,25 @@ compose-config: ## Проверить валидность docker-compose
 
 .PHONY: deploy
 deploy: fe-up ## Деплой стека на сервере (app + db + визуализатор)
+
+##@ Лицензии
+
+.PHONY: licenses
+licenses: ## Отчёт о лицензиях зависимостей (backend + frontend) в target/licenses/
+	@mkdir -p target/licenses
+	@echo "Backend (Maven license-maven-plugin)…"
+	-$(MVN) -B -q org.codehaus.mojo:license-maven-plugin:2.4.0:add-third-party \
+		-Dlicense.outputDirectory=$(CURDIR)/target/licenses \
+		-Dlicense.thirdPartyFilename=backend.txt
+	@if [ -f target/licenses/backend.txt ]; then \
+		echo "  → target/licenses/backend.txt"; \
+	else \
+		echo "  backend: не сгенерировано (нужен доступ к Maven Central)"; \
+	fi
+	@echo "Frontend (pnpm licenses)…"
+	$(PNPM) --dir $(FRONTEND) licenses list > target/licenses/frontend.txt
+	@echo "  → target/licenses/frontend.txt"
+	@echo "Сводка и совместимость — docs/06-submission/licenses.md"
 
 ##@ Локальная разработка
 
