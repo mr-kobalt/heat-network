@@ -11,13 +11,13 @@
 - [x] E1-03 Каркас Spring Boot 2.6.3, health/info, OpenAPI, профили
 - [x] E1-04 Dockerfile и docker-compose
 - [x] E1-05 Документация (устав, требования, домен, архитектура, ADR)
-- [ ] E1-06 CI (сборка + тесты)
+- [x] E1-06 CI (сборка + тесты) — `.github/workflows/ci.yml` (backend/frontend/compose)
 - [ ] E1-07 Pre-commit hooks
 - [ ] E1-08 Статический анализ (SpotBugs/Checkstyle)
 - [ ] E1-09 Офлайн-конфигурация, запрет исходящих соединений — NFR-12
 - [x] E1-10 Headless-профиль без UI; проверка Swagger — NFR-13, NFR-04
 - [x] E1-11 Node/pnpm в devenv для визуализатора
-- [ ] E1-12 Сборка фронтенда в CI
+- [x] E1-12 Сборка фронтенда в CI (pnpm test/build)
 
 ## Эпик E2. Ввод и модель данных (M1, ревизия v2)
 
@@ -650,6 +650,20 @@
   победителей (пересчитать baseline), проигравших пометить `rejected` и удалить
   код/конфиг/тесты
 
+## Эпик E60. Пост-рефакторинг (после M5)
+
+- [ ] E60-01 Удалить legacy двухуровневую маску запретов
+  (`ObstacleMaskBuilder.build(...,coarseFactor,...)`, `ObstacleMask` coarse-поля,
+  `GridShape.conservativeDilation`, `ObstacleMaskTest`): в проде используется
+  только `buildPassability` (factor = 1)
+- [ ] E60-02 Дедупликация утилит: `clamp`, `line`, `turnDegrees`, `elapsedMs`,
+  `kSpecial`, `crosses`/`sharesNode` — в общий класс геометрии/времени
+- [ ] E60-03 Единый источник стоимости/`S`: свести `GridForestPlanner.estimateScore`,
+  `ForestResultBuilder` и `CalculationService.mergeVariants` (снять дубли
+  `maxLengthEnforcer.enforce`), под golden-тесты (baseline обязателен)
+- [ ] E60-04 Дедупликация тест-хелперов (`line`/`tables`/`dataset`,
+  `printTurnViolations`) и свойств-классов конфигурации
+
 ## Отклонённые направления
 
 - [-] E48/E49. ANE-MiST (атрибутная кластеризация точек) как генератор
@@ -749,3 +763,4 @@
 | 2026-09-29 | Backlog: заведены отложенные задачи E8-03d…g (реальный 3 ГБ, валидный эталон, joint re-run FR-29, политика FR-43 в тайлах), E8-15d2c3…5 (трассировка этапов, меж-тайловые стволы, тест) и E8-16a…d (инкрементальный withAdditional, индекс repairCrossings, контекст plan, дубли enforce/S) | команда |
 | 2026-09-29 | Эпик E9 (M4) / ADR-0073: режим глубины `mode=2d|depth` (отдельный набор вариантов), вертикальный пост-слой (`DepthProfileBuilder`), `depth_start`/`depth_end`, `Kгл`, техузлы на границах профиля; E9-01…04 закрыты, E9-05 (интеграция в поиск) и E9-06 (профиль по путям) — следующие | команда |
 | 2026-09-29 | M5 / ADR-0074: удалены устаревшие подсистемы (`mst`, `forest-decomposition`, `oks_future`/`oks_existing`), неиспользуемые методы/поля/импорты и старые комментарии; SnakeYAML 1.29 → 1.30; baseline без изменений | команда |
+| 2026-09-29 | M5: закрыты E1-06 (CI) и E1-12 (сборка фронтенда в CI); заведён эпик E60 (legacy-маска, дедупликация, единый `S`) | команда |

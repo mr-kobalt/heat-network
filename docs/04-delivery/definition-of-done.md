@@ -19,9 +19,10 @@
 
 ## 3. Сборка и окружение
 
-- `mvn -DskipTests package` и `mvn test` — успех.
-- `devenv test` — успех.
-- При изменении инфраструктуры — `docker compose config` валиден.
+- `make build` и `make test` (или `./mvnw -B verify`) — успех.
+- `make compose-config` (`docker compose config`) — валиден.
+- CI (`.github/workflows/ci.yml`) — зелёный: backend, frontend, compose.
+- `devenv test` (опционально) — успех.
 
 ## 4. Документация
 
@@ -50,3 +51,4 @@
 | 2026-09-16 | Первоначальная версия | команда |
 | 2026-09-16 | Добавлены критерии по протоколу встречи: офлайн, отсутствие UI, диагностика невалидной геометрии | команда |
 | 2026-09-19 | Привязка к ТП v2 | команда |
+| 2026-09-29 | Сборка через `make`/`./mvnw`, CI; пакет сдачи в `docs/06-submission/` | команда |
