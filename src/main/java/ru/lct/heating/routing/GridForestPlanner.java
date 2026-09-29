@@ -267,7 +267,10 @@ public class GridForestPlanner {
                 spill ? "postgis" : "memory");
 
         Map<Integer, TiePoint> sources = mapSources(pass, ties);
-        Map<String, List<ConnectionExit>> exitCandidates = exitCandidates(dataset, exits, terminals);
+        // E8: выходы-кандидаты точки строятся лениво — при недостижимости
+        // основного выхода или при включённом переназначении выхода relink.
+        // При дефолтных флагах и достижимых выходах `candidatesFor` не зовётся.
+        Map<String, List<ConnectionExit>> exitCandidates = new HashMap<>();
         long[] reachable = reachableCells(pass, sources.keySet());
         // ADR-0037: если клетка основного выхода заблокирована или недостижима,
         // берём ближайший альтернативный выход, ведущий в достижимую клетку.
@@ -275,13 +278,20 @@ public class GridForestPlanner {
             if (exitReachable(pass, reachable, terminal.target)) {
                 continue;
             }
-            for (ConnectionExit candidate : exitCandidates.getOrDefault(terminal.pointId, List.of())) {
+            for (ConnectionExit candidate
+                    : candidatesFor(exitCandidates, dataset, exits, terminal)) {
                 if (!candidate.isBlocked() && candidate.getTarget() != null
                         && exitReachable(pass, reachable, candidate.getTarget())) {
                     terminal.target = candidate.getTarget();
                     terminal.tail = candidate.getTail() == null ? List.of() : candidate.getTail();
                     break;
                 }
+            }
+        }
+        // ADR-0039: при переназначении выхода relink нужны все кандидаты точки.
+        if (appProperties.isForestRelinkExitRelocation()) {
+            for (Terminal terminal : terminals) {
+                candidatesFor(exitCandidates, dataset, exits, terminal);
             }
         }
         // Клетки выхода ОКС принудительно проходимы (цель — на границе буфера ОКС).
@@ -316,6 +326,9 @@ public class GridForestPlanner {
         int iterations = Math.max(1, appProperties.getForestCostIterations());
         int[] dnEstimate = new int[pass.width() * pass.height()];
         Arrays.fill(dnEstimate, selectDiameter(totalFlow));
+        // E8: стоимость руб./м по индексу Ду — убирает поиск номенклатуры из
+        // внутреннего цикла релаксации Дейкстры (стоимость монотонна по Ду).
+        double[] costPerMDn = diameters.costPerMDnTable();
         // E25-04: Kспец по клеткам (max при наложении) для целевой функции.
         // E41: растр угловых спецзон, чтобы не звать angleOk на каждом ребре.
         ZoneRasters rasters = zoneRasters(specialZones, pass);
@@ -330,11 +343,16 @@ public class GridForestPlanner {
             long passStart = System.nanoTime();
             GridBuild build = buildTrees(pass, dataset, sources, terminalCells, obstacleIndex,
                     specialZones, specialK, angleMask, graph, warnings, passIndex > 0, dnEstimate,
-                    terminalFlow, exitCandidates, trace, passIndex + 1);
+                    costPerMDn, terminalFlow, exitCandidates, trace, passIndex + 1);
             long passMs = elapsedMs(passStart);
             builds.add(build);
             passStats.add(GridReport.Pass.builder().index(passIndex + 1).score(build.score)
                     .trees(build.trees.size()).timeMs(passMs)
+                    .dijkstraMs(build.dijkstraMs)
+                    .extractMs(build.extractMs)
+                    .refineMs(build.refineMs)
+                    .dijkstraSettled(build.dijkstraSettled)
+                    .heapPushes(build.heapPushes)
                     .relinkCandidateNodes(build.relinkStats.getCandidateNodes())
                     .relinkCandidateEdges(build.relinkStats.getCandidateEdges())
                     .relinkTpoints(build.relinkStats.getTpoints())
@@ -523,25 +541,23 @@ public class GridForestPlanner {
     }
 
     /**
-     * ADR-0039: выходы-кандидаты каждой точки ({@code candidatesFor}), которые
-     * используются и для выбора достижимой цели роста, и для переприсоединения.
-     * Если резолвер не дал кандидатов, берётся канонический выход из
-     * {@code exits}.
+     * ADR-0039/E8: выходы-кандидаты точки ({@code candidatesFor}) — лениво и с
+     * кэшем. Используются для выбора достижимой цели роста и для
+     * переприсоединения. Если резолвер не дал кандидатов, берётся канонический
+     * выход из {@code exits}.
      */
-    private Map<String, List<ConnectionExit>> exitCandidates(NetworkDataset dataset,
-                                                             Map<String, ConnectionExit> exits,
-                                                             List<Terminal> terminals) {
-        Map<String, List<ConnectionExit>> result = new HashMap<>();
-        for (Terminal terminal : terminals) {
-            List<ConnectionExit> candidates = approachResolver.candidatesFor(dataset,
-                    terminal.pointId);
+    private List<ConnectionExit> candidatesFor(Map<String, List<ConnectionExit>> cache,
+                                               NetworkDataset dataset,
+                                               Map<String, ConnectionExit> exits,
+                                               Terminal terminal) {
+        return cache.computeIfAbsent(terminal.pointId, pointId -> {
+            List<ConnectionExit> candidates = approachResolver.candidatesFor(dataset, pointId);
             if (candidates.isEmpty()) {
-                ConnectionExit canonical = exits == null ? null : exits.get(terminal.pointId);
+                ConnectionExit canonical = exits == null ? null : exits.get(pointId);
                 candidates = canonical == null ? List.of() : List.of(canonical);
             }
-            result.put(terminal.pointId, candidates);
-        }
-        return result;
+            return candidates;
+        });
     }
 
     /**
@@ -846,7 +862,7 @@ public class GridForestPlanner {
                                  Map<Integer, Terminal> terminalCells, ObstacleIndex obstacleIndex,
                                  SpecialZoneIndex specialZones, double[] specialK, long[] angleMask,
                                  ExistingNetworkGraph graph, List<String> warnings,
-                                 boolean costWeighted, int[] dnEstimate,
+                                 boolean costWeighted, int[] dnEstimate, double[] costPerMDn,
                                  Map<String, Double> terminalFlow,
                                  Map<String, List<ConnectionExit>> exitCandidates,
                                  StageTrace trace, int passNumber) {
@@ -881,12 +897,15 @@ public class GridForestPlanner {
             // клетки пути становятся частью леса (T-присоединение).
             int remaining = distinctTerminals(terminalCells);
             long dijkstraStart = System.nanoTime();
+            long dijkstraSettled = 0L;
+            long heapPushes = sources.size();
             while (!heap.isEmpty() && remaining > 0) {
                 int current = heap.pop();
                 if (store.settled(current)) {
                     continue;
                 }
                 store.setSettled(current, true);
+                dijkstraSettled++;
                 Terminal hit = terminalCells.get(current);
                 if (hit != null && !hit.connected) {
                     int node = current;
@@ -909,6 +928,7 @@ public class GridForestPlanner {
                         store.setSettled(cell, false);
                         store.setDist(cell, 0.0);
                         heap.push(cell);
+                        heapPushes++;
                     }
                     hit.connected = true;
                     hit.startCell = current;
@@ -947,16 +967,17 @@ public class GridForestPlanner {
                     double length = pass.stepLength(step[0], step[1]);
                     double weight = length;
                     if (costWeighted) {
-                        int dn = Math.max(dnEstimate[current], dnEstimate[next]);
+                        double cpm = Math.max(costPerMDn[dnEstimate[current]],
+                                costPerMDn[dnEstimate[next]]);
                         double k = Math.max(specialK[current], specialK[next]);
-                        weight = costModel.score(Math.round(length * diameters.newCostPerM(dn) * k),
-                                length);
+                        weight = costModel.score(Math.round(length * cpm * k), length);
                     }
                     double candidate = store.dist(current) + weight;
                     if (candidate < store.dist(next) - EPS) {
                         store.setDist(next, candidate);
                         store.setParent(next, current);
                         heap.push(next);
+                        heapPushes++;
                     }
                 }
             }
@@ -1113,8 +1134,9 @@ public class GridForestPlanner {
             trees = optimizeTreeDiameters(trees, specialZones);
             List<ForestTree> optimizedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
             long refineMs = elapsedMs(refineStart);
-            log.info("Grid pass {}: dijkstra={}ms extract={}ms relink={}ms refine={}ms", passNumber,
-                    dijkstraMs, extractMs, relinkMs, refineMs);
+            log.info("Grid pass {}: dijkstra={}ms extract={}ms relink={}ms refine={}ms "
+                            + "settled={} heapPushes={}", passNumber,
+                    dijkstraMs, extractMs, relinkMs, refineMs, dijkstraSettled, heapPushes);
 
             Set<String> connected = new HashSet<>();
             List<String> unconnected = new ArrayList<>();
@@ -1127,7 +1149,8 @@ public class GridForestPlanner {
             }
             double score = estimateScore(trees, unconnected, terminalFlow, specialZones);
             return new GridBuild(trees, score, connected, rawFeatures, relinkedTrees,
-                    contractedTrees, refinedTrees, optimizedTrees, passNumber, relinkStats);
+                    contractedTrees, refinedTrees, optimizedTrees, passNumber, relinkStats,
+                    dijkstraMs, extractMs, refineMs, dijkstraSettled, heapPushes);
         } finally {
             store.close();
         }
@@ -2769,7 +2792,7 @@ public class GridForestPlanner {
         List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
         String rootId = tree.getTieInNodeId();
         int passes = Math.max(1, appProperties.getForestChamberMergePasses());
-        int[] diag = new int[7];
+        int[] diag = new int[8];
         for (int passIndex = 0; passIndex < passes; passIndex++) {
             List<Integer> pairs = new ArrayList<>();
             for (int i = 0; i < edges.size(); i++) {
@@ -2798,8 +2821,8 @@ public class GridForestPlanner {
             }
         }
         log.debug("CHAMBER_MERGE_DIAG: moveNull={} turnUnresolved={} rejectedAngle={} enforceFail={} "
-                        + "degreeFail={} scoreWorse={} applied={}", diag[0], diag[1], diag[6], diag[2],
-                diag[3], diag[4], diag[5]);
+                        + "degreeFail={} scoreWorse={} applied={} prefiltered={}", diag[0], diag[1],
+                diag[6], diag[2], diag[3], diag[4], diag[5], diag[7]);
         return ForestTree.builder().tieInNodeId(rootId).nodes(nodes).edges(edges).build();
     }
 
@@ -2850,18 +2873,26 @@ public class GridForestPlanner {
         }
         List<String> ignoredWarnings = new ArrayList<>();
         List<Stub> stubs = new ArrayList<>();
+        int dnA = 0;
+        int dnB = 0;
         for (int i : incident) {
             if (i == edgeIndex) {
                 continue;
             }
             ForestEdge edge = edges.get(i);
-            String nodeId = (edge.getFromNodeId().equals(a) || edge.getToNodeId().equals(a)) ? a : b;
+            boolean touchesA = edge.getFromNodeId().equals(a) || edge.getToNodeId().equals(a);
+            String nodeId = touchesA ? a : b;
             Stub stub = stub(i, edge, nodeId, false, nodes, ownObstacles, specialZones,
                     ignoredWarnings);
             if (stub == null) {
                 return false;
             }
             stubs.add(stub);
+            if (touchesA) {
+                dnA = Math.max(dnA, edge.getDiameterMm());
+            } else {
+                dnB = Math.max(dnB, edge.getDiameterMm());
+            }
         }
         if (stubs.size() < 3) {
             return false;
@@ -2899,13 +2930,30 @@ public class GridForestPlanner {
         }
         Map<String, String> rename = Map.of(b, a);
         double currentScore = treeScore(nodes, edges, rootId, specialZones);
+        // E8: оптимистичная (по прямым отрезкам) оценка улучшения и экономия на
+        // удаляемой камере — отсекает кандидатов до дорогого `tryChamberMove`
+        // (visibility/gridPath) и ремонта геометрии.
+        long saving = Math.min(costModel.chamberCost(Math.max(dnA, shared.getDiameterMm())),
+                costModel.chamberCost(Math.max(dnB, shared.getDiameterMm())));
         for (Coordinate candidate : candidates) {
+            if (!mergeStraightCanImprove(candidate, stubs, saving)) {
+                diag[7]++;
+                continue;
+            }
             // Ослабленные повороты без grid-фолбэка: кандидат либо проходит
             // контракт (валидация/ремонт ниже), либо отвергается.
             ChamberMove move = tryChamberMove(candidate, stubs, edges, incident, obstacleIndex,
                     specialZones, pass, false, rename, true);
             if (move == null) {
                 diag[0]++;
+                continue;
+            }
+            // E8: дешёвый необходимый предикат улучшения — по стыкам и экономии
+            // на удаляемой камере. Отсекает большинство кандидатов до дорогого
+            // ремонта геометрии (repair*), который доминирует во времени.
+            if (!mergeCanImprove(move, stubs, Math.max(dnA, shared.getDiameterMm()),
+                    Math.max(dnB, shared.getDiameterMm()))) {
+                diag[7]++;
                 continue;
             }
             List<ForestEdge> candidateEdges = new ArrayList<>();
@@ -2970,6 +3018,48 @@ public class GridForestPlanner {
             return true;
         }
         return false;
+    }
+
+    /**
+     * E8: дешёвый необходимый предикат улучшения при объединении камер —
+     * изменение стоимости/длины только стыков минус экономия на удаляемой
+     * камере. Если даже эта оптимистичная оценка не даёт строгого улучшения
+     * {@code S}, полная проверка (ремонт, enforce, treeScore) не нужна.
+     */
+    private boolean mergeCanImprove(ChamberMove move, List<Stub> stubs, int dnA, int dnB) {
+        long stubDelta = 0L;
+        double lengthDelta = 0.0;
+        for (int i = 0; i < stubs.size(); i++) {
+            Stub stub = stubs.get(i);
+            double newLen = move.stubLens.get(i);
+            stubDelta += costModel.segmentCost(stub.oldRestLen + newLen, stub.dn, 1.0,
+                    stub.kSpecial)
+                    - costModel.segmentCost(stub.oldRestLen + stub.oldStubLen, stub.dn, 1.0,
+                            stub.kSpecial);
+            lengthDelta += newLen - stub.oldStubLen;
+        }
+        long saving = Math.min(costModel.chamberCost(dnA), costModel.chamberCost(dnB));
+        return costModel.score(stubDelta - saving, lengthDelta) < -EPS;
+    }
+
+    /**
+     * E8: оптимистичная оценка улучшения по прямым отрезкам «кандидат → сосед»
+     * (нижняя граница длины новых стыков). Если даже она не улучшает {@code S}
+     * с учётом экономии на удаляемой камере, кандидат отбрасывается до
+     * {@code tryChamberMove}.
+     */
+    private boolean mergeStraightCanImprove(Coordinate candidate, List<Stub> stubs, long saving) {
+        long stubDelta = 0L;
+        double lengthDelta = 0.0;
+        for (Stub stub : stubs) {
+            double straight = candidate.distance(stub.endpoint);
+            stubDelta += costModel.segmentCost(stub.oldRestLen + straight, stub.dn, 1.0,
+                    stub.kSpecial)
+                    - costModel.segmentCost(stub.oldRestLen + stub.oldStubLen, stub.dn, 1.0,
+                            stub.kSpecial);
+            lengthDelta += straight - stub.oldStubLen;
+        }
+        return costModel.score(stubDelta - saving, lengthDelta) < -EPS;
     }
 
     /**
@@ -4851,11 +4941,18 @@ public class GridForestPlanner {
         private final List<ForestTree> optimizedTrees;
         private final int passNumber;
         private final RelinkStats relinkStats;
+        private final long dijkstraMs;
+        private final long extractMs;
+        private final long refineMs;
+        private final long dijkstraSettled;
+        private final long heapPushes;
 
         private GridBuild(List<ForestTree> trees, double score, Set<String> connected,
                           List<StageFeature> rawFeatures, List<ForestTree> relinkedTrees,
                           List<ForestTree> contractedTrees, List<ForestTree> refinedTrees,
-                          List<ForestTree> optimizedTrees, int passNumber, RelinkStats relinkStats) {
+                          List<ForestTree> optimizedTrees, int passNumber, RelinkStats relinkStats,
+                          long dijkstraMs, long extractMs, long refineMs, long dijkstraSettled,
+                          long heapPushes) {
             this.trees = trees;
             this.score = score;
             this.connected = connected;
@@ -4866,6 +4963,11 @@ public class GridForestPlanner {
             this.optimizedTrees = optimizedTrees;
             this.passNumber = passNumber;
             this.relinkStats = relinkStats;
+            this.dijkstraMs = dijkstraMs;
+            this.extractMs = extractMs;
+            this.refineMs = refineMs;
+            this.dijkstraSettled = dijkstraSettled;
+            this.heapPushes = heapPushes;
         }
     }
 

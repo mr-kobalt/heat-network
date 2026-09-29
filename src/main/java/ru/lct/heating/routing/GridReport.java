@@ -36,6 +36,16 @@ public class GridReport {
         double score;
         int trees;
         long timeMs;
+        /**
+         * E8: разбивка времени прохода (мс): рост/Дейкстра, извлечение топологии,
+         * refine (включая камеры, слияние, привязки и подбор Ду).
+         */
+        long dijkstraMs;
+        long extractMs;
+        long refineMs;
+        /** E8: число осевших клеток и число добавлений в кучу за проход. */
+        long dijkstraSettled;
+        long heapPushes;
         /** R3: счётчики relink (кандидаты, T-точки, проверки, пересборки, принятые ходы). */
         long relinkCandidateNodes;
         long relinkCandidateEdges;

@@ -475,6 +475,18 @@ no-op при выключенном флаге, результат и baseline �
   (`false`) быстрее, но чуть хуже по `S`. Диагностика
   `CHAMBER_MERGE_APPLIED`/`CHAMBER_MERGE_DIAG`. Основной набор `S` 13.5552 →
   13.4250; OSM без изменений.
+- E8-13 (2026-09-29): разбивка времени прохода пишется в `GridReport.Pass`
+  (`dijkstraMs`/`extractMs`/`refineMs`/`dijkstraSettled`/`heapPushes`); slow-
+  профилировщик `PerformanceProfileSlowTest`. Профиль показал, что доминанта —
+  не рост Дейкстры, а постобработка (`mergeChambers` до 10.9 с/проход,
+  `optimizeChambers` до 4.5 с/проход). В `mergeChambers` добавлен дешёвый
+  **необходимый** предикат улучшения (по прямым стыкам и экономии на удаляемой
+  камере) до дорогого `tryChamberMove`/ремонта геометрии: pass 2 merge
+  10.9 с → 1 мс, `Grid total` осн. 16.6 → 6.3 с, OSM 20.4 → 19.3 с, `S`/длина/
+  стоимость без изменений. `DiameterCatalog` — примитивный индекс `dn → row` и
+  таблица `newCostPerM` (без stream на горячем пути); выходы-кандидаты точки
+  (`candidatesFor`) в `plan` строятся лениво. OSM-доминанта теперь —
+  `optimizeChambers` (задача E8-14).
 
 ## 12. Расширение 2.5D (дополнительно, ТП 5)
 
@@ -559,3 +571,4 @@ no-op при выключенном флаге, результат и baseline �
 | 2026-09-28 | ADR-0065: visibility-фолбэк включён по умолчанию; добавлены окно перепробега `forest-exit-visibility-max-detour-m` (10 м) и детерминированный предел попыток `forest-exit-visibility-max-attempts` (200, защита NFR-08). Baseline `CalculationPipelineSlowTest` пересчитан: `S` 13.4250003 → 13.4203952, длина 1913.09 → 1912.29 м; OSM без изменений | команда |
 | 2026-09-28 | ADR-0066/E50-08: регуляризация выхода терминала (`forest-exit-regularization`, дефолт on): visibility-спрямление подхода к `target` (`straightenExitApproaches`), привязка некорневой новой камеры к `target` (`snapExitChambers`, `forest-exit-snap-m=1.0`), dedupe микровершин, snap T-точек relink. Осн. `S` 13.4204 → 13.4077, длина 1912.29 → 1910.03; OSM `S` 13.7609 → 13.7580, поворот у точки 4 устранён (turns 1 → 0, warnings 3 → 2); baseline пересчитан | команда |
 | 2026-09-28 | ADR-0067: локальные visibility-коннекторы камер/корней (`tryChamberMove`), терминал-осведомлённые корневые стубы, финальное спрямление после переносов, ремонт «шипа» (`k=0`), отбраковка невалидных вариантов (`treesGeometryValid`, `VARIANT_GEOMETRY_FILTERED`). Осн. `S` 13.4077 → 13.2993 (длина 1910.03 → 1890.06); OSM 13.7580 → 13.6796 (длина 1984.70 → 1970.86), дефектный вариант отфильтрован; точка 17 — ствол 96.16 м (ребро 106.7 м); baseline пересчитан | команда |
+| 2026-09-29 | E8-13: профиль проходов (`GridReport.Pass`, `PerformanceProfileSlowTest`); дешёвый необходимый предикат улучшения в `mergeChambers` до `tryChamberMove`/ремонта, примитивный `DiameterCatalog` (без stream), ленивые выходы-кандидаты. Осн. `Grid total` 16.6 → 6.3 с (pass 2 merge 10.9 с → 1 мс), OSM 20.4 → 19.3 с; `S` 13.29925214746317, длина 1890.0622718210566, стоимость 272466619 — без изменений; OSM-доминанта `optimizeChambers` → E8-14 | команда |
