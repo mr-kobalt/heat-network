@@ -501,6 +501,23 @@ no-op при выключенном флаге, результат и baseline �
   и финального спрямления повторно вызывается `repairGlobalCrossings` (FR-29).
   Исправлен латентный дефект `tryChamberMove` (вырожденное ребро из 1 вершины →
   кандидат отклоняется). `S` без изменений.
+- E8-15 (2026-09-29): подготовка к масштабу 3 ГБ (NFR-08). Генератор
+  `scripts/generate-moscow-dataset.mjs` (Москва из OSM, тайловый Overpass,
+  `--synth-only`) и харнесс `LoadProfileSlowTest` (`-Dload.dataset`,
+  `-DargLine="-Xmx…"`). Разреженные растры: `Kспец`/угловая маска
+  (`SparseCellValues`/`SparseCellSet`) и оценка Ду `dnEstimate` больше не
+  занимают `double[width*height]`/`int[width*height]`; `reachableCells` —
+  фронтальный BFS без очереди на всю сетку. PostGIS-спилл — только состояние
+  клеток; при крупной сетке без БД — предупреждение `GRID_IN_MEMORY_LARGE`.
+  Пространственная декомпозиция по кластерам — E8-15c.
+- E8-15c (2026-09-29, ADR-0068): пространственная декомпозиция — union-find
+  кластеризация точек (`forest-cluster-radius-m`), локальная сетка на кластер
+  (`planSingle`, `forest-cluster-margin-m`), учёт занятости камер между
+  кластерами (FR-26), уникальные id (`namespaceTrees`), слияние вариантов по
+  проходу, глобальный ремонт меж-кластерных пересечений. **По умолчанию
+  выключено** (`forest-decomposition=false`): проверочные наборы — единый
+  кластер, baseline без изменений; в кластерном режиме возможна смена
+  канонического выхода (FR-43) — follow-up.
 
 ## 12. Расширение 2.5D (дополнительно, ТП 5)
 
@@ -588,3 +605,5 @@ no-op при выключенном флаге, результат и baseline �
 | 2026-09-29 | E8-13: профиль проходов (`GridReport.Pass`, `PerformanceProfileSlowTest`); дешёвый необходимый предикат улучшения в `mergeChambers` до `tryChamberMove`/ремонта, примитивный `DiameterCatalog` (без stream), ленивые выходы-кандидаты. Осн. `Grid total` 16.6 → 6.3 с (pass 2 merge 10.9 с → 1 мс), OSM 20.4 → 19.3 с; `S` 13.29925214746317, длина 1890.0622718210566, стоимость 272466619 — без изменений; OSM-доминанта `optimizeChambers` → E8-14 | команда |
 | 2026-09-29 | E8-14: бюджеты обхода стыка камеры/корня — `forest-chamber-grid-expansions` 40000→4000 и `forest-chamber-visibility-max-nodes` 200→100, `visibilityPath` параметризован; агрегированная диагностика `optimizeChambers`. OSM `optimizeChambers` ~4.5→~1.5 с, `Grid total` ~19→~13.7 с, осн. ~6.3→~5.7 с; `S` без изменений (осн. 13.29925214746317, OSM 13.679614324110897); A/B 2000/60 отклонён (+0.05 S) | команда |
 | 2026-09-29 | E8-16 (A1+A2): relink — кэш `Kспец` и убран дублирующий финальный `rebuild`; префильтр перемещения камер `chamberStraightCanImprove`; финальный `repairGlobalCrossings` после переносов (FR-29). Исправлен вырожденный стык в `tryChamberMove`. `S` без изменений (осн. 13.29925214746317, OSM 13.679614324110897) | команда |
+| 2026-09-29 | E8-15a/b: генератор крупного набора Москвы из OSM (`generate-moscow-dataset.mjs`, тайловый Overpass, `--synth-only`) + харнесс `LoadProfileSlowTest`; разреженные растры (`SparseCellValues`/`SparseCellSet` для `Kспец`/угла, `dnEstimate`), фронтальный BFS `reachableCells`, guardrail `GRID_IN_MEMORY_LARGE`. `S` без изменений (осн. 13.29925214746317, OSM 13.679614324110897); fast+slow зелёные | команда |
+| 2026-09-29 | E8-15c / ADR-0068: пространственная декомпозиция точек (union-find, локальные сетки, учёт занятости камер, namespace id, слияние по проходу, глобальный ремонт). По умолчанию **выключено** (`forest-decomposition=false`); baseline `S` без изменений, в кластерном режиме возможна смена канонического выхода (follow-up) | команда |

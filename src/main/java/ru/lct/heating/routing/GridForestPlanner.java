@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
@@ -236,24 +238,275 @@ public class GridForestPlanner {
         if (terminals.isEmpty()) {
             return List.of(result(List.of(), baseUnconnected));
         }
-        List<TieInCandidate> ties = tieCandidates(dataset, terminals, graph);
+        List<TieInCandidate> allTies = rawTieCandidates(dataset, terminals, graph);
+        if (allTies.isEmpty()) {
+            warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
+            baseUnconnected.addAll(terminalIds);
+            return List.of(result(List.of(), baseUnconnected));
+        }
+        // E8-15c: пространственная декомпозиция — каждый кластер точек решается
+        // на своей локальной сетке (рабочий набор ограничен кластером). По
+        // умолчанию выключено (см. {@code forest-decomposition}).
+        List<List<Terminal>> clusters = appProperties.isForestDecomposition()
+                ? clusterTerminals(terminals) : List.of(terminals);
+        if (clusters.size() <= 1) {
+            return withBaseUnconnected(planSingle(dataset, graph, obstacleIndex, specialZones,
+                    warnings, exits, trace, terminals, allTies, true, Map.of()), baseUnconnected);
+        }
+        log.info("Decomposition: terminals={} clusters={} radius={}m", terminals.size(),
+                clusters.size(), appProperties.getForestClusterRadiusM());
+        List<List<ForestPlanningResult>> plansByCluster = new ArrayList<>();
+        TreeSet<Integer> globalPasses = new TreeSet<>();
+        Map<String, Integer> chamberUsage = new HashMap<>();
+        int clusterIndex = 0;
+        for (List<Terminal> cluster : clusters) {
+            clusterIndex++;
+            List<ForestPlanningResult> results = planSingle(dataset, graph, obstacleIndex,
+                    specialZones, warnings, exits, trace, cluster, allTies, false, chamberUsage);
+            plansByCluster.add(results);
+            for (ForestPlanningResult planning : results) {
+                globalPasses.add(planning.getPassNumber());
+            }
+            countChamberUsage(results, chamberUsage);
+            log.info("Decomposition cluster {}/{}: terminals={} plans={}", clusterIndex,
+                    clusters.size(), cluster.size(), results.size());
+        }
+        // Каждый глобальный проход собирает ВСЕ кластеры: у кластера без данного
+        // прохода берётся ближайший (по номеру) доступный, чтобы вариант покрывал
+        // все точки подключения.
+        List<ForestPlanningResult> merged = new ArrayList<>();
+        Set<String> signatures = new HashSet<>();
+        for (int pass : globalPasses) {
+            List<ForestTree> trees = new ArrayList<>();
+            List<String> unconnected = new ArrayList<>();
+            for (int clusterIdx = 0; clusterIdx < plansByCluster.size(); clusterIdx++) {
+                ForestPlanningResult planning = chooseForPass(plansByCluster.get(clusterIdx), pass);
+                if (planning == null) {
+                    continue;
+                }
+                trees.addAll(namespaceTrees(planning.getTrees(), "c" + clusterIdx + "_"));
+                unconnected.addAll(planning.getUnconnectedConnectionPointIds());
+            }
+            // E8-15c: меж-кластерные пересечения — глобальный ремонт на локальной
+            // маске (пропуск, если охват слишком велик для одной сетки).
+            trees = repairMergedCrossings(trees, obstacleIndex, warnings);
+            if (appProperties.isForestExitRegularization() && !treesGeometryValid(trees)) {
+                warnings.add("VARIANT_GEOMETRY_FILTERED: merged pass=" + pass);
+                continue;
+            }            if (!signatures.add(signature(trees))) {
+                continue;
+            }
+            if (merged.size() >= MAX_PLANS) {
+                break;
+            }
+            merged.add(ForestPlanningResult.builder().trees(trees)
+                    .unconnectedConnectionPointIds(unconnected).passNumber(pass).build());
+        }
+        if (merged.isEmpty()) {
+            merged.add(result(List.of(), new ArrayList<>(terminalIds)));
+        }
+        return withBaseUnconnected(merged, baseUnconnected);
+    }
+
+    /** План кластера для глобального прохода {@code pass} (или ближайший по номеру). */
+    private ForestPlanningResult chooseForPass(List<ForestPlanningResult> results, int pass) {
+        ForestPlanningResult best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (ForestPlanningResult planning : results) {
+            int distance = Math.abs(planning.getPassNumber() - pass);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = planning;
+            }
+        }
+        return best;
+    }
+
+    /** E8-15c: добавить к неconnected результатам общие (без терминала) точки. */
+    private List<ForestPlanningResult> withBaseUnconnected(List<ForestPlanningResult> results,
+                                                           List<String> baseUnconnected) {
+        if (baseUnconnected.isEmpty()) {
+            return results;
+        }
+        List<ForestPlanningResult> merged = new ArrayList<>(results.size());
+        for (ForestPlanningResult planning : results) {
+            List<String> unconnected = new ArrayList<>(baseUnconnected);
+            unconnected.addAll(planning.getUnconnectedConnectionPointIds());
+            merged.add(ForestPlanningResult.builder().trees(planning.getTrees())
+                    .unconnectedConnectionPointIds(unconnected)
+                    .passNumber(planning.getPassNumber()).build());
+        }
+        return merged;
+    }
+
+    /**
+     * E8-15c: union-find кластеризация точек подключения по радиусу
+     * {@code forest-cluster-radius-m}. Связные компоненты — кластеры; порядок
+     * детерминирован (по минимальному индексу точки).
+     */
+    private List<List<Terminal>> clusterTerminals(List<Terminal> terminals) {
+        int n = terminals.size();
+        double radius = appProperties.getForestClusterRadiusM();
+        int[] parent = new int[n];
+        for (int i = 0; i < n; i++) {
+            parent[i] = i;
+        }
+        if (radius > 0 && n > 1) {
+            double radius2 = radius * radius;
+            for (int i = 0; i < n; i++) {
+                Coordinate a = terminals.get(i).point;
+                for (int j = i + 1; j < n; j++) {
+                    Coordinate b = terminals.get(j).point;
+                    double dx = a.x - b.x;
+                    double dy = a.y - b.y;
+                    if (dx * dx + dy * dy <= radius2) {
+                        union(parent, i, j);
+                    }
+                }
+            }
+        }
+        Map<Integer, List<Terminal>> byRoot = new TreeMap<>();
+        for (int i = 0; i < n; i++) {
+            byRoot.computeIfAbsent(find(parent, i), key -> new ArrayList<>()).add(terminals.get(i));
+        }
+        return new ArrayList<>(byRoot.values());
+    }
+
+    private static int find(int[] parent, int x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    }
+
+    private static void union(int[] parent, int a, int b) {
+        int ra = find(parent, a);
+        int rb = find(parent, b);
+        if (ra != rb) {
+            parent[Math.max(ra, rb)] = Math.min(ra, rb);
+        }
+    }
+    /** E8-15c: учесть новые врезки в существующие камеры после кластера. */
+    private void countChamberUsage(List<ForestPlanningResult> results,
+                                   Map<String, Integer> chamberUsage) {
+        for (ForestPlanningResult planning : results) {
+            for (ForestTree tree : planning.getTrees()) {
+                ForestNode root = tree.getNodes().get(tree.getTieInNodeId());
+                if (root != null && root.isExisting()) {
+                    chamberUsage.merge(root.getId(), 1, Integer::sum);
+                }
+            }
+        }
+    }
+
+    /**
+     * E8-15c: префикс id новых узлов/рёбер кластера — иначе при слиянии
+     * деревьев разных кластеров id вида {@code ch_0}/{@code e_1_0_0} совпадают.
+     * Существующие узлы сохраняют id (ссылаются на объекты входа).
+     */
+    private List<ForestTree> namespaceTrees(List<ForestTree> trees, String prefix) {
+        List<ForestTree> result = new ArrayList<>(trees.size());
+        for (ForestTree tree : trees) {
+            Map<String, String> idMap = new HashMap<>();
+            Map<String, ForestNode> nodes = new LinkedHashMap<>();
+            for (ForestNode node : tree.getNodes().values()) {
+                // Существующие узлы и точки подключения сохраняют id (ссылки на
+                // объекты входа); префиксуются только новые камеры/тех. узлы.
+                boolean keepId = node.isExisting()
+                        || node.getType() == NodeType.CONNECTION_POINT;
+                String newId = keepId ? node.getId() : prefix + node.getId();
+                idMap.put(node.getId(), newId);
+                nodes.put(newId, node.toBuilder().id(newId).build());
+            }
+            List<ForestEdge> edges = new ArrayList<>(tree.getEdges().size());
+            for (ForestEdge edge : tree.getEdges()) {
+                edges.add(ForestEdge.builder().id(prefix + edge.getId())
+                        .fromNodeId(idMap.getOrDefault(edge.getFromNodeId(), edge.getFromNodeId()))
+                        .toNodeId(idMap.getOrDefault(edge.getToNodeId(), edge.getToNodeId()))
+                        .coordinates(edge.getCoordinates()).flowTph(edge.getFlowTph())
+                        .diameterMm(edge.getDiameterMm()).build());
+            }
+            result.add(ForestTree.builder()
+                    .tieInNodeId(idMap.getOrDefault(tree.getTieInNodeId(), tree.getTieInNodeId()))
+                    .nodes(nodes).edges(edges).build());
+        }
+        return result;
+    }
+
+    /**
+     * Один кластер/набор терминалов: полный поиск по сетке. {@code includeInputBounds}
+     * — включать bounds всего входа (единичный набор); иначе bbox локальный
+     * (кластер) с запасом {@code forest-cluster-margin-m}.
+     */
+    private List<ForestPlanningResult> planSingle(NetworkDataset dataset,
+                                                  ExistingNetworkGraph graph,
+                                                  ObstacleIndex obstacleIndex,
+                                                  SpecialZoneIndex specialZones,
+                                                  List<String> warnings,
+                                                  Map<String, ConnectionExit> exits,
+                                                  StageTrace trace, List<Terminal> terminals,
+                                                  List<TieInCandidate> ties,
+                                                  boolean includeInputBounds,
+                                                  Map<String, Integer> chamberUsage) {
+        Set<String> terminalIds = new HashSet<>();
+        for (Terminal terminal : terminals) {
+            terminalIds.add(terminal.pointId);
+        }
+        List<String> baseUnconnected = new ArrayList<>();
+        if (terminals.isEmpty()) {
+            return List.of(result(List.of(), baseUnconnected));
+        }
         if (ties.isEmpty()) {
             warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
             baseUnconnected.addAll(terminalIds);
             return List.of(result(List.of(), baseUnconnected));
         }
-        if (trace.isEnabled()) {
-            trace.addStage(StageTrace.TIES, tieFeatures(ties));
-        }
 
         long start = System.nanoTime();
         double cell = appProperties.getForestGridCellM() > 0
                 ? appProperties.getForestGridCellM() : 2.0;
-        Envelope bounds = bounds(dataset, terminals, ties, cell);
+        Envelope bounds;
+        List<TieInCandidate> localTies = ties;
+        if (includeInputBounds) {
+            bounds = bounds(dataset, terminals, ties, cell);
+        } else {
+            bounds = new Envelope();
+            for (Terminal terminal : terminals) {
+                bounds.expandToInclude(terminal.target);
+            }
+            bounds.expandBy(Math.max(appProperties.getForestClusterMarginM(), cell * 2.0));
+            localTies = new ArrayList<>();
+            for (TieInCandidate tie : ties) {
+                if (bounds.contains(tie.getCoordinate())) {
+                    localTies.add(tie);
+                }
+            }
+            if (localTies.isEmpty()) {
+                baseUnconnected.addAll(terminalIds);
+                return List.of(result(List.of(), baseUnconnected));
+            }
+        }
+        // E26/E8-15c: правило 10 м с учётом занятости камер предыдущими кластерами.
+        localTies = preferExistingChambers(dataset, graph, localTies, chamberUsage);
+        if (localTies.isEmpty()) {
+            baseUnconnected.addAll(terminalIds);
+            return List.of(result(List.of(), baseUnconnected));
+        }
+        if (trace.isEnabled()) {
+            trace.addStage(StageTrace.TIES, tieFeatures(localTies));
+        }
         GridShape shape = gridShape();
         long estimatedCells = (long) shape.columns(bounds.getWidth(), cell)
                 * shape.rows(bounds.getHeight(), cell);
         boolean spill = cellStoreFactory.spillEnabled(estimatedCells);
+        // E8-15a: понятная диагностика при крупной сетке без PostGIS-спилла
+        // (состояние клеток останется в heap; NFR-08).
+        if (!spill && estimatedCells > appProperties.getForestGridMaxCells()) {
+            warnings.add("GRID_IN_MEMORY_LARGE: cells=" + estimatedCells
+                    + " > forest-grid-max-cells=" + appProperties.getForestGridMaxCells()
+                    + "; PostGIS-спилл недоступен — возможен большой расход heap");
+        }
         long maxBytes = spill ? Long.MAX_VALUE / 4
                 : Math.max(1L, appProperties.getForestGridMaxCells() / 4);
         ObstacleMask pass = maskBuilder.buildPassability(obstacleIndex, bounds, cell, maxBytes,
@@ -266,7 +519,7 @@ public class GridForestPlanner {
                 pass.width(), pass.height(), pass.blockedCells(), pass.buildMs(),
                 spill ? "postgis" : "memory");
 
-        Map<Integer, TiePoint> sources = mapSources(pass, ties);
+        Map<Integer, TiePoint> sources = mapSources(pass, localTies);
         // E8: выходы-кандидаты точки строятся лениво — при недостижимости
         // основного выхода или при включённом переназначении выхода relink.
         // При дефолтных флагах и достижимых выходах `candidatesFor` не зовётся.
@@ -324,16 +577,18 @@ public class GridForestPlanner {
         }
 
         int iterations = Math.max(1, appProperties.getForestCostIterations());
-        int[] dnEstimate = new int[pass.width() * pass.height()];
-        Arrays.fill(dnEstimate, selectDiameter(totalFlow));
+        int baseDn = selectDiameter(totalFlow);
+        // E8-15b: оценка Ду по клеткам — разреженная (по умолчанию baseDn), без
+        // int[width*height] на всю сетку (NFR-08).
+        SparseCellValues dnEstimate = new SparseCellValues(1, baseDn);
         // E8: стоимость руб./м по индексу Ду — убирает поиск номенклатуры из
         // внутреннего цикла релаксации Дейкстры (стоимость монотонна по Ду).
         double[] costPerMDn = diameters.costPerMDnTable();
         // E25-04: Kспец по клеткам (max при наложении) для целевой функции.
         // E41: растр угловых спецзон, чтобы не звать angleOk на каждом ребре.
         ZoneRasters rasters = zoneRasters(specialZones, pass);
-        double[] specialK = rasters.k;
-        long[] angleMask = rasters.angleMask;
+        SparseCellValues specialK = rasters.k;
+        SparseCellSet angleMask = rasters.angleMask;
         List<GridBuild> builds = new ArrayList<>();
         List<GridReport.Pass> passStats = new ArrayList<>();
         double bestScore = Double.POSITIVE_INFINITY;
@@ -589,14 +844,18 @@ public class GridForestPlanner {
         return result;
     }
 
-    private List<TieInCandidate> tieCandidates(NetworkDataset dataset, List<Terminal> terminals,
-                                               ExistingNetworkGraph graph) {
+    /**
+     * E8-15c: «сырые» кандидаты врезки (без правила 10 м/занятости камер) —
+     * правило применяется на кластер с учётом уже занятых камер.
+     */
+    private List<TieInCandidate> rawTieCandidates(NetworkDataset dataset,
+                                                  List<Terminal> terminals,
+                                                  ExistingNetworkGraph graph) {
         List<TieInCandidate> all = new ArrayList<>(candidateProvider.candidates(dataset));
         for (Terminal terminal : terminals) {
             all.addAll(candidateProvider.projections(dataset, terminal.target));
         }
-        all = candidateProvider.distinct(candidateProvider.excludeNearChambers(dataset, all));
-        return preferExistingChambers(dataset, graph, all);
+        return candidateProvider.distinct(candidateProvider.excludeNearChambers(dataset, all));
     }
 
     /**
@@ -604,10 +863,15 @@ public class GridForestPlanner {
      * {@code chamber-tie-in-radius-m} (10 м) от существующей камеры с запасом
      * примыканий — врезаемся в камеру: сетевые кандидаты рядом с такой камерой
      * исключаются (камера остаётся кандидатом сама).
+     *
+     * <p>E8-15c: {@code chamberUsage} — сколько новых примыканий уже добавили
+     * предыдущие кластеры; камеры, достигшие {@code forest-max-chamber-degree},
+     * исключаются.</p>
      */
     private List<TieInCandidate> preferExistingChambers(NetworkDataset dataset,
                                                         ExistingNetworkGraph graph,
-                                                        List<TieInCandidate> candidates) {
+                                                        List<TieInCandidate> candidates,
+                                                        Map<String, Integer> chamberUsage) {
         double radius = appProperties.getChamberTieInRadiusM();
         if (!appProperties.isForestChamberTieInRules() || radius <= 0.0
                 || dataset.getHeatChambers() == null || dataset.getHeatChambers().isEmpty()) {
@@ -619,23 +883,36 @@ public class GridForestPlanner {
             if (chamber.getGeometry() == null) {
                 continue;
             }
-            int used = graph == null ? 0 : graph.chamberAttachments(chamber.getId());
+            int used = chamberUsed(graph, chamberUsage, chamber.getId());
             if (maxDegree <= 0 || used < maxDegree) {
                 eligible.add(chamber.getGeometry().getCoordinate());
             }
         }
-        if (eligible.isEmpty()) {
-            return candidates;
-        }
         List<TieInCandidate> result = new ArrayList<>(candidates.size());
         for (TieInCandidate candidate : candidates) {
-            if (!"heat_chamber".equals(candidate.getExistingObjectType())
-                    && nearAny(candidate.getCoordinate(), eligible, radius)) {
+            if ("heat_chamber".equals(candidate.getExistingObjectType())) {
+                // Камеру, уже заполненную предыдущими кластерами, не предлагаем.
+                int extra = chamberUsage.getOrDefault(candidate.getExistingObjectId(), 0);
+                if (extra > 0 && maxDegree > 0
+                        && chamberUsed(graph, chamberUsage, candidate.getExistingObjectId())
+                                >= maxDegree) {
+                    continue;
+                }
+                result.add(candidate);
+                continue;
+            }
+            if (!eligible.isEmpty() && nearAny(candidate.getCoordinate(), eligible, radius)) {
                 continue;
             }
             result.add(candidate);
         }
         return result;
+    }
+
+    private int chamberUsed(ExistingNetworkGraph graph, Map<String, Integer> chamberUsage,
+                            String chamberId) {
+        int used = graph == null ? 0 : graph.chamberAttachments(chamberId);
+        return used + chamberUsage.getOrDefault(chamberId, 0);
     }
 
     private boolean nearAny(Coordinate coordinate, List<Coordinate> points, double radius) {
@@ -810,49 +1087,62 @@ public class GridForestPlanner {
      * Связность с сетью (8-связность): битсет клеток, достижимых от источников
      * без пересечения запретов. Терминал подключается только к достижимой
      * клетке, иначе его клетка могла бы оказаться в изолированном «кармане».
+     *
+     * <p>E8-15b: фронтальный BFS (текущий/следующий слой) вместо очереди,
+     * растущей до размера области {@code int[n]} — память O(слоя), а не O(n).</p>
      */
     private long[] reachableCells(ObstacleMask pass, Set<Integer> sources) {
         int width = pass.width();
         int height = pass.height();
         int n = width * height;
         long[] reachable = new long[(n + 63) / 64];
-        int[] queue = new int[Math.min(n, 1 << 20) + 1];
-        int head = 0;
-        int tail = 0;
+        int[] frontier = new int[Math.max(16, sources.size() + 1)];
+        int frontierSize = 0;
         for (Integer source : sources) {
-            if ((reachable[source >>> 6] & (1L << (source & 63))) != 0) {
+            int word = source >>> 6;
+            long bit = 1L << (source & 63);
+            if ((reachable[word] & bit) != 0) {
                 continue;
             }
-            reachable[source >>> 6] |= 1L << (source & 63);
-            if (tail == queue.length) {
-                queue = Arrays.copyOf(queue, Math.min(n + 1, queue.length * 2));
+            reachable[word] |= bit;
+            if (frontierSize == frontier.length) {
+                frontier = Arrays.copyOf(frontier, frontier.length * 2);
             }
-            queue[tail++] = source;
+            frontier[frontierSize++] = source;
         }
-        while (head < tail) {
-            int cell = queue[head++];
-            int col = cell % width;
-            int row = cell / width;
-            for (int[] step : pass.neighbors(col, row)) {
-                int nc = col + step[0];
-                int nr = row + step[1];
-                if (nc < 0 || nr < 0 || nc >= width || nr >= height || pass.blockedCell(nc, nr)) {
-                    continue;
+        while (frontierSize > 0) {
+            int[] nextFrontier = new int[Math.max(16, frontierSize * 2)];
+            int nextSize = 0;
+            for (int i = 0; i < frontierSize; i++) {
+                int cell = frontier[i];
+                int col = cell % width;
+                int row = cell / width;
+                for (int[] step : pass.neighbors(col, row)) {
+                    int nc = col + step[0];
+                    int nr = row + step[1];
+                    if (nc < 0 || nr < 0 || nc >= width || nr >= height
+                            || pass.blockedCell(nc, nr)) {
+                        continue;
+                    }
+                    if (pass.diagonalStep(step[0], step[1])
+                            && (pass.blockedCell(col, nr) || pass.blockedCell(nc, row))) {
+                        continue;
+                    }
+                    int next = nr * width + nc;
+                    int word = next >>> 6;
+                    long bit = 1L << (next & 63);
+                    if ((reachable[word] & bit) != 0) {
+                        continue;
+                    }
+                    reachable[word] |= bit;
+                    if (nextSize == nextFrontier.length) {
+                        nextFrontier = Arrays.copyOf(nextFrontier, nextFrontier.length * 2);
+                    }
+                    nextFrontier[nextSize++] = next;
                 }
-                if (pass.diagonalStep(step[0], step[1])
-                        && (pass.blockedCell(col, nr) || pass.blockedCell(nc, row))) {
-                    continue;
-                }
-                int next = nr * width + nc;
-                if ((reachable[next >>> 6] & (1L << (next & 63))) != 0) {
-                    continue;
-                }
-                reachable[next >>> 6] |= 1L << (next & 63);
-                if (tail == queue.length) {
-                    queue = Arrays.copyOf(queue, Math.min(n + 1, Math.max(1024, queue.length * 2)));
-                }
-                queue[tail++] = next;
             }
+            frontier = nextFrontier;
+            frontierSize = nextSize;
         }
         return reachable;
     }
@@ -860,9 +1150,11 @@ public class GridForestPlanner {
     private GridBuild buildTrees(ObstacleMask pass, NetworkDataset dataset,
                                  Map<Integer, TiePoint> sources,
                                  Map<Integer, Terminal> terminalCells, ObstacleIndex obstacleIndex,
-                                 SpecialZoneIndex specialZones, double[] specialK, long[] angleMask,
+                                 SpecialZoneIndex specialZones, SparseCellValues specialK,
+                                 SparseCellSet angleMask,
                                  ExistingNetworkGraph graph, List<String> warnings,
-                                 boolean costWeighted, int[] dnEstimate, double[] costPerMDn,
+                                 boolean costWeighted, SparseCellValues dnEstimate,
+                                 double[] costPerMDn,
                                  Map<String, Double> terminalFlow,
                                  Map<String, List<ConnectionExit>> exitCandidates,
                                  StageTrace trace, int passNumber) {
@@ -960,16 +1252,18 @@ public class GridForestPlanner {
                     }
                     // E41: жёсткий контроль минимального угла пересечения спецзон.
                     // Гейтинг по растру: точная проверка только у самих зон.
-                    if (angleMask != null && (bitSet(angleMask, current) || bitSet(angleMask, next))
+                    if (angleMask != null
+                            && (angleMask.contains(current) || angleMask.contains(next))
                             && !specialZones.angleOk(line(center(pass, current), center(pass, next)))) {
                         continue;
                     }
                     double length = pass.stepLength(step[0], step[1]);
                     double weight = length;
                     if (costWeighted) {
-                        double cpm = Math.max(costPerMDn[dnEstimate[current]],
-                                costPerMDn[dnEstimate[next]]);
-                        double k = Math.max(specialK[current], specialK[next]);
+                        double cpm = Math.max(
+                                costPerMDn[(int) dnEstimate.get(current)],
+                                costPerMDn[(int) dnEstimate.get(next)]);
+                        double k = Math.max(specialK.get(current), specialK.get(next));
                         weight = costModel.score(Math.round(length * cpm * k), length);
                     }
                     double candidate = store.dist(current) + weight;
@@ -1424,12 +1718,12 @@ public class GridForestPlanner {
         return new double[]{pass.cellCenterX(cell), pass.cellCenterY(cell)};
     }
 
-    private void updateEstimate(int[] dnEstimate, int parentCell, Chain chain, int dn) {
-        dnEstimate[parentCell] = Math.max(dnEstimate[parentCell], dn);
+    private void updateEstimate(SparseCellValues dnEstimate, int parentCell, Chain chain, int dn) {
+        dnEstimate.mergeMax(parentCell, dn);
         for (int cell : chain.intermediate) {
-            dnEstimate[cell] = Math.max(dnEstimate[cell], dn);
+            dnEstimate.mergeMax(cell, dn);
         }
-        dnEstimate[chain.end] = Math.max(dnEstimate[chain.end], dn);
+        dnEstimate.mergeMax(chain.end, dn);
     }
 
     private double estimateScore(List<ForestTree> trees, List<String> unconnected,
@@ -1927,31 +2221,31 @@ public class GridForestPlanner {
 
     /** Растр {@code Kспец} и (опционально) маска угловых спецзон для поиска. */
     private static final class ZoneRasters {
-        private final double[] k;
-        private final long[] angleMask;
+        private final SparseCellValues k;
+        private final SparseCellSet angleMask;
 
-        private ZoneRasters(double[] k, long[] angleMask) {
+        private ZoneRasters(SparseCellValues k, SparseCellSet angleMask) {
             this.k = k;
             this.angleMask = angleMask;
         }
     }
 
     /**
-     * E25-04: растор {@code Kспец} по клеткам (максимум при наложении зон).
-     * Клетки вне спецзон имеют коэффициент 1.0. E41: параллельно строится
-     * маска клеток, близких к оси угловой зоны (полоса {@code 2·cell}), чтобы
-     * вызывать точный {@code angleOk} только у зон, а не на каждом ребре роста.
+     * E25-04/E8-15b: разреженный растр {@code Kспец} по клеткам (максимум при
+     * наложении зон). Клетки вне спецзон имеют коэффициент 1.0; хранятся только
+     * клетки зон, а не {@code double[width*height]} на всю сетку (NFR-08).
+     * E41: параллельно — разреженное множество клеток, близких к оси угловой
+     * зоны (полоса {@code 2·cell}), чтобы звать точный {@code angleOk} только у
+     * зон, а не на каждом ребре роста.
      */
     private ZoneRasters zoneRasters(SpecialZoneIndex specialZones, ObstacleMask pass) {
         int width = pass.width();
         int height = pass.height();
-        double[] k = new double[width * height];
-        Arrays.fill(k, 1.0);
         if (specialZones == null || specialZones.size() == 0) {
-            return new ZoneRasters(k, null);
+            return new ZoneRasters(new SparseCellValues(1, 1.0), null);
         }
-        long[] angleMask = specialZones.hasAngleZones()
-                ? new long[(width * height + 63) >>> 6] : null;
+        SparseCellValues k = new SparseCellValues(Math.max(16, specialZones.size() * 64), 1.0);
+        SparseCellSet angleMask = specialZones.hasAngleZones() ? new SparseCellSet() : null;
         double cell = pass.cellM();
         Coordinate probe = new Coordinate();
         for (SpecialZone zone : specialZones.zones()) {
@@ -1982,31 +2276,21 @@ public class GridForestPlanner {
                     probe.x = pass.centerX(col, row);
                     probe.y = pass.centerY(col, row);
                     Geometry point = GeometrySupport.GEOMETRY_FACTORY.createPoint(probe);
+                    int index = row * width + col;
                     if (zonePrepared.covers(point)) {
-                        int index = row * width + col;
-                        if (kSpecial > k[index]) {
-                            k[index] = kSpecial;
-                        }
+                        k.mergeMax(index, kSpecial);
                     }
                     if (bandPrepared != null && bandPrepared.covers(point)) {
-                        int index = row * width + col;
-                        angleMask[index >>> 6] |= 1L << (index & 63);
+                        angleMask.add(index);
                     }
                 }
             }
         }
         if (angleMask != null) {
-            long bits = 0L;
-            for (long word : angleMask) {
-                bits += Long.bitCount(word);
-            }
-            log.info("Angle mask: bits={} zones={}", bits, specialZones.size());
+            log.info("Angle mask: bits={} zones={}", angleMask.size(), specialZones.size());
         }
+        log.info("Zone raster: kCells={} zones={}", k.size(), specialZones.size());
         return new ZoneRasters(k, angleMask);
-    }
-
-    private boolean bitSet(long[] bits, int index) {
-        return (bits[index >>> 6] & (1L << (index & 63))) != 0;
     }
 
     private boolean isTopology(int cell, Map<Integer, Integer> parent,
@@ -2057,7 +2341,7 @@ public class GridForestPlanner {
                                  Map<Integer, List<Integer>> children,
                                  Map<Integer, Integer> childCount, Map<Integer, Integer> parent,
                                  Map<Integer, List<Terminal>> terminalsByCell,
-                                 Map<Integer, Double> flow, int[] dnEstimate) {
+                                 Map<Integer, Double> flow, SparseCellValues dnEstimate) {
         Map<String, ForestNode> nodes = new HashMap<>();
         for (int cell : topology) {
             String id = ids.get(cell);
@@ -3561,6 +3845,47 @@ public class GridForestPlanner {
             }
         }
         return false;
+    }
+
+    /**
+     * E8-15c: глобальный ремонт меж-кластерных пересечений. Маска строится по
+     * bbox слитых деревьев; если охват больше {@code forest-grid-max-cells} —
+     * ремонт пропускается с предупреждением (декомпозиция рассчитана на
+     * пространственно разнесённые кластеры).
+     */
+    private List<ForestTree> repairMergedCrossings(List<ForestTree> trees,
+                                                   ObstacleIndex obstacleIndex,
+                                                   List<String> warnings) {
+        if (trees.size() < 2 || obstacleIndex == null) {
+            return trees;
+        }
+        Envelope envelope = new Envelope();
+        for (ForestTree tree : trees) {
+            for (ForestEdge edge : tree.getEdges()) {
+                for (Coordinate coordinate : edge.getCoordinates()) {
+                    envelope.expandToInclude(coordinate);
+                }
+            }
+        }
+        if (envelope.isNull()) {
+            return trees;
+        }
+        double cell = appProperties.getForestGridCellM() > 0
+                ? appProperties.getForestGridCellM() : 1.0;
+        GridShape shape = gridShape();
+        long cells = (long) shape.columns(envelope.getWidth(), cell)
+                * shape.rows(envelope.getHeight(), cell);
+        if (cells > appProperties.getForestGridMaxCells()) {
+            warnings.add("FOREST_GLOBAL_REPAIR_SKIPPED: cells=" + cells);
+            return trees;
+        }
+        envelope.expandBy(Math.max(cell * 2.0, 10.0));
+        ObstacleMask mask = maskBuilder.buildPassability(obstacleIndex, envelope, cell,
+                Long.MAX_VALUE / 4, warnings, shape);
+        if (mask == null) {
+            return trees;
+        }
+        return repairGlobalCrossings(trees, mask, obstacleIndex, warnings);
     }
 
     /**

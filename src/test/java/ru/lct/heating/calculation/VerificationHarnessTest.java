@@ -56,6 +56,18 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
             properties.setForestExitRegularization(
                     Boolean.parseBoolean(System.getProperty("verify.exitRegularization")));
         }
+        if (System.getProperty("verify.clusterRadiusM") != null) {
+            properties.setForestClusterRadiusM(
+                    Double.parseDouble(System.getProperty("verify.clusterRadiusM")));
+        }
+        if (System.getProperty("verify.clusterMarginM") != null) {
+            properties.setForestClusterMarginM(
+                    Double.parseDouble(System.getProperty("verify.clusterMarginM")));
+        }
+        if (System.getProperty("verify.decomposition") != null) {
+            properties.setForestDecomposition(
+                    Boolean.parseBoolean(System.getProperty("verify.decomposition")));
+        }
 
         ObjectMapper mapper = new ObjectMapper();
         Path result = tempDir.resolve("verify-result.geojson");
