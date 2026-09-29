@@ -38,9 +38,16 @@ server:
     include-message: always
 
 springdoc:
+  # ADR-0075: документация API. UI — /swagger-ui.html, спецификация — /v3/api-docs.
   swagger-ui:
     path: /swagger-ui.html
-    operations-sorter: alpha
+    operations-sorter: method
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    display-request-duration: true
+    persist-authorization: true
+  api-docs:
+    path: /v3/api-docs
 
 management:
   endpoints:

@@ -159,3 +159,4 @@ flowchart LR
 | 2026-09-29 | ADR-0073/E9 (M4): режим глубины `mode=2d|depth`, вертикальный пост-слой (`DepthProfileBuilder`), `depth_start`/`depth_end`, `Kгл`, техузлы границ профиля; допущения A-20/NQ-05 | команда |
 | 2026-09-29 | M5: раздел «Сдача» (`06-submission/`) и регламенты конкурса в карте; единый `Makefile`/`./mvnw`/CI; mermaid-диаграммы | команда |
 | 2026-09-29 | ADR-0074: удаление устаревших подсистем (`mst`, `forest-decomposition`, `oks_future`/`oks_existing`), мёртвого кода; SnakeYAML 1.29 → 1.30 | команда |
+| 2026-09-29 | ADR-0075: документация API (OpenAPI/Swagger) — аннотации, модель ошибок, build-info, тест контракта | команда |

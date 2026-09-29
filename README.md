@@ -68,6 +68,15 @@ make db-up
 make run
 ```
 
+### API и Swagger
+
+- Swagger UI: http://localhost:8080/swagger-ui.html (спецификация —
+  http://localhost:8080/v3/api-docs).
+- Разделы: `Dataset` (загрузка), `Runs` (запуск/статус/результат/этапы),
+  `Algorithms`, `Service`; описания операций и моделей — по ADR-0075.
+- Быстрая проверка: `GET /api/v1/info` (версия сборки), `GET /api/v1/algorithms`.
+- Визуализатор встраивает Swagger UI во вкладку «API» (ADR-0072).
+
 ## Команды (Makefile)
 
 | Команда | Назначение |
@@ -172,3 +181,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-29 | ADR-0073: дополнительный режим глубины `?mode=depth` | команда |
 | 2026-09-29 | Визуализатор: выбор режима `2D/Глубина` (ADR-0073), запоминание в localStorage | команда |
 | 2026-09-29 | M5: Makefile (единый интерфейс), Maven Wrapper, CI, devenv-обёртки; актуализирован README; регламенты конкурса и пакет сдачи | команда |
+| 2026-09-29 | API: описания OpenAPI/Swagger (ADR-0075), build-info в `/api/v1/info`, тест контракта | команда |
