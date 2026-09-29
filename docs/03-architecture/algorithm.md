@@ -57,8 +57,8 @@ List<ForestPlanningResult>`.
     `numericId`, Point) — **цели**;
   - `restrictions` (`RestrictionObject`: `id`, `restrictionType`,
     LineString/MultiLineString/Polygon/MultiPolygon);
-  - `oksFutures`/`oksExisting` — устаревшие, не использовать; `bounds` —
-    `Envelope`.
+  - `bounds` — `Envelope` (границы входных объектов). Устаревшие типы
+    `oks_future`/`oks_existing` при разборе игнорируются (поля модели удалены).
 - **`ExistingNetworkGraph graph`** — топология сети по геометрии: `segments`,
   `chambers`, `sources`, `chamberAttachments` (число существующих примыканий
   к камере), `warnings`.
@@ -543,7 +543,7 @@ no-op при выключенном флаге, результат и baseline �
   **существующим** камерам, предотвращение меж-тайловой перегрузки
   (  `chamberUsage`: камеры на пределе исключаются из следующих тайлов), опция
   `forest-preserve-canonical-exits` (FR-43). `forest-decomposition` (ADR-0068) —
-  superseded в пользу партиционирования (ADR-0071).
+  superseded в пользу партиционирования (ADR-0071) и удалена (ADR-0074).
 - Режим глубины (2026-09-29, ADR-0073, M4): отдельный запуск `mode=depth`
   (колонка `calculation_run.mode`), вертикальный пост-слой
   `DepthProfileBuilder` над 2D-планом; вертикальные габариты спецпроходов,

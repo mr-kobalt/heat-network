@@ -44,6 +44,9 @@ make db-up / db-down / db-logs     # PostgreSQL + PostGIS (docker-compose)
 make up / fe-up / stop / down / ps # Docker-стек (app+db, опц. frontend)
 make compose-config                # если менялась инфраструктура
 make fe-install / fe-dev / fe-build / fe-test
+make fe-basemap / fe-basemap-style / fe-assets  # офлайн-подложка карты
+make presentation / presentation-notes / presentation-pptx  # PDF/pptx из Markdown
+make licenses                      # лицензии зависимостей → target/licenses/
 make deploy                        # развёртывание стека
 ./mvnw -B test                     # Maven Wrapper (без установленного Maven)
 devenv shell / devenv test         # окружение nix (опционально)

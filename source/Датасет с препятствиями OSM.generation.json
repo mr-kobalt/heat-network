@@ -15,8 +15,8 @@
   ],
   "margin": 0,
   "clip": true,
-  "base": "/home/kobalt/Code/work/lct2026/source/Датасет скорректированный.geojson",
-  "output": "/home/kobalt/Code/work/lct2026/source/Датасет с препятствиями OSM.geojson",
+  "base": "source/Датасет скорректированный.geojson",
+  "output": "source/Датасет с препятствиями OSM.geojson",
   "counts": {
     "road": 226,
     "railway": 43,
