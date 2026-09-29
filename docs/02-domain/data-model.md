@@ -40,6 +40,14 @@
 Типы вывода: `heat_network`, `heat_chamber`, `technical_node`, `variant_summary`.
 Объектов `tie_in` и `*_reconstruction` в выводе **нет** (ТП v2).
 
+```mermaid
+flowchart LR
+  VS["variant_summary\n(ровно одна на вариант)"] -.->|variant_id| NET["heat_network"]
+  NET -->|start_node_id / end_node_id| N1["heat_chamber"]
+  NET -->|start_node_id / end_node_id| N2["technical_node"]
+  NET -->|start_node_id / end_node_id| N3["oks_connection_point\n(id точки подключения)"]
+```
+
 ### 2.1. Новый участок тепловой сети
 
 `object_type = heat_network`, геометрия LineString.

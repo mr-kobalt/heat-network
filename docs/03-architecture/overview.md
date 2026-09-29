@@ -2,15 +2,11 @@
 
 ## 1. Контекст (C4, уровень 1)
 
-```
-┌──────────────┐   GeoJSON (до 3 ГБ)   ┌───────────────────────────┐
-│ Пользователь │ ────────────────────▶ │  Heating Routing Service  │
-│ (инженер)    │ ◀──────────────────── │  (Spring Boot, Java 11)   │
-└──────────────┘   результат GeoJSON    └────────────┬──────────────┘
-                                                     │ JDBC
-                                                ┌────▼─────────────┐
-                                                │ PostgreSQL+PostGIS│
-                                                └──────────────────┘
+```mermaid
+flowchart LR
+  U["Пользователь (инженер)"] -->|"GeoJSON (до 3 ГБ)"| S["Heating Routing Service\n(Spring Boot, Java 11)"]
+  S -->|"результат GeoJSON"| U
+  S -->|JDBC| DB[("PostgreSQL + PostGIS")]
 ```
 
 Пользователь (до 50 одновременно) загружает набор, запускает расчёт,
@@ -36,13 +32,10 @@
 
 ## 3. Компоненты приложения (конвейер)
 
-```
-ingest ──▶ geometry ──▶ graph ──▶ routing ──▶ hydraulics ──▶ cost
-                                                        │
-                                                        ▼
-                                              variants ──▶ output
-                                                        ▲
-                                                   persistence
+```mermaid
+flowchart LR
+  ingest --> geometry --> graph --> routing --> hydraulics --> cost --> variants --> output
+  persistence["persistence"] -.-> output
 ```
 
 | Пакет | Ответственность |
