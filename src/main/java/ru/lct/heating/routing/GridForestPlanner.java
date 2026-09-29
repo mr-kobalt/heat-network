@@ -1130,6 +1130,10 @@ public class GridForestPlanner {
             // ADR-0067: финальное visibility-спрямление подходов после всех
             // переносов камер/корней (соединители пересобираются заново).
             trees = straightenExitApproachesPost(trees, obstacleIndex, terminalCells);
+            // A2: переносы камер/корней/слияние и финальное спрямление могут
+            // снова создать меж-древесные пересечения — повторный финальный
+            // ремонт (FR-29), чтобы не отбраковывать вариант целиком фильтром.
+            trees = repairGlobalCrossings(trees, pass, obstacleIndex, warnings);
             // ADR-0062: финальный глобальный подбор Ду (после слияния камер).
             trees = optimizeTreeDiameters(trees, specialZones);
             List<ForestTree> optimizedTrees = trace.isEnabled() ? new ArrayList<>(trees) : trees;
@@ -2631,13 +2635,9 @@ public class GridForestPlanner {
             stats.candidates += candidates.size();
         }
         for (Coordinate candidate : candidates) {
-            // Дешёвый префильтр: даже без обхода новый ствол не может быть
-            // короче суммы прямых отрезков «кандидат → сосед».
-            double straightSum = 0.0;
-            for (Stub stub : stubs) {
-                straightSum += candidate.distance(stub.endpoint);
-            }
-            if (straightSum >= currentStubSum - EPS) {
+            // A1/E8: дешёвый необходимый предикат улучшения по прямым стыкам
+            // (нижняя граница длины) до дорогого `tryChamberMove`.
+            if (!chamberStraightCanImprove(candidate, stubs)) {
                 continue;
             }
             ChamberMove move = tryChamberMove(candidate, stubs, edges, incidentSet, obstacleIndex,
@@ -3088,6 +3088,25 @@ public class GridForestPlanner {
     }
 
     /**
+     * A1/E8: то же для перемещения (без слияния) камеры — экономии на камере
+     * нет. Необходимый предикат: если оптимистичная оценка по прямым стыкам не
+     * улучшает {@code S}, дорогой {@code tryChamberMove} не нужен.
+     */
+    private boolean chamberStraightCanImprove(Coordinate candidate, List<Stub> stubs) {
+        long stubDelta = 0L;
+        double lengthDelta = 0.0;
+        for (Stub stub : stubs) {
+            double straight = candidate.distance(stub.endpoint);
+            stubDelta += costModel.segmentCost(stub.oldRestLen + straight, stub.dn, 1.0,
+                    stub.kSpecial)
+                    - costModel.segmentCost(stub.oldRestLen + stub.oldStubLen, stub.dn, 1.0,
+                            stub.kSpecial);
+            lengthDelta += straight - stub.oldStubLen;
+        }
+        return costModel.score(stubDelta, lengthDelta) < -EPS;
+    }
+
+    /**
      * Оптимизация merge: проверка кандидата без ремонта — маршрутные повороты
      * ≤90° (внутренние вершины) и попарные углы в узлах по правилу
      * ({@code nodeAngleOk}: камера ≥30°, техузел ≤90°). true — контракт соблюдён.
@@ -3428,6 +3447,11 @@ public class GridForestPlanner {
                 coords.addAll(reversed);
             }
             coords = dedupeConsecutive(coords);
+            // Защита от вырожденного ребра: после склейки дублей вершин должно
+            // остаться ≥2 (иначе LineString невалиден; кандидат отклоняется).
+            if (coords.size() < 2) {
+                return null;
+            }
             replaced.put(stub.edgeIndex, ForestEdge.builder().id(old.getId())
                     .fromNodeId(rename == null ? old.getFromNodeId()
                             : rename.getOrDefault(old.getFromNodeId(), old.getFromNodeId()))

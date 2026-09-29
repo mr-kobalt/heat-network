@@ -104,9 +104,13 @@ public class TerminalRelinker {
         double candidateRadius = appProperties.getForestRelinkCandidateRadiusM();
         int idCounter = idBase;
         List<String> ignoredWarnings = new ArrayList<>();
+        // R5a/E8: кэш Kспец по id ребра переживает итерации и принятые ходы —
+        // неизменные рёбра не пересчитываются повторно.
+        Map<String, Double> kCache = new HashMap<>();
+        Rebuild current = null;
         for (int iter = 0; iter < iterations; iter++) {
-            CostContext ctx = costContext(edges, ignoredWarnings, stats);
-            Rebuild current = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow,
+            CostContext ctx = costContext(edges, ignoredWarnings, stats, kCache);
+            current = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow,
                     Double.POSITIVE_INFINITY, ctx);
             if (current == null) {
                 return tree;
@@ -152,7 +156,7 @@ public class TerminalRelinker {
                     edgeEnvelopes = new Envelope[edges.size()];
                     edgeGeometries(edges, edgeLines, edgeEnvelopes);
                     index = buildIndex(nodes, edges, edgeLines, edgeEnvelopes, candidateK, stats);
-                    ctx = costContext(edges, ignoredWarnings, stats);
+                    ctx = costContext(edges, ignoredWarnings, stats, kCache);
                 } else {
                     idCounter += 100;
                 }
@@ -161,23 +165,24 @@ public class TerminalRelinker {
                 break;
             }
         }
-        CostContext finalCtx = costContext(edges, ignoredWarnings, stats);
-        Rebuild finalState = rebuild(tree.getTieInNodeId(), nodes, edges, terminalFlow,
-                Double.POSITIVE_INFINITY, finalCtx);
-        return finalState == null ? tree : finalState.tree;
+        // E8: последнее принятое состояние уже собрано в `current` — повторный
+        // `rebuild` после цикла избыточен (рёбра с момента последнего rebuild
+        // не менялись, а Kспец кэширован).
+        return current == null ? tree : current.tree;
     }
 
     /**
-     * R5a: контекст стоимости хода — спецзоны ({@code Kспец}) с кэшем по id
-     * ребра на итерацию. Кэш покрывает существующие рёбра дерева; новые рёбра
-     * кандидатов считаются по месту.
+     * R5a/E8: контекст стоимости хода — спецзоны ({@code Kспец}) с кэшем по id
+     * ребра, переживающим итерации и принятые ходы. Дозаполняет только
+     * отсутствующие id; новые рёбра кандидатов считаются по месту (и тоже
+     * попадают в кэш).
      */
-    private CostContext costContext(List<Edge> edges, List<String> warnings, RelinkStats stats) {
+    private CostContext costContext(List<Edge> edges, List<String> warnings, RelinkStats stats,
+                                    Map<String, Double> cache) {
         boolean specialCost = appProperties.isForestRelinkSpecialCost();
-        Map<String, Double> cache = new HashMap<>();
         if (specialCost && specialZones != null && specialZones.size() > 0) {
             for (Edge edge : edges) {
-                if (edge.kSpecial >= 0) {
+                if (edge.kSpecial >= 0 || cache.containsKey(edge.id)) {
                     continue;
                 }
                 long start = System.nanoTime();
@@ -1055,9 +1060,9 @@ public class TerminalRelinker {
     }
 
     /**
-     * R5a: контекст стоимости хода. {@code Kспец} берётся из кэша по id ребра
-     * (заполняется на итерацию для существующих рёбер); новые рёбра кандидатов
-     * считаются по месту. Тайминги — в {@link RelinkStats}.
+     * R5a/E8: контекст стоимости хода. {@code Kспец} берётся из кэша по id ребра
+     * (переживает итерации и принятые ходы); новые рёбра кандидатов считаются по
+     * месту. Тайминги — в {@link RelinkStats}.
      */
     private static final class CostContext {
         private final SpecialZoneIndex zones;
@@ -1089,6 +1094,7 @@ public class TerminalRelinker {
             long start = System.nanoTime();
             double k = zones.maxKSpecialNearby(edge.coords);
             stats.addKSpecial(System.nanoTime() - start);
+            kSpecialCache.put(edge.id, k);
             return k;
         }
 
