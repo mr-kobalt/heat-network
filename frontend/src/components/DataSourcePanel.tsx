@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Divider, Group, Progress, Stack, Text } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Divider,
+  Group,
+  Progress,
+  Stack,
+  Text,
+} from '@mantine/core';
 import { Dropzone } from '@mantine/dropzone';
 import { IconDownload, IconFileDownload, IconFileImport, IconUpload } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
@@ -7,7 +15,7 @@ import { parseFeatureCollection } from '../types';
 import { useStore } from '../store';
 import { fetchAlgorithms, fetchResultBlob } from '../api/client';
 import { runDataset } from '../runDataset';
-import { stageLabel } from '../runStages';
+import { formatDuration, stageLabel, STATUS_LABELS } from '../runStages';
 
 const ACCEPT = ['.geojson', '.json', 'application/geo+json'];
 
@@ -18,11 +26,26 @@ export function DataSourcePanel() {
   const runBusy = useStore((state) => state.runBusy);
   const runStage = useStore((state) => state.runStage);
   const runProgress = useStore((state) => state.runProgress);
+  const runStatus = useStore((state) => state.runStatus);
+  const runStartedAt = useStore((state) => state.runStartedAt);
+  const runFinishedAt = useStore((state) => state.runFinishedAt);
   const runError = useStore((state) => state.runError);
   const runId = useStore((state) => state.runId);
   const result = useStore((state) => state.result);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Тикаем таймер раз в секунду, пока идёт расчёт (иначе — фиксируем итог).
+  useEffect(() => {
+    if (!runBusy) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [runBusy]);
+
+  const elapsed = runStartedAt ? (runFinishedAt ?? now) - runStartedAt : 0;
 
   const { data: fetchedAlgorithms, error: algorithmsError } = useQuery({
     queryKey: ['algorithms'],
@@ -128,19 +151,27 @@ export function DataSourcePanel() {
         </Text>
       )}
 
-      {runBusy ? (
+      {runStartedAt != null && (
         <Stack gap={4}>
           <Group justify="space-between">
             <Text size="sm" fw={600}>
-              {stageLabel(runStage)}
+              {runBusy ? stageLabel(runStage) : STATUS_LABELS[runStatus]}
             </Text>
             <Text size="sm" c="dimmed">
-              {Math.round(runProgress)}%
+              {Math.round(runProgress)}% · {formatDuration(elapsed)}
             </Text>
           </Group>
-          <Progress value={runProgress} animated size="md" radius="sm" />
+          <Progress
+            value={runProgress}
+            animated={runBusy}
+            size="md"
+            radius="sm"
+            color={runStatus === 'FAILED' ? 'red' : undefined}
+          />
         </Stack>
-      ) : (
+      )}
+
+      {!runBusy && (
         <Group grow align="stretch" gap="xs">
           <Dropzone
             accept={ACCEPT}

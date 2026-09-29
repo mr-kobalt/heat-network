@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Badge, Box, Divider, Group, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { useStore } from '../store';
 import type { FeatureCollection, FeatureProperties } from '../types';
+import { DatasetDiagnostics } from './DatasetDiagnostics';
 
 interface Aggregate {
   length: number;
@@ -229,9 +230,13 @@ export function VariantSummaryPanel() {
 
   if (!result || variants.length === 0) {
     return (
-      <Text size="sm" c="dimmed">
-        Загрузите результат расчёта, чтобы увидеть сводку по вариантам.
-      </Text>
+      <Stack gap="xs">
+        <Divider label="сводка" labelPosition="center" />
+        <DatasetDiagnostics />
+        <Text size="sm" c="dimmed">
+          Загрузите результат расчёта, чтобы увидеть сводку по вариантам.
+        </Text>
+      </Stack>
     );
   }
 
@@ -311,6 +316,7 @@ export function VariantSummaryPanel() {
   return (
     <Stack gap="xs">
       <Divider label="сводка" labelPosition="center" />
+      <DatasetDiagnostics />
       <Box style={{ overflowX: 'auto' }}>
         <Table withRowBorders={false} fz="xs" style={{ minWidth: 320 }}>
           <Table.Thead>

@@ -11,7 +11,12 @@ function resolveBaseUrl(): string {
   return raw.endsWith('/api') ? raw.slice(0, -4) : raw;
 }
 
-const baseUrl = resolveBaseUrl();
+export const baseUrl = resolveBaseUrl();
+
+/** Абсолютный/относительный адрес страницы Swagger UI (backend springdoc). */
+export function swaggerUiUrl(): string {
+  return `${baseUrl}/swagger-ui/index.html`;
+}
 
 export interface DatasetResponse {
   id: string;
@@ -119,6 +124,7 @@ export async function fetchGridMask(runId: string): Promise<GridMask> {
 export interface RunFetchResult {
   runId: string;
   result: FeatureCollection;
+  dataset: DatasetResponse;
   traced: boolean;
   status: RunResponse['status'];
 }
@@ -127,6 +133,8 @@ export interface RunFetchResult {
 export interface RunHooks {
   /** Началась загрузка набора на сервис. */
   onUpload?: () => void;
+  /** Набор принят сервисом (диагностика ingest). */
+  onDataset?: (dataset: DatasetResponse) => void;
   /** Очередное состояние запуска (создание и опрос). */
   onRun?: (run: RunResponse) => void;
   /** Расчёт завершён, загружается результат. */
@@ -140,6 +148,7 @@ export async function runAndFetch(
 ): Promise<RunFetchResult> {
   hooks.onUpload?.();
   const dataset = await uploadDataset(file);
+  hooks.onDataset?.(dataset);
   const created = await createRun(dataset.id, algorithm, true);
   let run = created;
   hooks.onRun?.(run);
@@ -153,5 +162,11 @@ export async function runAndFetch(
   }
   hooks.onResultLoading?.();
   const result = await fetchResult(run.id);
-  return { runId: run.id, result, traced: Boolean(run.traced), status: run.status };
+  return {
+    runId: run.id,
+    result,
+    dataset,
+    traced: Boolean(run.traced),
+    status: run.status,
+  };
 }

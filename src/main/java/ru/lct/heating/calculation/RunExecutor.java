@@ -66,6 +66,9 @@ public class RunExecutor {
             run.setResultPath(resultFile.toString());
             run.setSummary(outcome.getSummary() == null
                     ? null : objectMapper.writeValueAsString(outcome.getSummary()));
+            // E8-15d2c2: если трассировка запрашивалась, но недоступна (партиционирование),
+            // отражаем фактическую доступность файлов этапов, а не запрошенный флаг.
+            run.setTrace(outcome.isTraced());
             runRepository.save(run);
         } catch (Exception exception) {
             log.error("Расчёт {} завершился ошибкой", runId, exception);

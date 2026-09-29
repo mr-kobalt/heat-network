@@ -63,3 +63,135 @@
 .nav-resize-handle:active::after {
   background: var(--mantine-color-indigo-5);
 }
+
+/* ADR-0072: типовое оформление markdown-документации. */
+.docs-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--mantine-color-dark-8);
+}
+
+.docs-content h2 {
+  margin-top: 1.4em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+  font-size: 20px;
+}
+
+.docs-content h3 {
+  margin-top: 1.2em;
+  font-size: 17px;
+}
+
+.docs-content h4 {
+  margin-top: 1em;
+  font-size: 15px;
+}
+
+.docs-content p,
+.docs-content ul,
+.docs-content ol {
+  margin: 0.6em 0;
+}
+
+.docs-content ul,
+.docs-content ol {
+  padding-left: 1.4em;
+}
+
+.docs-content code {
+  background: var(--mantine-color-gray-1);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 12.5px;
+}
+
+.docs-content pre {
+  background: var(--mantine-color-dark-8);
+  color: var(--mantine-color-gray-1);
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.docs-content pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.docs-content blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  border-left: 4px solid var(--mantine-color-indigo-3);
+  background: var(--mantine-color-gray-0);
+  color: var(--mantine-color-gray-7);
+}
+
+.docs-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  display: block;
+  overflow-x: auto;
+}
+
+.docs-content th,
+.docs-content td {
+  border: 1px solid var(--mantine-color-gray-3);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-content th {
+  background: var(--mantine-color-gray-1);
+  font-weight: 600;
+}
+
+.docs-content hr {
+  border: none;
+  border-top: 1px solid var(--mantine-color-gray-3);
+  margin: 1.2em 0;
+}
+
+/* ADR-0072: оглавление документа (ToC) в правой панели. */
+.docs-content h2,
+.docs-content h3 {
+  scroll-margin-top: 12px;
+}
+
+.docs-toc {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px 12px;
+}
+
+.docs-toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--mantine-color-gray-7);
+  border-left: 2px solid transparent;
+}
+
+.docs-toc-item:hover {
+  background: var(--mantine-color-gray-1);
+}
+
+.docs-toc-item[data-active='true'] {
+  color: var(--mantine-color-indigo-7);
+  font-weight: 600;
+  border-left-color: var(--mantine-color-indigo-5);
+  background: var(--mantine-color-indigo-0);
+}
+
+.docs-toc-item[data-level='3'] {
+  color: var(--mantine-color-gray-6);
+}
+
+

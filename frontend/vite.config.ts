@@ -30,8 +30,22 @@ export default defineConfig({
   base: './',
   server: {
     port: 5173,
+    fs: {
+      // Docker-контекст фронтенда — корень репозитория: docs/ лежит рядом
+      // с frontend/ и подключается реестром документации (ADR-0072).
+      allow: ['..'],
+    },
     proxy: {
       '/api': {
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // Swagger UI backend-сервиса (springdoc) для вкладки «API» (ADR-0072).
+      '/swagger-ui': {
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/v3': {
         target: process.env.VITE_API_PROXY ?? 'http://localhost:8080',
         changeOrigin: true,
       },

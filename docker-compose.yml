@@ -43,8 +43,9 @@ services:
   frontend:
     profiles: ["frontend"]
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      # Контекст — корень репозитория: фронтенд собирает и docs/ (ADR-0072).
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         # Базовый URL API — без суффикса /api (пути клиента уже включают /api,
         # nginx проксирует /api -> app:8080).

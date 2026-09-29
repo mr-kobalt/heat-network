@@ -5,8 +5,14 @@ target/
 .idea/
 *.iml
 *.log
-docs/
 source/
 *.geojson
 *.pdf
 *.docx
+
+# Фронтенд: зависимости и артефакты собираются/генерируются внутри образа.
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+frontend/*.tsbuildinfo
+frontend/.vite/

@@ -107,8 +107,10 @@ Backend:
 | UI | Mantine v7 |
 | Карта | MapLibre GL JS + `pmtiles` (офлайн-подложка) |
 | Состояние | Zustand; TanStack Query |
+| Markdown | `react-markdown` + `remark-gfm`; `rehype-slug`/`github-slugger` для якорей и ToC (раздел «Документация», ADR-0072) |
+| API-документация | встроенный Swagger UI backend-сервиса (раздел «API», ADR-0072) |
 | Тесты | Vitest + Testing Library |
-| Контейнер | nginx (профиль compose `frontend`) |
+| Контейнер | nginx (профиль compose `frontend`); контекст сборки — корень репозитория (`docs/`, ADR-0072) |
 
 Node.js 22 + pnpm 11 добавляются через devenv.
 
@@ -122,3 +124,5 @@ Node.js 22 + pnpm 11 добавляются через devenv.
 | 2026-09-19 | Единая БД через docker-compose; devenv без Postgres; FQIN для образов (ADR-0017) | команда |
 | 2026-09-19 | Добавлены скрипты `fe-up`/`fe-logs` (весь стек с визуализатором) | команда |
 | 2026-09-19 | Скрипт `stop`; `down` через stop + `down --remove-orphans` (podman-compose) | команда |
+| 2026-09-29 | Визуализатор: `react-markdown`/`remark-gfm` (раздел «Документация»), встроенный Swagger UI, контекст сборки — корень репозитория (ADR-0072) | команда |
+| 2026-09-29 | Документация: дерево каталогов и ToC, якоря через `rehype-slug`/`github-slugger` (ADR-0072) | команда |

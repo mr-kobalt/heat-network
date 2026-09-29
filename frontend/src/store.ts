@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import { FeatureCollection, GeoFeature, GridMask, StageDescriptor, StageManifest } from './types';
+import {
+  DatasetInfo,
+  FeatureCollection,
+  GeoFeature,
+  GridMask,
+  StageDescriptor,
+  StageManifest,
+} from './types';
 import type { BasemapId } from './map/style';
 
 /** Итоговая вкладка (результат) — вне этапов. */
@@ -37,6 +44,8 @@ export type AlgorithmInfo = {
 type State = {
   input: FeatureCollection | null;
   result: FeatureCollection | null;
+  /** Диагностика последнего загруженного набора (FR-08). */
+  datasetInfo: DatasetInfo | null;
   variants: string[];
   activeVariant: string | null;
   /** Связь вариант ↔ проход поиска (из `variant_summary.pass`). */
@@ -73,6 +82,9 @@ type State = {
   runError: string | null;
   /** Идёт расчёт/загрузка результата (для индикации в двух точках входа). */
   runBusy: boolean;
+  /** Время начала и завершения последнего расчёта (для таймера). */
+  runStartedAt: number | null;
+  runFinishedAt: number | null;
   /** ADR-0059: идёт перетаскивание границы панели (карта не ресайзится). */
   panelResizing: boolean;
   beginRun: () => void;
@@ -84,6 +96,7 @@ type State = {
   gridMask: GridMask | null;
   setInput: (input: FeatureCollection | null) => void;
   setResult: (result: FeatureCollection | null) => void;
+  setDatasetInfo: (info: DatasetInfo | null) => void;
   setActiveVariant: (variant: string | null) => void;
   select: (feature: GeoFeature | null, anchor?: [number, number] | null) => void;
   selectAndCenter: (feature: GeoFeature, anchor?: [number, number] | null) => void;
@@ -113,6 +126,7 @@ const defaultLayerMode: Record<LayerKey, LayerMode> = {
 export const useStore = create<State>((set) => ({
   input: null,
   result: null,
+  datasetInfo: null,
   variants: [],
   activeVariant: null,
   variantToPass: {},
@@ -137,6 +151,8 @@ export const useStore = create<State>((set) => ({
   runProgress: 0,
   runError: null,
   runBusy: false,
+  runStartedAt: null,
+  runFinishedAt: null,
   panelResizing: false,
   stageData: {},
   gridMask: null,
@@ -199,6 +215,7 @@ export const useStore = create<State>((set) => ({
       gridMask: null,
     });
   },
+  setDatasetInfo: (info) => set({ datasetInfo: info }),
   setActiveVariant: (variant) =>
     set((state) => ({
       activeVariant: variant,
@@ -263,6 +280,9 @@ export const useStore = create<State>((set) => ({
     runProgress: 0,
     runError: null,
     runBusy: true,
+    runStartedAt: Date.now(),
+    runFinishedAt: null,
+    datasetInfo: null,
   }),
   updateRun: (status, stage = null, progress = 0) =>
     set({ runStatus: status, runStage: stage, runProgress: progress }),
@@ -271,6 +291,7 @@ export const useStore = create<State>((set) => ({
       runStatus: status,
       runError: error,
       runBusy: false,
+      runFinishedAt: Date.now(),
       runStage: status === 'FAILED' ? state.runStage : 'done',
       runProgress: status === 'FAILED' ? state.runProgress : 100,
     })),
@@ -280,6 +301,8 @@ export const useStore = create<State>((set) => ({
     runProgress: 0,
     runError: null,
     runBusy: false,
+    runStartedAt: null,
+    runFinishedAt: null,
   }),
   setPanelResizing: (value) => set({ panelResizing: value }),
   setStageData: (stageId, data) =>

@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import {
   AppShell,
   Badge,
   Box,
   Burger,
+  Center,
   Group,
+  Loader,
   Stack,
   Tabs,
   Title,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconDatabase, IconStack2 } from '@tabler/icons-react';
+import { IconApi, IconBook2, IconDatabase, IconMap2, IconStack2 } from '@tabler/icons-react';
 import { MapView } from './map/MapView';
 import { DataSourcePanel } from './components/DataSourcePanel';
 import { VariantSummaryPanel } from './components/VariantSummaryPanel';
@@ -18,7 +20,14 @@ import { LayersPanel } from './components/LayersPanel';
 import { SideStrip } from './components/SideStrip';
 import { PanelToggleButton } from './components/PanelToggleButton';
 import { StageDataLoader } from './components/StageDataLoader';
+import { useHashRoute } from './useHashRoute';
+import type { AppView } from './useHashRoute';
 import { useStore } from './store';
+
+const DocsView = lazy(() =>
+  import('./docs/DocsView').then((module) => ({ default: module.DocsView })));
+const ApiView = lazy(() =>
+  import('./components/ApiView').then((module) => ({ default: module.ApiView })));
 
 const MIN_NAV_WIDTH = 240;
 const MAX_NAV_WIDTH = 640;
@@ -41,12 +50,30 @@ function readNavCollapsed(): boolean {
 
 const PANEL_STYLE = { padding: 12, flex: 1, overflowY: 'auto' as const };
 
+/** Область контента под шапкой (для вкладок «Документация» и «API»). */
+const VIEW_STYLE = {
+  position: 'absolute' as const,
+  top: 'var(--app-shell-header-offset, 0px)',
+  left: 'var(--app-shell-navbar-offset, 0px)',
+  right: 0,
+  bottom: 0,
+};
+
+function ViewFallback() {
+  return (
+    <Center h="100%">
+      <Loader size="sm" />
+    </Center>
+  );
+}
+
 export function App() {
   const [opened, { toggle }] = useDisclosure(false);
   const [collapsed, setCollapsed] = useState(readNavCollapsed);
   const [navWidth, setNavWidth] = useState(readNavWidth);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const setPanelResizing = useStore((state) => state.setPanelResizing);
+  const { route, setView, navigateDoc } = useHashRoute();
 
   useEffect(() => {
     localStorage.setItem(NAV_WIDTH_KEY, String(Math.round(navWidth)));
@@ -86,20 +113,43 @@ export function App() {
   }, [setPanelResizing]);
 
   const navbarWidth = collapsed ? STRIP_WIDTH : STRIP_WIDTH + navWidth;
+  const isMap = route.view === 'map';
 
   return (
     <AppShell
       header={{ height: 56 }}
-      navbar={{ width: navbarWidth, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+      navbar={{
+        width: navbarWidth,
+        breakpoint: 'sm',
+        collapsed: { mobile: !opened, desktop: !isMap },
+      }}
       padding={0}
     >
       <AppShell.Header>
         <Group h="100%" px="md" gap="sm" wrap="nowrap" align="center">
           <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-          <Title order={3}>Трассы теплосети</Title>
-          <Badge variant="light" size="lg" radius="sm">
+          <Title order={3} visibleFrom="sm">Трассы теплосети</Title>
+          <Badge variant="light" size="lg" radius="sm" visibleFrom="md">
             ТП v2
           </Badge>
+          <Tabs
+            value={route.view}
+            onChange={(value) => setView((value ?? 'map') as AppView)}
+            variant="outline"
+            ml="auto"
+          >
+            <Tabs.List>
+              <Tabs.Tab value="map" leftSection={<IconMap2 size={16} />}>
+                Карта
+              </Tabs.Tab>
+              <Tabs.Tab value="docs" leftSection={<IconBook2 size={16} />}>
+                Документация
+              </Tabs.Tab>
+              <Tabs.Tab value="api" leftSection={<IconApi size={16} />}>
+                API
+              </Tabs.Tab>
+            </Tabs.List>
+          </Tabs>
         </Group>
       </AppShell.Header>
 
@@ -164,29 +214,47 @@ export function App() {
       </AppShell.Navbar>
 
       <AppShell.Main style={{ position: 'relative', height: '100vh' }}>
-        {!collapsed && (
-          <Box
-            visibleFrom="sm"
-            className="nav-resize-handle"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Изменить ширину панели"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            style={{
-              position: 'absolute',
-              left: 'calc(var(--app-shell-navbar-offset, 0px) - 8px)',
-              top: 'var(--app-shell-header-offset, 0px)',
-              bottom: 0,
-              width: 16,
-              cursor: 'col-resize',
-              zIndex: 50,
-              touchAction: 'none',
-            }}
-          />
+        {/* Карта не размонтируется при переходе на «Документацию»/«API»,
+            чтобы сохранялись вьюпорт, выбор и состояние расчёта. */}
+        <Box style={{ display: isMap ? undefined : 'none' }}>
+          {isMap && !collapsed && (
+            <Box
+              visibleFrom="sm"
+              className="nav-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Изменить ширину панели"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              style={{
+                position: 'absolute',
+                left: 'calc(var(--app-shell-navbar-offset, 0px) - 8px)',
+                top: 'var(--app-shell-header-offset, 0px)',
+                bottom: 0,
+                width: 16,
+                cursor: 'col-resize',
+                zIndex: 50,
+                touchAction: 'none',
+              }}
+            />
+          )}
+          <MapView visible={isMap} />
+        </Box>
+        {route.view === 'docs' && (
+          <Box style={VIEW_STYLE}>
+            <Suspense fallback={<ViewFallback />}>
+              <DocsView path={route.docPath} onNavigate={navigateDoc} />
+            </Suspense>
+          </Box>
         )}
-        <MapView />
+        {route.view === 'api' && (
+          <Box style={VIEW_STYLE}>
+            <Suspense fallback={<ViewFallback />}>
+              <ApiView />
+            </Suspense>
+          </Box>
+        )}
         <StageDataLoader />
       </AppShell.Main>
     </AppShell>

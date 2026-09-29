@@ -55,6 +55,15 @@ export function parseFeatureCollection(raw: unknown): FeatureCollection {
   return candidate as FeatureCollection;
 }
 
+/** Сводная информация о загруженном наборе (диагностика ingest, FR-08). */
+export interface DatasetInfo {
+  id: string;
+  status: string;
+  originalFilename?: string;
+  objectCounts?: Record<string, number>;
+  bbox?: string;
+}
+
 /** Этап алгоритма в манифесте трассировки (ADR-0036). */
 export type StageDescriptor = {
   id: string;

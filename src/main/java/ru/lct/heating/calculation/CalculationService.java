@@ -202,10 +202,12 @@ public class CalculationService {
         if (warnings.size() > warningLimit) {
             log.info("Warning: ещё {} предупреждений (см. warnings.json)", warnings.size() - warningLimit);
         }
+        boolean traced = false;
         if (stagesDir != null && tileM <= 0.0) {
             String runId = stagesDir.getParent() == null
                     ? null : stagesDir.getParent().getFileName().toString();
             traceWriter.write(trace, runId, algorithm.id(), stagesDir);
+            traced = true;
             progress.report("trace", 98);
         }
         log.info("Calculation total: {} ms; warnings={}", elapsedMs(totalStart), warnings.size());
@@ -213,6 +215,7 @@ public class CalculationService {
         return CalculationOutcome.builder()
                 .summary(best)
                 .warnings(warnings)
+                .traced(traced)
                 .build();
     }
 

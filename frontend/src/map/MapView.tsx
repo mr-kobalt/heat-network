@@ -45,7 +45,7 @@ const CONTAINER_STYLE = {
   bottom: 'calc(var(--app-shell-footer-offset, 0px) + var(--app-shell-padding, 0px))',
 } as const;
 
-export function MapView() {
+export function MapView({ visible = true }: { visible?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const basemapRef = useRef<BasemapId>('osm');
@@ -263,6 +263,16 @@ export function MapView() {
       mapRef.current?.resize();
     }
   }, [ready, panelResizing]);
+
+  // Возврат на вкладку «Карта» с «Документации»/«API»: контейнер снова видим,
+  // разово подгоняем канву (при скрытии ResizeObserver видел нулевой размер).
+  useEffect(() => {
+    if (!visible || !ready) {
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(() => mapRef.current?.resize());
+    return () => window.cancelAnimationFrame(frame);
+  }, [visible, ready]);
 
   useEffect(() => {
     const map = mapRef.current;

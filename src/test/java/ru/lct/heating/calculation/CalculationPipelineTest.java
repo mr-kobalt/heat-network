@@ -32,6 +32,7 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
 
         CalculationOutcome outcome = service(permissiveExitProperties()).calculate(SAMPLE, resultFile, summaryFile);
 
+        assertThat(outcome.isTraced()).isFalse();
         assertGridForestResult(resultFile, outcome, objectMapper);
     }
 
@@ -47,6 +48,7 @@ class CalculationPipelineTest extends AbstractCalculationPipelineTest {
                 null, stagesDir);
 
         assertThat(outcome.getSummary()).isNotNull();
+        assertThat(outcome.isTraced()).isTrue();
         assertThat(Files.exists(stagesDir.resolve("manifest.json"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("grid.json"))).isTrue();
         assertThat(Files.exists(stagesDir.resolve("network.geojson"))).isTrue();
