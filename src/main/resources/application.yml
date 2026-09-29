@@ -127,6 +127,8 @@ heating:
     # E8-15d2c: пространственное партиционирование входа (0 — выключено).
     forest-partition-tile-m: ${HEATING_FOREST_PARTITION_TILE_M:0.0}
     forest-partition-margin-m: ${HEATING_FOREST_PARTITION_MARGIN_M:0.0}
+    # E8-15d2c2: не подменять канонический выход при локальной недостижимости (FR-43).
+    forest-preserve-canonical-exits: ${HEATING_FOREST_PRESERVE_CANONICAL_EXITS:false}
     # E25/ADR-0045: строгий обход спецпроходов (полоса непроходима, пересечение
     # через «ворота» перпендикулярно оси). По умолчанию выключено.
     forest-special-strict: ${HEATING_FOREST_SPECIAL_STRICT:true}

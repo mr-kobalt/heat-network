@@ -33,6 +33,14 @@ class LoadProfileSlowTest extends AbstractCalculationPipelineTest {
 
         AppProperties properties = new AppProperties();
         String algorithm = System.getProperty("load.algorithm", "grid-forest");
+        if (System.getProperty("load.partitionTileM") != null) {
+            properties.setForestPartitionTileM(
+                    Double.parseDouble(System.getProperty("load.partitionTileM")));
+        }
+        if (System.getProperty("load.partitionMarginM") != null) {
+            properties.setForestPartitionMarginM(
+                    Double.parseDouble(System.getProperty("load.partitionMarginM")));
+        }
         Path result = tempDir.resolve("load-result.geojson");
         Path summary = tempDir.resolve("load-summary.json");
         Path warnings = tempDir.resolve("load-warnings.json");

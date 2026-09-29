@@ -93,6 +93,7 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
         int specialBends = countSpecialBends(result, mapper);
         int exitMismatches = countMissingCanonicalExits(dataset, result, mapper);
         int dangling = countDanglingNodeReferences(dataset, result, mapper);
+        int existingDegree = countExistingChamberDegreeViolations(dataset, result, mapper);
         System.out.println("VERIFY dataset=" + datasetPath
                 + " algorithm=grid-forest"
                 + " score=" + outcome.getSummary().getScore()
@@ -104,6 +105,7 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
                 + " specialBends=" + specialBends
                 + " exitMismatches=" + exitMismatches
                 + " danglingRefs=" + dangling
+                + " existingChamberDegree=" + existingDegree
                 + " chamberDegreeViolations=" + degreeViolations
                 + " warnings=" + outcome.getWarnings().size());
 
@@ -127,6 +129,7 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
         assertThat(exitMismatches).isZero();
         assertThat(dangling).isZero();
         assertThat(degreeViolations).isZero();
+        assertThat(existingDegree).isZero();
         assertThat(outcome.getSummary().getUnconnectedOksIds())
                 .as("неподключённые точки (ТП §2.5)")
                 .isEmpty();

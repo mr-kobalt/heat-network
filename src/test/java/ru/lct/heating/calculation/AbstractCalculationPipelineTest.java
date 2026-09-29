@@ -40,6 +40,7 @@ import ru.lct.heating.ingest.CrsTransformer;
 import ru.lct.heating.ingest.FeatureParser;
 import ru.lct.heating.ingest.GeoJsonGeometryParser;
 import ru.lct.heating.ingest.GeoJsonStreamReader;
+import ru.lct.heating.ingest.IngestResult;
 import ru.lct.heating.ingest.IngestService;
 import ru.lct.heating.output.ForestResultBuilder;
 import ru.lct.heating.output.GeoJsonResultWriter;
@@ -312,6 +313,47 @@ abstract class AbstractCalculationPipelineTest {
         int violations = 0;
         for (String chamber : chambers) {
             if (degree.getOrDefault(chamber, 0) > 4) {
+                violations++;
+            }
+        }
+        return violations;
+    }
+
+    /**
+     * E8-03b: FR-26 для **существующих** камер с учётом входных примыканий
+     * (они не выпускаются как `heat_chamber`): attachments(вход) + новые рёбра
+     * из результата ≤ 4.
+     */
+    protected int countExistingChamberDegreeViolations(Path input, Path result, ObjectMapper mapper)
+            throws Exception {
+        IngestService ingest = new IngestService(new GeoJsonStreamReader(mapper),
+                new FeatureParser(crsTransformer));
+        IngestResult ingested;
+        try (var stream = Files.newInputStream(input)) {
+            ingested = ingest.ingest(stream);
+        }
+        Map<String, Integer> attachments = new NetworkGraphBuilder()
+                .build(ingested.getDataset()).getChamberAttachments();
+        Set<String> existing = new HashSet<>(attachments.keySet());
+        if (existing.isEmpty()) {
+            return 0;
+        }
+        Map<String, Integer> degree = new HashMap<>();
+        for (JsonNode feature : mapper.readTree(result.toFile()).path("features")) {
+            JsonNode properties = feature.path("properties");
+            if (!"heat_network".equals(properties.path("object_type").asText())) {
+                continue;
+            }
+            for (String key : List.of("start_node_id", "end_node_id")) {
+                String id = properties.path(key).asText();
+                if (existing.contains(id)) {
+                    degree.merge(id, 1, Integer::sum);
+                }
+            }
+        }
+        int violations = 0;
+        for (String chamber : existing) {
+            if (attachments.getOrDefault(chamber, 0) + degree.getOrDefault(chamber, 0) > 4) {
                 violations++;
             }
         }

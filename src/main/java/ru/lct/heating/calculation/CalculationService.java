@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -286,6 +287,7 @@ public class CalculationService {
                                                      List<String> warnings,
                                                      ProgressReporter progress) throws IOException {
         List<List<VariantResult>> perPartition = new ArrayList<>();
+        Map<String, Integer> chamberUsage = new HashMap<>();
         int index = 0;
         for (DatasetPartitioner.Partition partition : plan.partitions()) {
             index++;
@@ -294,15 +296,78 @@ public class CalculationService {
                 ingestResult = ingestService.ingestLines(inputStream);
             }
             addIngestWarnings(ingestResult, warnings);
-            List<VariantResult> variants = runPipeline(ingestResult, algorithm, warnings,
+            // E8-03c: камеры, заполненные предыдущими тайлами, исключаем из
+            // локального набора (FR-26 между тайлами).
+            NetworkDataset dataset = excludeFullChambers(ingestResult.getDataset(), chamberUsage);
+            IngestResult localized = IngestResult.builder().dataset(dataset)
+                    .diagnostics(ingestResult.getDiagnostics()).build();
+            List<VariantResult> variants = runPipeline(localized, algorithm, warnings,
                     StageTrace.disabled(), progress);
-            Set<String> keepIds = inputNodeIds(ingestResult.getDataset());
+            Set<String> keepIds = inputNodeIds(dataset);
             perPartition.add(namespaceVariants(variants, "p" + index + "_", keepIds));
+            countExistingChamberUsage(variants, dataset, chamberUsage);
             progress.report("generate", 45 + (int) Math.round(45.0 * index
                     / Math.max(1, plan.partitions().size())));
         }
         log.info("Partitioned: partitions={}", perPartition.size());
         return mergeVariants(perPartition);
+    }
+
+    /** Убрать из локального набора камеры, достигшие предельной степени. */
+    private NetworkDataset excludeFullChambers(NetworkDataset dataset,
+                                               Map<String, Integer> chamberUsage) {
+        if (chamberUsage.isEmpty() || dataset.getHeatChambers() == null
+                || dataset.getHeatChambers().isEmpty()) {
+            return dataset;
+        }
+        int maxDegree = appProperties.getForestMaxChamberDegree();
+        if (maxDegree <= 0) {
+            return dataset;
+        }
+        List<HeatChamberObject> kept = new ArrayList<>(dataset.getHeatChambers().size());
+        boolean removed = false;
+        for (HeatChamberObject chamber : dataset.getHeatChambers()) {
+            if (chamberUsage.getOrDefault(chamber.getId(), 0) >= maxDegree) {
+                removed = true;
+                continue;
+            }
+            kept.add(chamber);
+        }
+        if (!removed) {
+            return dataset;
+        }
+        return NetworkDataset.builder()
+                .sources(dataset.getSources())
+                .networkSegments(dataset.getNetworkSegments())
+                .heatChambers(kept)
+                .oksFutures(dataset.getOksFutures())
+                .connectionPoints(dataset.getConnectionPoints())
+                .oksExisting(dataset.getOksExisting())
+                .restrictions(dataset.getRestrictions())
+                .bounds(dataset.getBounds())
+                .build();
+    }
+
+    /** Учесть новые врезки в существующие камеры по лучшему варианту тайла. */
+    private void countExistingChamberUsage(List<VariantResult> variants, NetworkDataset dataset,
+                                           Map<String, Integer> chamberUsage) {
+        if (variants.isEmpty() || dataset.getHeatChambers() == null) {
+            return;
+        }
+        Set<String> existing = new HashSet<>();
+        for (HeatChamberObject chamber : dataset.getHeatChambers()) {
+            existing.add(chamber.getId());
+        }
+        VariantResult best = variants.get(0);
+        Map<String, Integer> perChamber = new HashMap<>();
+        for (OutputSegment segment : best.getSegments()) {
+            for (String node : new String[]{segment.getStartNodeId(), segment.getEndNodeId()}) {
+                if (existing.contains(node)) {
+                    perChamber.merge(node, 1, Integer::sum);
+                }
+            }
+        }
+        perChamber.forEach((id, count) -> chamberUsage.merge(id, count, Integer::sum));
     }
 
     /** ID узлов, которые нельзя префиксовать (точки подключения, существующие камеры). */

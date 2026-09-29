@@ -241,8 +241,14 @@ public class GridForestPlanner {
         // E8-15c: пространственная декомпозиция — каждый кластер точек решается
         // на своей локальной сетке (рабочий набор ограничен кластером). По
         // умолчанию выключено (см. {@code forest-decomposition}).
+        // Устарело в пользу партиционирования входа (ADR-0071, E8-15d2c): может
+        // менять канонический выход (FR-43). Не развивать.
         List<List<Terminal>> clusters = appProperties.isForestDecomposition()
                 ? clusterTerminals(terminals) : List.of(terminals);
+        if (clusters.size() > 1) {
+            log.warn("forest-decomposition устарел (ADR-0071): используйте "
+                    + "партиционирование входа (forest-partition-tile-m)");
+        }
         if (clusters.size() <= 1) {
             List<TieInCandidate> allTies = rawTieCandidates(dataset, terminals, graph);
             if (allTies.isEmpty()) {
@@ -531,17 +537,22 @@ public class GridForestPlanner {
         long[] reachable = reachableCells(pass, sources.keySet());
         // ADR-0037: если клетка основного выхода заблокирована или недостижима,
         // берём ближайший альтернативный выход, ведущий в достижимую клетку.
-        for (Terminal terminal : terminals) {
-            if (exitReachable(pass, reachable, terminal.target)) {
-                continue;
-            }
-            for (ConnectionExit candidate
-                    : candidatesFor(exitCandidates, dataset, exits, terminal)) {
-                if (!candidate.isBlocked() && candidate.getTarget() != null
-                        && exitReachable(pass, reachable, candidate.getTarget())) {
-                    terminal.target = candidate.getTarget();
-                    terminal.tail = candidate.getTail() == null ? List.of() : candidate.getTail();
-                    break;
+        // E8-03b: в партиционированном режиме выход не подменяем — локальная
+        // сетка тайла иначе меняет канонический выход (FR-43/E43).
+        if (!appProperties.isForestPreserveCanonicalExits()) {
+            for (Terminal terminal : terminals) {
+                if (exitReachable(pass, reachable, terminal.target)) {
+                    continue;
+                }
+                for (ConnectionExit candidate
+                        : candidatesFor(exitCandidates, dataset, exits, terminal)) {
+                    if (!candidate.isBlocked() && candidate.getTarget() != null
+                            && exitReachable(pass, reachable, candidate.getTarget())) {
+                        terminal.target = candidate.getTarget();
+                        terminal.tail = candidate.getTail() == null ? List.of()
+                                : candidate.getTail();
+                        break;
+                    }
                 }
             }
         }
