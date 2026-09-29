@@ -40,6 +40,13 @@ public class IngestService {
         return accumulator.toResult();
     }
 
+    /** E8-15d2c: ingest партиции в формате JSONL (одна фича на строку). */
+    public IngestResult ingestLines(InputStream inputStream) throws IOException {
+        Accumulator accumulator = new Accumulator();
+        reader.readLines(inputStream, feature -> accumulate(feature, accumulator));
+        return accumulator.toResult();
+    }
+
     private void accumulate(JsonNode feature, Accumulator accumulator) {
         accumulator.totalFeatures++;
         Optional<ParsedFeature> parsed = featureParser.parse(feature, accumulator.warnings);

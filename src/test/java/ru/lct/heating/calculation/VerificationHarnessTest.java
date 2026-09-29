@@ -68,6 +68,14 @@ class VerificationHarnessTest extends AbstractCalculationPipelineTest {
             properties.setForestDecomposition(
                     Boolean.parseBoolean(System.getProperty("verify.decomposition")));
         }
+        if (System.getProperty("verify.partitionTileM") != null) {
+            properties.setForestPartitionTileM(
+                    Double.parseDouble(System.getProperty("verify.partitionTileM")));
+        }
+        if (System.getProperty("verify.partitionMarginM") != null) {
+            properties.setForestPartitionMarginM(
+                    Double.parseDouble(System.getProperty("verify.partitionMarginM")));
+        }
 
         ObjectMapper mapper = new ObjectMapper();
         Path result = tempDir.resolve("verify-result.geojson");

@@ -44,4 +44,22 @@ public class GeoJsonStreamReader {
             }
         }
     }
+
+    /**
+     * E8-15d2c: чтение партиции в формате JSONL (одна фича на строку) —
+     * потоково, без загрузки файла целиком.
+     */
+    public void readLines(InputStream inputStream, Consumer<JsonNode> featureConsumer)
+            throws IOException {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(inputStream, java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                featureConsumer.accept(objectMapper.readTree(line));
+            }
+        }
+    }
 }

@@ -108,7 +108,10 @@ abstract class AbstractCalculationPipelineTest {
                 new SpecialZoneIndexBuilder(resolver, new RestrictionAxisBuilder(), envelopes),
                 variantGenerator, new GeoJsonResultWriter(objectMapper), objectMapper,
                 appProperties, registry, approachResolver,
-                new ru.lct.heating.trace.StageTraceWriter(objectMapper, crs));
+                new ru.lct.heating.trace.StageTraceWriter(objectMapper, crs),
+                new ru.lct.heating.ingest.DatasetPartitioner(
+                        new GeoJsonStreamReader(objectMapper), objectMapper),
+                costModel);
     }
 
     /**

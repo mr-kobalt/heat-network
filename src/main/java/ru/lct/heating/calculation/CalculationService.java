@@ -7,9 +7,11 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
@@ -17,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import ru.lct.heating.config.AppProperties;
+import ru.lct.heating.cost.CostModel;
 import ru.lct.heating.domain.GeometrySupport;
 import ru.lct.heating.domain.HeatChamberObject;
 import ru.lct.heating.domain.NetworkDataset;
@@ -29,10 +32,13 @@ import ru.lct.heating.geometry.SpecialZoneIndex;
 import ru.lct.heating.geometry.SpecialZoneIndexBuilder;
 import ru.lct.heating.graph.ExistingNetworkGraph;
 import ru.lct.heating.graph.NetworkGraphBuilder;
+import ru.lct.heating.ingest.DatasetPartitioner;
 import ru.lct.heating.ingest.IngestResult;
 import ru.lct.heating.ingest.IngestService;
 import ru.lct.heating.output.GeoJsonResultWriter;
+import ru.lct.heating.output.OutputChamber;
 import ru.lct.heating.output.OutputSegment;
+import ru.lct.heating.output.OutputTechnicalNode;
 import ru.lct.heating.output.VariantResult;
 import ru.lct.heating.output.VariantSummary;
 import ru.lct.heating.routing.ConnectionExit;
@@ -63,6 +69,8 @@ public class CalculationService {
     private final TracingAlgorithmRegistry algorithmRegistry;
     private final OksApproachResolver approachResolver;
     private final StageTraceWriter traceWriter;
+    private final DatasetPartitioner datasetPartitioner;
+    private final CostModel costModel;
 
     public CalculationService(IngestService ingestService, NetworkGraphBuilder graphBuilder,
                               ObstacleIndexBuilder obstacleIndexBuilder,
@@ -71,7 +79,8 @@ public class CalculationService {
                               ObjectMapper objectMapper, AppProperties appProperties,
                               TracingAlgorithmRegistry algorithmRegistry,
                               OksApproachResolver approachResolver,
-                              StageTraceWriter traceWriter) {
+                              StageTraceWriter traceWriter,
+                              DatasetPartitioner datasetPartitioner, CostModel costModel) {
         this.ingestService = ingestService;
         this.graphBuilder = graphBuilder;
         this.obstacleIndexBuilder = obstacleIndexBuilder;
@@ -83,6 +92,8 @@ public class CalculationService {
         this.algorithmRegistry = algorithmRegistry;
         this.approachResolver = approachResolver;
         this.traceWriter = traceWriter;
+        this.datasetPartitioner = datasetPartitioner;
+        this.costModel = costModel;
     }
 
     public CalculationOutcome calculate(Path inputFile, Path resultFile, Path summaryFile)
@@ -134,56 +145,32 @@ public class CalculationService {
         trace.setPassProgress((pass, total) -> progress.report("generate",
                 45 + (int) Math.round(45.0 * pass / Math.max(1, total))));
         List<String> warnings = new ArrayList<>();
-        long stage = System.nanoTime();
-        IngestResult ingestResult;
-        try (InputStream inputStream = Files.newInputStream(inputFile)) {
-            ingestResult = ingestService.ingest(inputStream);
+        List<VariantResult> variants;
+        double tileM = appProperties.getForestPartitionTileM();
+        if (tileM > 0.0) {
+            double margin = appProperties.getForestPartitionMarginM() > 0.0
+                    ? appProperties.getForestPartitionMarginM()
+                    : appProperties.getForestClusterMarginM();
+            Path partitionDir = summaryFile.resolveSibling("partitions");
+            DatasetPartitioner.PartitionPlan plan = datasetPartitioner.partition(
+                    inputFile, partitionDir, tileM, margin, warnings);
+            if (plan.isSingle()) {
+                variants = runPipeline(ingestFile(plan.singleInput(), warnings), algorithm,
+                        warnings, trace, progress);
+            } else {
+                if (stagesDir != null) {
+                    warnings.add("TRACE_DISABLED_FOR_PARTITIONS: трассировка этапов "
+                            + "не поддерживается в режиме партиционирования");
+                }
+                variants = calculatePartitioned(plan, algorithm, warnings, progress);
+            }
+        } else {
+            variants = runPipeline(ingestFile(inputFile, warnings), algorithm, warnings, trace,
+                    progress);
         }
-        warnings.addAll(ingestResult.getDiagnostics().getWarnings().stream()
-                .map(warning -> warning.getCode() + ": " + warning.getMessage())
-                .collect(Collectors.toList()));
-
-        NetworkDataset dataset = ingestResult.getDataset();
-        log.info("Stage ingest: {} ms; connectionPoints={} segments={} chambers={} restrictions={} warnings={}",
-                elapsedMs(stage), size(dataset.getConnectionPoints()), size(dataset.getNetworkSegments()),
-                size(dataset.getHeatChambers()), size(dataset.getRestrictions()), warnings.size());
-        progress.report("ingest", 10);
-
-        stage = System.nanoTime();
-        ExistingNetworkGraph graph = graphBuilder.build(dataset);
-        warnings.addAll(graph.getWarnings());
-        log.info("Stage graph: {} ms; segments={} chambers={} attachments={}",
-                elapsedMs(stage), graph.getSegments().size(), graph.getChambers().size(),
-                graph.getChamberAttachments().size());
-        traceNetwork(trace, graph);
-        progress.report("graph", 20);
-
-        stage = System.nanoTime();
-        ObstacleIndex obstacleIndex = obstacleIndexBuilder.build(dataset, warnings);
-        log.info("Stage obstacle index: {} ms; size={}", elapsedMs(stage), obstacleIndex.size());
-        progress.report("obstacles", 30);
-
-        stage = System.nanoTime();
-        SpecialZoneIndex specialZones = specialZoneIndexBuilder.build(
-                dataset, appProperties.getDefaultDiameterMm(), warnings);
-        log.info("Stage special zones: {} ms; size={}", elapsedMs(stage), specialZones.size());
-        traceRestrictions(trace, obstacleIndex, specialZones);
-        progress.report("special", 35);
-
-        stage = System.nanoTime();
-        Map<String, ConnectionExit> exits = approachResolver.resolveExits(dataset);
-        log.info("Stage exits: {} ms; resolved={}", elapsedMs(stage), exits.size());
-        traceExits(trace, exits);
-        progress.report("exits", 40);
-
-        stage = System.nanoTime();
-        List<VariantResult> variants = generateVariants(dataset, obstacleIndex, graph, specialZones,
-                warnings, exits, algorithm, trace);
-        log.info("Stage generate: {} ms; algorithm={} variants={}", elapsedMs(stage),
-                algorithm.id(), variants.size());
         progress.report("generate", 90);
 
-        stage = System.nanoTime();
+        long stage = System.nanoTime();
         try (OutputStream outputStream = Files.newOutputStream(resultFile)) {
             resultWriter.write(variants, outputStream);
         }
@@ -215,7 +202,7 @@ public class CalculationService {
         if (warnings.size() > warningLimit) {
             log.info("Warning: ещё {} предупреждений (см. warnings.json)", warnings.size() - warningLimit);
         }
-        if (stagesDir != null) {
+        if (stagesDir != null && tileM <= 0.0) {
             String runId = stagesDir.getParent() == null
                     ? null : stagesDir.getParent().getFileName().toString();
             traceWriter.write(trace, runId, algorithm.id(), stagesDir);
@@ -227,6 +214,208 @@ public class CalculationService {
                 .summary(best)
                 .warnings(warnings)
                 .build();
+    }
+
+    /** Разбор одного файла (FeatureCollection) с диагностикой. */
+    private IngestResult ingestFile(Path inputFile, List<String> warnings) throws IOException {
+        long stage = System.nanoTime();
+        IngestResult ingestResult;
+        try (InputStream inputStream = Files.newInputStream(inputFile)) {
+            ingestResult = ingestService.ingest(inputStream);
+        }
+        addIngestWarnings(ingestResult, warnings);
+        NetworkDataset dataset = ingestResult.getDataset();
+        log.info("Stage ingest: {} ms; connectionPoints={} segments={} chambers={} restrictions={} warnings={}",
+                elapsedMs(stage), size(dataset.getConnectionPoints()), size(dataset.getNetworkSegments()),
+                size(dataset.getHeatChambers()), size(dataset.getRestrictions()), warnings.size());
+        return ingestResult;
+    }
+
+    private void addIngestWarnings(IngestResult ingestResult, List<String> warnings) {
+        warnings.addAll(ingestResult.getDiagnostics().getWarnings().stream()
+                .map(warning -> warning.getCode() + ": " + warning.getMessage())
+                .collect(Collectors.toList()));
+    }
+
+    /** Стадии конвейера для одного набора: граф → ограничения → выходы → лес. */
+    private List<VariantResult> runPipeline(IngestResult ingestResult, TracingAlgorithm algorithm,
+                                            List<String> warnings, StageTrace trace,
+                                            ProgressReporter progress) {
+        NetworkDataset dataset = ingestResult.getDataset();
+        long stage = System.nanoTime();
+        ExistingNetworkGraph graph = graphBuilder.build(dataset);
+        warnings.addAll(graph.getWarnings());
+        log.info("Stage graph: {} ms; segments={} chambers={} attachments={}",
+                elapsedMs(stage), graph.getSegments().size(), graph.getChambers().size(),
+                graph.getChamberAttachments().size());
+        traceNetwork(trace, graph);
+        progress.report("graph", 20);
+
+        stage = System.nanoTime();
+        ObstacleIndex obstacleIndex = obstacleIndexBuilder.build(dataset, warnings);
+        log.info("Stage obstacle index: {} ms; size={}", elapsedMs(stage), obstacleIndex.size());
+        progress.report("obstacles", 30);
+
+        stage = System.nanoTime();
+        SpecialZoneIndex specialZones = specialZoneIndexBuilder.build(
+                dataset, appProperties.getDefaultDiameterMm(), warnings);
+        log.info("Stage special zones: {} ms; size={}", elapsedMs(stage), specialZones.size());
+        traceRestrictions(trace, obstacleIndex, specialZones);
+        progress.report("special", 35);
+
+        stage = System.nanoTime();
+        Map<String, ConnectionExit> exits = approachResolver.resolveExits(dataset);
+        log.info("Stage exits: {} ms; resolved={}", elapsedMs(stage), exits.size());
+        traceExits(trace, exits);
+        progress.report("exits", 40);
+
+        stage = System.nanoTime();
+        List<VariantResult> variants = generateVariants(dataset, obstacleIndex, graph, specialZones,
+                warnings, exits, algorithm, trace);
+        log.info("Stage generate: {} ms; algorithm={} variants={}", elapsedMs(stage),
+                algorithm.id(), variants.size());
+        return variants;
+    }
+
+    /** E8-15d2c2: обработка партиций и слияние вариантов. */
+    private List<VariantResult> calculatePartitioned(DatasetPartitioner.PartitionPlan plan,
+                                                     TracingAlgorithm algorithm,
+                                                     List<String> warnings,
+                                                     ProgressReporter progress) throws IOException {
+        List<List<VariantResult>> perPartition = new ArrayList<>();
+        int index = 0;
+        for (DatasetPartitioner.Partition partition : plan.partitions()) {
+            index++;
+            IngestResult ingestResult;
+            try (InputStream inputStream = Files.newInputStream(partition.file())) {
+                ingestResult = ingestService.ingestLines(inputStream);
+            }
+            addIngestWarnings(ingestResult, warnings);
+            List<VariantResult> variants = runPipeline(ingestResult, algorithm, warnings,
+                    StageTrace.disabled(), progress);
+            Set<String> keepIds = inputNodeIds(ingestResult.getDataset());
+            perPartition.add(namespaceVariants(variants, "p" + index + "_", keepIds));
+            progress.report("generate", 45 + (int) Math.round(45.0 * index
+                    / Math.max(1, plan.partitions().size())));
+        }
+        log.info("Partitioned: partitions={}", perPartition.size());
+        return mergeVariants(perPartition);
+    }
+
+    /** ID узлов, которые нельзя префиксовать (точки подключения, существующие камеры). */
+    private Set<String> inputNodeIds(NetworkDataset dataset) {
+        Set<String> ids = new HashSet<>();
+        if (dataset.getConnectionPoints() != null) {
+            for (var point : dataset.getConnectionPoints()) {
+                ids.add(point.getId());
+            }
+        }
+        if (dataset.getHeatChambers() != null) {
+            for (HeatChamberObject chamber : dataset.getHeatChambers()) {
+                ids.add(chamber.getId());
+            }
+        }
+        return ids;
+    }
+
+    private List<VariantResult> namespaceVariants(List<VariantResult> variants, String prefix,
+                                                  Set<String> keepIds) {
+        List<VariantResult> result = new ArrayList<>(variants.size());
+        for (VariantResult variant : variants) {
+            List<OutputSegment> segments = new ArrayList<>(variant.getSegments().size());
+            for (OutputSegment segment : variant.getSegments()) {
+                segments.add(OutputSegment.builder()
+                        .id(prefix + segment.getId())
+                        .startNodeId(mapNode(segment.getStartNodeId(), prefix, keepIds))
+                        .endNodeId(mapNode(segment.getEndNodeId(), prefix, keepIds))
+                        .flowTph(segment.getFlowTph()).diameterMm(segment.getDiameterMm())
+                        .lengthM(segment.getLengthM()).layingMethod(segment.getLayingMethod())
+                        .depthStart(segment.getDepthStart()).depthEnd(segment.getDepthEnd())
+                        .cost(segment.getCost()).geometryWgs84(segment.getGeometryWgs84())
+                        .build());
+            }
+            List<OutputChamber> chambers = new ArrayList<>(variant.getChambers().size());
+            for (OutputChamber chamber : variant.getChambers()) {
+                chambers.add(OutputChamber.builder()
+                        .id(mapNode(chamber.getId(), prefix, keepIds))
+                        .diameterMm(chamber.getDiameterMm()).cost(chamber.getCost())
+                        .geometryWgs84(chamber.getGeometryWgs84()).build());
+            }
+            List<OutputTechnicalNode> nodes = new ArrayList<>(variant.getTechnicalNodes().size());
+            for (OutputTechnicalNode node : variant.getTechnicalNodes()) {
+                nodes.add(OutputTechnicalNode.builder()
+                        .id(prefix + node.getId())
+                        .geometryWgs84(node.getGeometryWgs84()).build());
+            }
+            result.add(variant.toBuilder().segments(segments).chambers(chambers)
+                    .technicalNodes(nodes).build());
+        }
+        return result;
+    }
+
+    private String mapNode(String nodeId, String prefix, Set<String> keepIds) {
+        return keepIds.contains(nodeId) ? nodeId : prefix + nodeId;
+    }
+
+    /** Слияние вариантов партиций: конкатенация по индексу (рангу), пересчёт S. */
+    private List<VariantResult> mergeVariants(List<List<VariantResult>> perPartition) {
+        int maxVariants = 0;
+        for (List<VariantResult> variants : perPartition) {
+            maxVariants = Math.max(maxVariants, variants.size());
+        }
+        List<VariantResult> merged = new ArrayList<>(maxVariants);
+        for (int k = 0; k < maxVariants; k++) {
+            List<OutputSegment> segments = new ArrayList<>();
+            List<OutputChamber> chambers = new ArrayList<>();
+            List<OutputTechnicalNode> nodes = new ArrayList<>();
+            long constructionCost = 0L;
+            long chamberCost = 0L;
+            long tieInCost = 0L;
+            int tieInCount = 0;
+            long penalty = 0L;
+            double length = 0.0;
+            List<String> unconnected = new ArrayList<>();
+            Set<String> numeric = new HashSet<>();
+            int passNumber = 1;
+            for (List<VariantResult> variants : perPartition) {
+                VariantResult variant = variants.get(Math.min(k, variants.size() - 1));
+                segments.addAll(variant.getSegments());
+                chambers.addAll(variant.getChambers());
+                nodes.addAll(variant.getTechnicalNodes());
+                VariantSummary summary = variant.getSummary();
+                constructionCost += summary.getConstructionCost();
+                chamberCost += summary.getChamberConstructionCost();
+                tieInCost += summary.getExistingChamberTieInCost();
+                tieInCount += summary.getExistingChamberTieInCount();
+                penalty += summary.getUnconnectedPenalty();
+                length += summary.getNewNetworkLengthM();
+                unconnected.addAll(summary.getUnconnectedOksIds());
+                if (summary.getNumericOksIds() != null) {
+                    numeric.addAll(summary.getNumericOksIds());
+                }
+                passNumber = summary.getPassNumber();
+            }
+            long calculatedCost = constructionCost + penalty;
+            double score = costModel.score(calculatedCost, length);
+            VariantSummary summary = VariantSummary.builder()
+                    .variantId("v" + (k + 1)).rank(k + 1).passNumber(passNumber)
+                    .constructionCost(constructionCost).chamberConstructionCost(chamberCost)
+                    .existingChamberTieInCount(tieInCount).existingChamberTieInCost(tieInCost)
+                    .unconnectedPenalty(penalty).calculatedCost(calculatedCost)
+                    .newNetworkLengthM(length).score(score)
+                    .unconnectedOksIds(unconnected).numericOksIds(numeric).build();
+            merged.add(VariantResult.builder().variantId("v" + (k + 1)).segments(segments)
+                    .chambers(chambers).technicalNodes(nodes).summary(summary).build());
+        }
+        merged.sort(java.util.Comparator.comparingDouble(
+                variant -> variant.getSummary().getScore()));
+        List<VariantResult> ranked = new ArrayList<>(merged.size());
+        int rank = 1;
+        for (VariantResult variant : merged) {
+            ranked.add(variant.toBuilder()
+                    .summary(variant.getSummary().toBuilder().rank(rank++).build()).build());
+        }
+        return ranked;
     }
 
     /** Прогресс не должен убывать (повторы генерации при адаптиве). */
