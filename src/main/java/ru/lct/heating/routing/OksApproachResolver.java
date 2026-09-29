@@ -87,6 +87,8 @@ public class OksApproachResolver {
                 new org.locationtech.jts.index.strtree.STRtree();
         private final List<RestrictionObject> prohibitedRestrictions = new ArrayList<>();
         private final Map<Integer, List<Prohibited>> prohibitedByDn = new HashMap<>();
+        /** E8-15d2b: полные списки выходов-кандидатов на точку (из resolveExits). */
+        private final Map<String, List<ConnectionExit>> candidatesCache = new HashMap<>();
     }
 
     private synchronized Context context(NetworkDataset dataset) {
@@ -138,13 +140,18 @@ public class OksApproachResolver {
         int total = dataset.getConnectionPoints().size();
         int skipped = 0;
         int blocked = 0;
+        Context context = context(dataset);
         for (OksConnectionPointObject connectionPoint : dataset.getConnectionPoints()) {
             Double flow = connectionPoint.getFlowTph();
             if (flow == null || flow <= 0.0 || connectionPoint.getGeometry() == null) {
                 skipped++;
                 continue;
             }
-            ConnectionExit exit = exitFor(connectionPoint, dataset, flow);
+            // E8-15d2b: полный список кандидатов кэшируется, чтобы
+            // `candidatesFor` не пересчитывал его в планировщике.
+            List<ConnectionExit> candidates = exitCandidates(connectionPoint, dataset, flow);
+            context.candidatesCache.put(connectionPoint.getId(), candidates);
+            ConnectionExit exit = candidates.get(0);
             if (exit.isBlocked()) {
                 blocked++;
             }
@@ -156,18 +163,6 @@ public class OksApproachResolver {
     }
 
     /**
-     * Выход ОКС (ADR-0037): перпендикуляр к внешней границе своей компоненты;
-     * продолжение луча до границы буфера всего ОКС
-     * ({@code minDistance + halfPairWidth}, без диагонали клетки); среди валидных
-     * пересечений — минимальное расстояние до точки. Другие компоненты ОКС и
-     * прочие ограничения не должны нарушаться.
-     */
-    private ConnectionExit exitFor(OksConnectionPointObject connectionPoint,
-                                   NetworkDataset dataset, double flow) {
-        return exitCandidates(connectionPoint, dataset, flow).get(0);
-    }
-
-    /**
      * Все валидные выходы точки, упорядоченные по возрастанию `p→target`
      * (ADR-0037). Первый — основной; остальные используются планировщиком как
      * альтернативы, если клетка основного выхода недостижима от сети.
@@ -176,7 +171,12 @@ public class OksApproachResolver {
         if (dataset.getConnectionPoints() == null || pointId == null) {
             return List.of();
         }
-        OksConnectionPointObject point = context(dataset).pointsById.get(pointId);
+        Context context = context(dataset);
+        List<ConnectionExit> cached = context.candidatesCache.get(pointId);
+        if (cached != null) {
+            return cached;
+        }
+        OksConnectionPointObject point = context.pointsById.get(pointId);
         if (point == null) {
             return List.of();
         }

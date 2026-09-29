@@ -24,6 +24,10 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      # NFR-08: для входа ~3 ГБ увеличьте heap, например раскомментировав:
+      # JAVA_TOOL_OPTIONS: "-Xmx8g"
+    # и при необходимости ограничение памяти контейнера:
+    # mem_limit: 12g
     ports:
       - "8080:8080"
     volumes:

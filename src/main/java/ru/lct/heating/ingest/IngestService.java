@@ -50,9 +50,7 @@ public class IngestService {
         private final List<SourceObject> sources = new ArrayList<>();
         private final List<NetworkSegment> networkSegments = new ArrayList<>();
         private final List<HeatChamberObject> heatChambers = new ArrayList<>();
-        private final List<OksFutureObject> oksFutures = new ArrayList<>();
         private final List<OksConnectionPointObject> connectionPoints = new ArrayList<>();
-        private final List<OksExistingObject> oksExisting = new ArrayList<>();
         private final List<RestrictionObject> restrictions = new ArrayList<>();
         private final List<IngestWarning> warnings = new ArrayList<>();
         private final List<String> errors = new ArrayList<>();
@@ -81,13 +79,14 @@ public class IngestService {
                     heatChambers.add((HeatChamberObject) parsed.getObject());
                     break;
                 case OKS_FUTURE:
-                    oksFutures.add((OksFutureObject) parsed.getObject());
+                    // E8-15d2b: устаревший тип (ТЗ v2) — не удерживаем в памяти;
+                    // в countsByType учтён, алгоритмом не используется.
                     break;
                 case OKS_CONNECTION_POINT:
                     connectionPoints.add((OksConnectionPointObject) parsed.getObject());
                     break;
                 case OKS_EXISTING:
-                    oksExisting.add((OksExistingObject) parsed.getObject());
+                    // E8-15d2b: устаревший тип — не удерживаем в памяти.
                     break;
                 case RESTRICTION:
                     restrictions.add((RestrictionObject) parsed.getObject());
@@ -143,9 +142,9 @@ public class IngestService {
                     .sources(sources)
                     .networkSegments(networkSegments)
                     .heatChambers(heatChambers)
-                    .oksFutures(oksFutures)
+                    .oksFutures(List.of())
                     .connectionPoints(connectionPoints)
-                    .oksExisting(oksExisting)
+                    .oksExisting(List.of())
                     .restrictions(restrictions)
                     .bounds(bounds)
                     .build();
