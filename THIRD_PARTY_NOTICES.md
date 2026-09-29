@@ -41,6 +41,9 @@
 - **github-slugger** — ISC — https://opensource.org/license/isc-license-txt
 - **@fontsource/inter (шрифт Inter)** — SIL Open Font License 1.1 —
   https://openfontlicense.org
+- **Montserrat (презентация, `docs/06-submission/presentation-assets/fonts`)** —
+  SIL Open Font License 1.1 — https://openfontlicense.org
+  (текст лицензии — `presentation-assets/fonts/OFL.txt`)
 - **TypeScript** — Apache-2.0 — https://www.apache.org/licenses/LICENSE-2.0
 
 ## Данные карты
@@ -58,6 +61,11 @@ JTS, jsts, elkjs, Logback, Jakarta API (EPL/EDL) и DOMPurify (MPL/Apache)
 используются как неизменённые библиотеки; выбранные permissive/EPL-варианты
 лицензий и сохранение уведомлений (этот файл) выполняют их условия. Строгий
 копилефт (GPL/AGPL/LGPL) не применяется.
+
+## Инструменты сборки (не в поставке)
+
+`pandoc`, `Chromium` и `python3` используются только при генерации презентации
+и документации; в распространяемую поставку не входят.
 
 ## Воспроизведение
 

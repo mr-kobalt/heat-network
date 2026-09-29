@@ -51,6 +51,10 @@
   **ODbL 1.0**; атрибуция «© OpenStreetMap contributors, © Protomaps»
   показывается на карте и в стиле (`build-style.mjs`).
 - **Глифы карты**: Noto Sans — OFL-1.1.
+- **Шрифт презентации Montserrat** (`presentation-assets/fonts/`, тема
+  организатора) — OFL-1.1, текст в `presentation-assets/fonts/OFL.txt`.
+- Инструменты сборки презентации (`pandoc`, Chromium, `python3`) — только
+  сборочные, в поставку не входят.
 - Исходные датасеты конкурса — по условиям организатора (не распространяются
   как открытые данные; см. `source/`).
 

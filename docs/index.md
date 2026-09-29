@@ -164,3 +164,4 @@ flowchart LR
 | 2026-09-29 | ADR-0075: документация API (OpenAPI/Swagger) — аннотации, модель ошибок, build-info, тест контракта | команда |
 | 2026-09-29 | M5: скриншоты визуализатора, make-цели подложки (`fe-basemap*`) и `licenses`, лицензионный отчёт и `THIRD_PARTY_NOTICES` | команда |
 | 2026-09-29 | Презентация: источник `presentation.md`, `make presentation` (pandoc + тема организатора), структура в `presentation-outline.md` | команда |
+| 2026-09-29 | Презентация: основной формат PDF (HTML→Chromium), тема `presentation-theme.css` + Montserrat (OFL), `presentation-notes`/`presentation-pptx` | команда |

@@ -1,0 +1,26 @@
+/* Дополнение к presentation-theme.css для версии с заметками спикера.
+   Подключается вторым --css: страница выше, слайд «резиновый», заметки видны. */
+
+@page {
+  size: 13.333in 10in; /* 1280×960 px @96dpi */
+  margin: 0;
+}
+
+section.level1,
+#title-block-header {
+  height: auto;
+  min-height: 560px;
+  padding-bottom: 64px;
+}
+
+.notes {
+  display: block;
+  position: relative;
+  margin-top: 30px;
+  padding-top: 18px;
+  border-top: 2px dashed var(--accent);
+  font-size: 16px;
+  line-height: 1.5;
+  color: #444a52;
+}
+.notes p { margin: 6px 0; font-size: 16px; }

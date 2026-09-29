@@ -146,3 +146,4 @@ pnpm --dir frontend basemap:prepare # локальная карта Москвы
 | 2026-09-29 | ADR-0075: описания OpenAPI/Swagger (`@Tag`/`@Operation`/`@Schema`), единая модель ошибок, `build-info` в `/api/v1/info`, slow-тест контракта | команда |
 | 2026-09-29 | M5: make-цели `fe-basemap*`/`fe-assets`/`licenses`; скриншоты визуализатора и резолвер ассетов в документации; `docs/06-submission/licenses.md` и `THIRD_PARTY_NOTICES.md` | команда |
 | 2026-09-29 | M5: презентация — источник `docs/06-submission/presentation.md`, тема организатора, сборка `make presentation` (pandoc + reference-скрипт) | команда |
+| 2026-09-29 | M5: презентация — основной PDF (HTML→Chromium, `presentation-theme.css`, Montserrat OFL); `presentation-notes`, `presentation-pptx` | команда |

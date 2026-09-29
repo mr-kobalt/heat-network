@@ -1,0 +1,270 @@
+/* Тема презентации ЛЦТ 2026 (команда sudoers).
+   Оформление по шаблону организатора: Montserrat, палитра #FF0053/#310F53.
+   Слайд 16:9 (1280×720); печать — Chromium --print-to-pdf. */
+
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('presentation-assets/fonts/montserrat-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url('presentation-assets/fonts/montserrat-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url('presentation-assets/fonts/montserrat-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('presentation-assets/fonts/montserrat-latin-700-normal.woff2') format('woff2');
+}
+
+:root {
+  --accent: #ff0053;
+  --accent2: #fc3777;
+  --purple: #310f53;
+  --purple2: #520978;
+  --lavender: #8a83d1;
+  --lightpink: #ffd6e4;
+  --ink: #1c1d22;
+  --muted: #6b6f76;
+  --slide-w: 1280px;
+  --slide-h: 720px;
+}
+
+@page {
+  size: 13.333in 7.5in; /* 1280×720 px @96dpi */
+  margin: 0;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  font-family: 'Montserrat', Arial, sans-serif;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.5;
+  counter-reset: slide;
+}
+
+/* --- Общий слайд ----------------------------------------------------------- */
+section.level1,
+#title-block-header {
+  position: relative;
+  width: var(--slide-w);
+  height: var(--slide-h);
+  padding: 64px 84px 76px;
+  overflow: hidden;
+  background: #ffffff;
+  counter-increment: slide;
+  page-break-after: always;
+  break-after: page;
+}
+section.level1:last-of-type { page-break-after: auto; break-after: auto; }
+
+/* Метка задачи сверху справа и номер слайда снизу справа. */
+section.level1::before {
+  content: 'ЛЦТ 2026 · тепловые сети и ОКС';
+  position: absolute;
+  top: 34px;
+  right: 84px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lavender);
+}
+section.level1::after {
+  content: counter(slide);
+  position: absolute;
+  right: 84px;
+  bottom: 30px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}
+/* --- Заголовки ------------------------------------------------------------- */
+h1 {
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--purple);
+  margin: 0 0 4px;
+  padding-right: 20px;
+}
+h1::after {
+  content: '';
+  display: block;
+  width: 92px;
+  height: 6px;
+  margin-top: 16px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* --- Списки и текст -------------------------------------------------------- */
+ul, ol {
+  margin: 22px 0 0;
+  padding-left: 24px;
+  font-size: 21px;
+  line-height: 1.45;
+}
+li { margin: 10px 0; }
+li::marker { color: var(--accent); font-weight: 700; }
+p { margin: 14px 0 0; font-size: 21px; }
+strong { color: var(--accent2); font-weight: 700; }
+em { color: var(--purple); font-style: normal; font-weight: 600; }
+a { color: var(--accent); text-decoration: none; }
+code {
+  font-family: 'Montserrat', monospace;
+  font-size: 17px;
+  background: var(--lightpink);
+  color: var(--purple);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+/* --- Титульный слайд ------------------------------------------------------- */
+#title-block-header {
+  color: #ffffff;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(255, 214, 228, 0.35), transparent 60%),
+    linear-gradient(135deg, var(--purple) 0%, var(--purple2) 55%, var(--accent) 130%);
+  padding: 120px 96px 90px;
+}
+#title-block-header::before {
+  content: '';
+  position: absolute;
+  right: -160px;
+  bottom: -220px;
+  width: 620px;
+  height: 620px;
+  background: var(--accent);
+  opacity: 0.28;
+  transform: rotate(24deg);
+}
+#title-block-header::after {
+  content: 'sudoers';
+  position: absolute;
+  left: 96px;
+  bottom: 44px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lightpink);
+}
+#title-block-header h1.title {
+  position: relative;
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1.12;
+  color: #ffffff;
+  max-width: 960px;
+  margin: 0;
+}
+#title-block-header h1.title::after {
+  width: 120px;
+  height: 8px;
+  background: var(--lightpink);
+}
+#title-block-header .subtitle {
+  position: relative;
+  margin-top: 22px;
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--lightpink);
+}
+#title-block-header .author,
+#title-block-header .date {
+  position: relative;
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* --- Разделитель (heading {.section}) -------------------------------------- */
+section.level1.section {
+  color: #ffffff;
+  background:
+    radial-gradient(900px 420px at 90% 110%, rgba(255, 214, 228, 0.25), transparent 60%),
+    linear-gradient(120deg, var(--accent) 0%, var(--purple) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+section.level1.section::before { color: var(--lightpink); }
+section.level1.section::after { color: var(--lightpink); }
+section.level1.section h1 {
+  font-size: 60px;
+  color: #ffffff;
+  max-width: 900px;
+}
+section.level1.section h1::after { background: var(--lightpink); }
+
+/* --- Слайд-изображение (.image) -------------------------------------------- */
+section.level1.image {
+  display: flex;
+  flex-direction: column;
+}
+section.level1.image img {
+  display: block;
+  margin: 16px auto 0;
+  max-width: 100%;
+  max-height: 400px;
+  border: 1px solid #e4eae9;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(49, 15, 83, 0.18);
+}
+
+/* --- Две колонки (::: two-col) --------------------------------------------- */
+.two-col { display: flex; gap: 36px; margin-top: 22px; }
+.two-col > div { flex: 1; min-width: 0; }
+.two-col h2 {
+  font-size: 24px;
+  color: var(--accent);
+  margin: 0 0 6px;
+}
+.two-col ul { margin-top: 8px; font-size: 19px; }
+
+/* --- Цифры/факты (::: stats) ----------------------------------------------- */
+.stats { display: flex; gap: 28px; margin-top: 40px; }
+.stats > div {
+  flex: 1;
+  background: #faf7fb;
+  border-left: 6px solid var(--accent);
+  border-radius: 10px;
+  padding: 22px 24px;
+}
+.stats .big {
+  display: block;
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--purple);
+  line-height: 1;
+}
+.stats .cap { display: block; margin-top: 8px; font-size: 16px; color: var(--muted); }
+
+/* --- Заметки спикера (скрыты в основном PDF) ------------------------------- */
+.notes { display: none; }

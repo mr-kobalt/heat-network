@@ -124,7 +124,8 @@ make run
 | `make fe-install` / `fe-dev` / `fe-build` / `fe-test` | Визуализатор (опционально) |
 | `make fe-basemap` / `fe-basemap-style` / `fe-assets` | Офлайн-подложка карты (PMTiles, глифы, спрайты, стили) |
 | `make licenses` | Отчёт о лицензиях зависимостей (`target/licenses/`) |
-| `make presentation` | Собрать презентацию (pptx) из `docs/06-submission/presentation.md` |
+| `make presentation` / `presentation-notes` | Презентация: PDF / PDF с заметками спикера |
+| `make presentation-pptx` / `presentation-all` | Запасной pptx / все форматы |
 | `make db-up` / `db-down` / `db-logs` | Контейнер БД |
 | `make up` / `fe-up` / `stop` / `down` / `ps` | Docker-стек (app+db, опц. frontend) |
 | `make compose-config` | Проверка `docker-compose.yml` |
@@ -270,3 +271,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-29 | M5: make-цели подложки (`fe-basemap*`, `fe-assets`) и `licenses`; скриншоты в `docs/06-submission/`; THIRD_PARTY_NOTICES | команда |
 | 2026-09-29 | README: тезисное описание алгоритма (mermaid + ссылки), пример через API (curl), скриншот визуализатора | команда |
 | 2026-09-29 | Презентация: источник `presentation.md` (расширенный технический дек), сборка `make presentation` (pandoc + тема организатора) | команда |
+| 2026-09-29 | Презентация: основной формат PDF (HTML→Chromium, тема Montserrat/палитра ЛЦТ), `presentation-notes` с заметками, `presentation-pptx` | команда |

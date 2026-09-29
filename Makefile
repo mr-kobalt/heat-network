@@ -19,6 +19,7 @@ MVN       ?= ./mvnw
 PNPM      ?= pnpm
 PANDOC    ?= pandoc
 PYTHON    ?= python3
+NODE      ?= node
 FRONTEND  := frontend
 HEALTH    := http://localhost:8080/actuator/health
 
@@ -159,7 +160,15 @@ deploy: fe-up ## Деплой стека на сервере (app + db + виз�
 ##@ Презентация
 
 .PHONY: presentation
-presentation: ## Собрать презентацию (pptx) из docs/06-submission/presentation.md
+presentation: ## Собрать презентацию (PDF) из docs/06-submission/presentation.md
+	$(NODE) scripts/build-presentation.mjs
+
+.PHONY: presentation-notes
+presentation-notes: ## Собрать PDF презентации с заметками спикера
+	$(NODE) scripts/build-presentation.mjs --notes
+
+.PHONY: presentation-pptx
+presentation-pptx: ## Собрать презентацию в pptx (pandoc, запасной формат)
 	@mkdir -p target/presentation
 	$(PANDOC) --print-default-data-file reference.pptx > target/presentation/reference-default.pptx
 	$(PYTHON) scripts/build-presentation-reference.py \
@@ -170,6 +179,9 @@ presentation: ## Собрать презентацию (pptx) из docs/06-submi
 		--reference-doc=target/presentation/reference.pptx \
 		--output target/presentation/sudoers-lct2026.pptx
 	@echo "→ target/presentation/sudoers-lct2026.pptx"
+
+.PHONY: presentation-all
+presentation-all: presentation-notes presentation-pptx ## PDF, notes и pptx
 
 ##@ Лицензии
 
