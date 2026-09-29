@@ -5,7 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.index.strtree.STRtree;
 import org.locationtech.jts.linearref.LengthIndexedLine;
 import org.locationtech.jts.operation.distance.DistanceOp;
 import org.springframework.stereotype.Component;
@@ -29,6 +31,97 @@ public class TieInCandidateProvider {
 
     public TieInCandidateProvider(AppProperties appProperties) {
         this.appProperties = appProperties;
+    }
+
+    /**
+     * E8-15d2a: индекс сети для локальной (по bbox) генерации врезок — STRtree
+     * по сегментам и координаты камер для исключения. Строится один раз на
+     * прогон; иначе на каждый кластер сэмплируется вся сеть.
+     */
+    public static final class TieInIndex {
+        private final STRtree segments = new STRtree();
+        private final List<Coordinate> chamberCoordinates = new ArrayList<>();
+        private final Map<NetworkSegment, Integer> order = new java.util.IdentityHashMap<>();
+
+        private TieInIndex(NetworkDataset dataset) {
+            if (dataset.getNetworkSegments() != null) {
+                int index = 0;
+                for (NetworkSegment segment : dataset.getNetworkSegments()) {
+                    if (segment.getGeometry() != null) {
+                        segments.insert(segment.getGeometry().getEnvelopeInternal(), segment);
+                        order.put(segment, index);
+                    }
+                    index++;
+                }
+            }
+            segments.build();
+            if (dataset.getHeatChambers() != null) {
+                for (HeatChamberObject chamber : dataset.getHeatChambers()) {
+                    if (chamber.getGeometry() != null) {
+                        chamberCoordinates.add(chamber.getGeometry().getCoordinate());
+                    }
+                }
+            }
+        }
+    }
+
+    public TieInIndex index(NetworkDataset dataset) {
+        return new TieInIndex(dataset);
+    }
+
+    /**
+     * E8-15d2a: кандидаты врезки в пределах bbox — камеры внутри bbox, сэмплы
+     * сегментов, пересекающих bbox (сегменты сэмплируются целиком) и проекции
+     * анкеров на эти сегменты. Исключение близких камер — по всем камерам, затем
+     * фильтр по bbox: эквивалентно {@link #candidates} ∩ bbox.
+     */
+    public List<TieInCandidate> localCandidates(NetworkDataset dataset, List<Coordinate> anchors,
+                                                Envelope envelope, TieInIndex index) {
+        Map<String, TieInCandidate> unique = new LinkedHashMap<>();
+        if (dataset.getHeatChambers() != null) {
+            for (HeatChamberObject chamber : dataset.getHeatChambers()) {
+                if (chamber.getGeometry() != null
+                        && envelope.contains(chamber.getGeometry().getCoordinate())) {
+                    put(unique, chamberCandidate(chamber));
+                }
+            }
+        }
+        @SuppressWarnings("unchecked")
+        List<NetworkSegment> nearby = index.segments.query(envelope);
+        // Детерминизм: порядок сегментов как в наборе (STRtree возвращает иначе).
+        nearby.sort(java.util.Comparator.comparingInt(
+                segment -> index.order.getOrDefault(segment, Integer.MAX_VALUE)));
+        double step = sampleStepM();
+        for (NetworkSegment segment : nearby) {
+            LengthIndexedLine indexed = new LengthIndexedLine(segment.getGeometry());
+            double length = segment.getGeometry().getLength();
+            for (double position = 0.0; position <= length; position += step) {
+                put(unique, candidate(segment, indexed.extractPoint(position)));
+            }
+            if (length > 0) {
+                put(unique, candidate(segment, indexed.extractPoint(length)));
+            }
+        }
+        for (Coordinate anchor : anchors) {
+            if (anchor == null) {
+                continue;
+            }
+            for (NetworkSegment segment : nearby) {
+                Coordinate projection = nearestPoint(segment.getGeometry(), anchor);
+                if (projection != null) {
+                    put(unique, candidate(segment, projection));
+                }
+            }
+        }
+        List<TieInCandidate> all = excludeNearChambers(new ArrayList<>(unique.values()),
+                index.chamberCoordinates);
+        List<TieInCandidate> result = new ArrayList<>(all.size());
+        for (TieInCandidate candidate : all) {
+            if (envelope.contains(candidate.getCoordinate())) {
+                result.add(candidate);
+            }
+        }
+        return result;
     }
 
     public List<TieInCandidate> candidates(NetworkDataset dataset) {

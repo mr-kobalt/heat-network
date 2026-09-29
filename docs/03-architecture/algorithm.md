@@ -524,6 +524,11 @@ no-op при выключенном флаге, результат и baseline �
   `OksApproachResolver` (id-индекс точек, STRtree по `oks`, кэш `prohibited` по
   Ду), `TieInCandidateProvider.excludeNearChambers` (STRtree по камерам).
   `S` без изменений.
+- E8-15d2a (2026-09-29): локальная генерация врезок для кластера —
+  `TieInCandidateProvider.TieInIndex` (STRtree сегментов + камеры) и
+  `localCandidates(anchors, bbox)`: сэмплы/проекции только по сегментам в bbox
+  с детерминированным порядком. В кластерном режиме сеть не сэмплируется
+  целиком (память/время ∝ кластеру); результат эквивалентен глобальному ∩ bbox.
 
 ## 12. Расширение 2.5D (дополнительно, ТП 5)
 
@@ -614,3 +619,4 @@ no-op при выключенном флаге, результат и baseline �
 | 2026-09-29 | E8-15a/b: генератор крупного набора Москвы из OSM (`generate-moscow-dataset.mjs`, тайловый Overpass, `--synth-only`) + харнесс `LoadProfileSlowTest`; разреженные растры (`SparseCellValues`/`SparseCellSet` для `Kспец`/угла, `dnEstimate`), фронтальный BFS `reachableCells`, guardrail `GRID_IN_MEMORY_LARGE`. `S` без изменений (осн. 13.29925214746317, OSM 13.679614324110897); fast+slow зелёные | команда |
 | 2026-09-29 | E8-15c / ADR-0068: пространственная декомпозиция точек (union-find, локальные сетки, учёт занятости камер, namespace id, слияние по проходу, глобальный ремонт). По умолчанию **выключено** (`forest-decomposition=false`); baseline `S` без изменений, в кластерном режиме возможна смена канонического выхода (follow-up) | команда |
 | 2026-09-29 | E8-15d1: dataset-индексы вместо O(n²) — STRtree в `NetworkGraphBuilder` (камеры), `ObstacleIndexBuilder.oksDiameterMm` (точки), `OksApproachResolver` (id/oks/prohibited), `TieInCandidateProvider.excludeNearChambers`. `S` без изменений (осн. 13.29925214746317, OSM 13.679614324110897) | команда |
+| 2026-09-29 | E8-15d2a: локальные врезки кластера (`TieInIndex` + `localCandidates`), сэмпл сети не целиком; эквивалентно глобальному ∩ bbox, единичный режим без изменений | команда |

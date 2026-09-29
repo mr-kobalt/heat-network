@@ -238,23 +238,26 @@ public class GridForestPlanner {
         if (terminals.isEmpty()) {
             return List.of(result(List.of(), baseUnconnected));
         }
-        List<TieInCandidate> allTies = rawTieCandidates(dataset, terminals, graph);
-        if (allTies.isEmpty()) {
-            warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
-            baseUnconnected.addAll(terminalIds);
-            return List.of(result(List.of(), baseUnconnected));
-        }
         // E8-15c: пространственная декомпозиция — каждый кластер точек решается
         // на своей локальной сетке (рабочий набор ограничен кластером). По
         // умолчанию выключено (см. {@code forest-decomposition}).
         List<List<Terminal>> clusters = appProperties.isForestDecomposition()
                 ? clusterTerminals(terminals) : List.of(terminals);
         if (clusters.size() <= 1) {
+            List<TieInCandidate> allTies = rawTieCandidates(dataset, terminals, graph);
+            if (allTies.isEmpty()) {
+                warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
+                baseUnconnected.addAll(terminalIds);
+                return List.of(result(List.of(), baseUnconnected));
+            }
             return withBaseUnconnected(planSingle(dataset, graph, obstacleIndex, specialZones,
-                    warnings, exits, trace, terminals, allTies, true, Map.of()), baseUnconnected);
+                    warnings, exits, trace, terminals, allTies, true, Map.of(), null),
+                    baseUnconnected);
         }
         log.info("Decomposition: terminals={} clusters={} radius={}m", terminals.size(),
                 clusters.size(), appProperties.getForestClusterRadiusM());
+        // E8-15d2a: врезки генерируются локально по bbox кластера (не по всей сети).
+        TieInCandidateProvider.TieInIndex tieIndex = candidateProvider.index(dataset);
         List<List<ForestPlanningResult>> plansByCluster = new ArrayList<>();
         TreeSet<Integer> globalPasses = new TreeSet<>();
         Map<String, Integer> chamberUsage = new HashMap<>();
@@ -262,7 +265,8 @@ public class GridForestPlanner {
         for (List<Terminal> cluster : clusters) {
             clusterIndex++;
             List<ForestPlanningResult> results = planSingle(dataset, graph, obstacleIndex,
-                    specialZones, warnings, exits, trace, cluster, allTies, false, chamberUsage);
+                    specialZones, warnings, exits, trace, cluster, List.of(), false, chamberUsage,
+                    tieIndex);
             plansByCluster.add(results);
             for (ForestPlanningResult planning : results) {
                 globalPasses.add(planning.getPassNumber());
@@ -448,7 +452,8 @@ public class GridForestPlanner {
                                                   StageTrace trace, List<Terminal> terminals,
                                                   List<TieInCandidate> ties,
                                                   boolean includeInputBounds,
-                                                  Map<String, Integer> chamberUsage) {
+                                                  Map<String, Integer> chamberUsage,
+                                                  TieInCandidateProvider.TieInIndex tieIndex) {
         Set<String> terminalIds = new HashSet<>();
         for (Terminal terminal : terminals) {
             terminalIds.add(terminal.pointId);
@@ -457,31 +462,30 @@ public class GridForestPlanner {
         if (terminals.isEmpty()) {
             return List.of(result(List.of(), baseUnconnected));
         }
-        if (ties.isEmpty()) {
-            warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
-            baseUnconnected.addAll(terminalIds);
-            return List.of(result(List.of(), baseUnconnected));
-        }
 
         long start = System.nanoTime();
         double cell = appProperties.getForestGridCellM() > 0
                 ? appProperties.getForestGridCellM() : 2.0;
         Envelope bounds;
-        List<TieInCandidate> localTies = ties;
+        List<TieInCandidate> localTies;
         if (includeInputBounds) {
+            if (ties.isEmpty()) {
+                warnings.add("FOREST_NO_TIE_IN_CANDIDATES: не найдено кандидатов врезки");
+                baseUnconnected.addAll(terminalIds);
+                return List.of(result(List.of(), baseUnconnected));
+            }
             bounds = bounds(dataset, terminals, ties, cell);
+            localTies = ties;
         } else {
             bounds = new Envelope();
+            List<Coordinate> anchors = new ArrayList<>(terminals.size());
             for (Terminal terminal : terminals) {
                 bounds.expandToInclude(terminal.target);
+                anchors.add(terminal.target);
             }
             bounds.expandBy(Math.max(appProperties.getForestClusterMarginM(), cell * 2.0));
-            localTies = new ArrayList<>();
-            for (TieInCandidate tie : ties) {
-                if (bounds.contains(tie.getCoordinate())) {
-                    localTies.add(tie);
-                }
-            }
+            // E8-15d2a: врезки кластера — только по сегментам/камерам в его bbox.
+            localTies = candidateProvider.localCandidates(dataset, anchors, bounds, tieIndex);
             if (localTies.isEmpty()) {
                 baseUnconnected.addAll(terminalIds);
                 return List.of(result(List.of(), baseUnconnected));
