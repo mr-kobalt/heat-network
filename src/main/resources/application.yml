@@ -133,6 +133,9 @@ heating:
     forest-chamber-optimization: ${HEATING_FOREST_CHAMBER_OPTIMIZATION:true}
     forest-chamber-search-radius-cells: ${HEATING_FOREST_CHAMBER_SEARCH_RADIUS_CELLS:3.0}
     forest-chamber-max-candidates: ${HEATING_FOREST_CHAMBER_MAX_CANDIDATES:25}
+    # E8-14: бюджеты дорогого обхода стыка камеры/корня (gridPath/visibilityPath).
+    forest-chamber-grid-expansions: ${HEATING_FOREST_CHAMBER_GRID_EXPANSIONS:4000}
+    forest-chamber-visibility-max-nodes: ${HEATING_FOREST_CHAMBER_VISIBILITY_MAX_NODES:100}
     forest-chamber-passes: ${HEATING_FOREST_CHAMBER_PASSES:1}
     # E50-05: объединение близких новых камер (Steiner-vertex merge).
     forest-chamber-merge: ${HEATING_FOREST_CHAMBER_MERGE:true}

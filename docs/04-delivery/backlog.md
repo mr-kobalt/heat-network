@@ -140,9 +140,15 @@
   (без stream на горячем пути), ленивое построение выходов-кандидатов
   (`candidatesFor`) в `GridForestPlanner.plan`. OSM-доминанта теперь —
   `optimizeChambers` (~4.4 с/проход); вынести в отдельную задачу (E8-14)
-- [ ] E8-14 Оптимизация `optimizeChambers` (OSM ~4.4 с/проход): дорогой
-  `tryChamberMove` (visibility/gridPath) для кандидатов, чей прямой стык
-  заблокирован; кэш/локализация видимости, ограничение кандидатов
+- [x] E8-14 Оптимизация `optimizeChambers` (2026-09-29): профиль (агрегированная
+  диагностика `candidates/tryCalls/visCalls/gridCalls` в `optimizeChambers`)
+  выявил доминанту — `gridPath`-фолбэк корня и `visibilityPath` при заблокированных
+  стыках. Бюджеты вынесены в конфиг: `forest-chamber-grid-expansions` (40000 →
+  **4000**) и `forest-chamber-visibility-max-nodes` (200 → **100**);
+  `visibilityPath` параметризован бюджетом узлов. OSM `optimizeChambers`
+  ~4.5 → ~1.5 с, `Grid total` ~19 → ~13.7 с; осн. ~6.3 → ~5.7 с. `S`, длина и
+  стоимость **без изменений** (осн. 13.29925214746317 / OSM 13.679614324110897).
+  A/B: 2000/60 меняет `S` (+0.05) — отклонено
 - [ ] E8-15 Масштаб 3 ГБ (NFR-08): сетка строится по общему bbox всего входа
   (`forest-grid-include-input-bounds`), а `zoneRasters`/`reachable` — плотные
   `double[]`/`long[]` на всю область (8 ГБ при 1e9 клеток) независимо от

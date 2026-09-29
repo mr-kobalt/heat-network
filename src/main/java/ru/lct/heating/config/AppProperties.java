@@ -169,6 +169,17 @@ public class AppProperties {
     private double forestChamberSearchRadiusCells = 3.0;
     /** ADR-0051: предел числа кандидатов позиции на камеру. */
     private int forestChamberMaxCandidates = 25;
+    /**
+     * E8-14: бюджет расширений {@code gridPath} при обходе заблокированного
+     * стыка камеры/корня. Меньше — быстрее; слишком малое значение может не
+     * найти дальний обход.
+     */
+    private int forestChamberGridExpansions = 4000;
+    /**
+     * E8-14: бюджет вершин visibility-графа при обходе стыка камеры
+     * (отличается от {@code forest-exit-visibility-max-nodes}).
+     */
+    private int forestChamberVisibilityMaxNodes = 100;
     /** ADR-0051: число проходов оптимизации камер. */
     private int forestChamberPasses = 1;
     /**

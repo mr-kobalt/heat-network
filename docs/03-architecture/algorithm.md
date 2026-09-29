@@ -487,6 +487,13 @@ no-op при выключенном флаге, результат и baseline �
   таблица `newCostPerM` (без stream на горячем пути); выходы-кандидаты точки
   (`candidatesFor`) в `plan` строятся лениво. OSM-доминанта теперь —
   `optimizeChambers` (задача E8-14).
+- E8-14 (2026-09-29): перемещение камер (`optimizeChambers`) — дорогой обход
+  заблокированного стыка (`visibilityPath` — граф до `forest-chamber-visibility-
+  max-nodes`; `gridPath`-фолбэк корня — до `forest-chamber-grid-expansions`).
+  Снижены бюджеты (200→100 узлов, 40000→4000 расширений) с сохранением `S`;
+  диагностика `Chamber optimization: ... visCalls/visMs/gridCalls/gridMs`.
+  OSM `optimizeChambers` ~4.5 → ~1.5 с; A/B 2000/60 даёт рост `S` +0.05 и
+  отклонён.
 
 ## 12. Расширение 2.5D (дополнительно, ТП 5)
 
@@ -572,3 +579,4 @@ no-op при выключенном флаге, результат и baseline �
 | 2026-09-28 | ADR-0066/E50-08: регуляризация выхода терминала (`forest-exit-regularization`, дефолт on): visibility-спрямление подхода к `target` (`straightenExitApproaches`), привязка некорневой новой камеры к `target` (`snapExitChambers`, `forest-exit-snap-m=1.0`), dedupe микровершин, snap T-точек relink. Осн. `S` 13.4204 → 13.4077, длина 1912.29 → 1910.03; OSM `S` 13.7609 → 13.7580, поворот у точки 4 устранён (turns 1 → 0, warnings 3 → 2); baseline пересчитан | команда |
 | 2026-09-28 | ADR-0067: локальные visibility-коннекторы камер/корней (`tryChamberMove`), терминал-осведомлённые корневые стубы, финальное спрямление после переносов, ремонт «шипа» (`k=0`), отбраковка невалидных вариантов (`treesGeometryValid`, `VARIANT_GEOMETRY_FILTERED`). Осн. `S` 13.4077 → 13.2993 (длина 1910.03 → 1890.06); OSM 13.7580 → 13.6796 (длина 1984.70 → 1970.86), дефектный вариант отфильтрован; точка 17 — ствол 96.16 м (ребро 106.7 м); baseline пересчитан | команда |
 | 2026-09-29 | E8-13: профиль проходов (`GridReport.Pass`, `PerformanceProfileSlowTest`); дешёвый необходимый предикат улучшения в `mergeChambers` до `tryChamberMove`/ремонта, примитивный `DiameterCatalog` (без stream), ленивые выходы-кандидаты. Осн. `Grid total` 16.6 → 6.3 с (pass 2 merge 10.9 с → 1 мс), OSM 20.4 → 19.3 с; `S` 13.29925214746317, длина 1890.0622718210566, стоимость 272466619 — без изменений; OSM-доминанта `optimizeChambers` → E8-14 | команда |
+| 2026-09-29 | E8-14: бюджеты обхода стыка камеры/корня — `forest-chamber-grid-expansions` 40000→4000 и `forest-chamber-visibility-max-nodes` 200→100, `visibilityPath` параметризован; агрегированная диагностика `optimizeChambers`. OSM `optimizeChambers` ~4.5→~1.5 с, `Grid total` ~19→~13.7 с, осн. ~6.3→~5.7 с; `S` без изменений (осн. 13.29925214746317, OSM 13.679614324110897); A/B 2000/60 отклонён (+0.05 S) | команда |

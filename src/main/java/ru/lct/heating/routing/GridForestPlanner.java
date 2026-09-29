@@ -2505,17 +2505,37 @@ public class GridForestPlanner {
         long start = System.nanoTime();
         int count = trees.size();
         ForestTree[] result = new ForestTree[count];
-        java.util.stream.IntStream.range(0, count).parallel().forEach(index -> result[index] =
-                optimizeChamberTree(trees.get(index), dataset, pass, obstacleIndex, specialZones,
-                        ownObstacles));
-        log.info("Chamber optimization: trees={} time={}ms", count, elapsedMs(start));
+        MoveStats[] statsByTree = new MoveStats[count];
+        java.util.stream.IntStream.range(0, count).parallel().forEach(index -> {
+            MoveStats stats = new MoveStats();
+            statsByTree[index] = stats;
+            result[index] = optimizeChamberTree(trees.get(index), dataset, pass, obstacleIndex,
+                    specialZones, ownObstacles, stats);
+        });
+        MoveStats total = new MoveStats();
+        for (MoveStats stats : statsByTree) {
+            if (stats == null) {
+                continue;
+            }
+            total.candidates += stats.candidates;
+            total.tryCalls += stats.tryCalls;
+            total.visCalls += stats.visCalls;
+            total.visNanos += stats.visNanos;
+            total.gridCalls += stats.gridCalls;
+            total.gridNanos += stats.gridNanos;
+        }
+        log.info("Chamber optimization: trees={} time={}ms candidates={} tryCalls={} "
+                        + "visCalls={} visMs={} gridCalls={} gridMs={}", count, elapsedMs(start),
+                total.candidates, total.tryCalls, total.visCalls, total.visNanos / 1_000_000L,
+                total.gridCalls, total.gridNanos / 1_000_000L);
         return new ArrayList<>(Arrays.asList(result));
     }
 
     private ForestTree optimizeChamberTree(ForestTree tree, NetworkDataset dataset, ObstacleMask pass,
                                            ObstacleIndex obstacleIndex,
                                            SpecialZoneIndex specialZones,
-                                           Map<String, Set<PreparedGeometry>> ownObstacles) {
+                                           Map<String, Set<PreparedGeometry>> ownObstacles,
+                                           MoveStats stats) {
         Map<String, ForestNode> nodes = new LinkedHashMap<>(tree.getNodes());
         List<ForestEdge> edges = new ArrayList<>(tree.getEdges());
         String rootId = tree.getTieInNodeId();
@@ -2531,7 +2551,7 @@ public class GridForestPlanner {
             boolean changed = false;
             for (String nodeId : movable) {
                 if (relocateChamber(nodeId, nodes, edges, rootId, dataset, pass, obstacleIndex,
-                        specialZones, ownObstacles)) {
+                        specialZones, ownObstacles, stats)) {
                     changed = true;
                 }
             }
@@ -2546,9 +2566,10 @@ public class GridForestPlanner {
                                     List<ForestEdge> edges, String rootId, NetworkDataset dataset,
                                     ObstacleMask pass, ObstacleIndex obstacleIndex,
                                     SpecialZoneIndex specialZones,
-                                    Map<String, Set<PreparedGeometry>> ownObstacles) {
+                                    Map<String, Set<PreparedGeometry>> ownObstacles,
+                                    MoveStats stats) {
         return relocateChamberWith(nodeId, nodes, edges, rootId, dataset, pass, obstacleIndex,
-                specialZones, ownObstacles, null, false);
+                specialZones, ownObstacles, null, false, stats);
     }
 
     /**
@@ -2562,7 +2583,8 @@ public class GridForestPlanner {
                                         ObstacleIndex obstacleIndex,
                                         SpecialZoneIndex specialZones,
                                         Map<String, Set<PreparedGeometry>> ownObstacles,
-                                        Coordinate forced, boolean terminalAware) {
+                                        Coordinate forced, boolean terminalAware,
+                                        MoveStats stats) {
         ForestNode node = nodes.get(nodeId);
         if (node == null) {
             return false;
@@ -2605,6 +2627,9 @@ public class GridForestPlanner {
         long bestCheap = 0L;
         Coordinate bestPosition = null;
         Map<Integer, ForestEdge> bestReplaced = null;
+        if (stats != null) {
+            stats.candidates += candidates.size();
+        }
         for (Coordinate candidate : candidates) {
             // Дешёвый префильтр: даже без обхода новый ствол не может быть
             // короче суммы прямых отрезков «кандидат → сосед».
@@ -2616,7 +2641,7 @@ public class GridForestPlanner {
                 continue;
             }
             ChamberMove move = tryChamberMove(candidate, stubs, edges, incidentSet, obstacleIndex,
-                    specialZones, pass, isRoot, null, false);
+                    specialZones, pass, isRoot, null, false, stats);
             if (move == null || move.stubSum >= currentStubSum - EPS) {
                 continue;
             }
@@ -2697,7 +2722,7 @@ public class GridForestPlanner {
                     Coordinate target = nearbyTerminalTarget(nodeId, nodes, edges, terminalsById,
                             snap);
                     if (target != null && relocateChamberWith(nodeId, nodes, edges, rootId, null,
-                            null, obstacleIndex, specialZones, ownObstacles, target, true)) {
+                            null, obstacleIndex, specialZones, ownObstacles, target, true, null)) {
                         changed = true;
                     }
                 }
@@ -2943,7 +2968,7 @@ public class GridForestPlanner {
             // Ослабленные повороты без grid-фолбэка: кандидат либо проходит
             // контракт (валидация/ремонт ниже), либо отвергается.
             ChamberMove move = tryChamberMove(candidate, stubs, edges, incident, obstacleIndex,
-                    specialZones, pass, false, rename, true);
+                    specialZones, pass, false, rename, true, null);
             if (move == null) {
                 diag[0]++;
                 continue;
@@ -3317,11 +3342,14 @@ public class GridForestPlanner {
                                        Set<Integer> incidentSet, ObstacleIndex obstacleIndex,
                                        SpecialZoneIndex specialZones, ObstacleMask pass,
                                        boolean allowFallback, Map<String, String> rename,
-                                       boolean relaxedTurns) {
+                                       boolean relaxedTurns, MoveStats stats) {
         List<Coordinate> firstSteps = new ArrayList<>();
         List<List<Coordinate>> connectors = new ArrayList<>();
         List<Double> stubLens = new ArrayList<>();
         double stubSum = 0.0;
+        if (stats != null) {
+            stats.tryCalls++;
+        }
         for (Stub stub : stubs) {
             // Прямой отрезок «кандидат → соседняя вершина» (как в refine/string
             // pulling); если запрет — при `allowFallback` (корень) пробуем
@@ -3339,16 +3367,28 @@ public class GridForestPlanner {
             } else {
                 // ADR-0067: локальный visibility-коннектор (касание границы
                 // допустимо) — прошивает узкие полосы, недоступные gridPath.
+                long visStart = stats != null ? System.nanoTime() : 0L;
                 List<Coordinate> vis = appProperties.isForestExitRegularization()
                         ? visibilityPath(candidate, null, stub.endpoint, stub.nextAfter,
-                                obstacleIndex, candidate.distance(stub.endpoint))
+                                obstacleIndex, candidate.distance(stub.endpoint),
+                                appProperties.getForestChamberVisibilityMaxNodes())
                         : null;
+                if (stats != null) {
+                    stats.visCalls++;
+                    stats.visNanos += System.nanoTime() - visStart;
+                }
                 if (vis != null && vis.size() >= 2
                         && (specialZones == null || polylineSpecialOk(vis, specialZones))) {
                     connector = vis;
                 } else if (allowFallback) {
+                    long gridStart = stats != null ? System.nanoTime() : 0L;
                     List<Coordinate> path = gridPath(pass, obstacleIndex, candidate, null,
-                            stub.endpoint, stub.nextAfter, stub.ignored, 40000);
+                            stub.endpoint, stub.nextAfter, stub.ignored,
+                            appProperties.getForestChamberGridExpansions());
+                    if (stats != null) {
+                        stats.gridCalls++;
+                        stats.gridNanos += System.nanoTime() - gridStart;
+                    }
                     if (path == null || path.size() < 2
                             || (specialZones != null && !polylineSpecialOk(path, specialZones))) {
                         return null;
@@ -3454,6 +3494,16 @@ public class GridForestPlanner {
         private List<Double> stubLens;
         /** Точка, в которую фактически перенесена камера (с учётом snap). */
         private Coordinate position;
+    }
+
+    /** E8-14: диагностика перемещения камер (per-tree, не потокобезопасна). */
+    private static final class MoveStats {
+        private long candidates;
+        private long tryCalls;
+        private long visCalls;
+        private long visNanos;
+        private long gridCalls;
+        private long gridNanos;
     }
 
     private boolean rootConnectorTurnsOk(Coordinate q, ForestNode branch, ForestTree tree) {
@@ -4141,6 +4191,18 @@ public class GridForestPlanner {
     private List<Coordinate> visibilityPath(Coordinate start, Coordinate startPrevious,
                                             Coordinate target, Coordinate point,
                                             ObstacleIndex obstacleIndex, double straight) {
+        return visibilityPath(start, startPrevious, target, point, obstacleIndex, straight,
+                appProperties.getForestExitVisibilityMaxNodes());
+    }
+
+    /**
+     * @param maxNodesBudget бюджет вершин visibility-графа (E8-14: для
+     *                      перемещения камер — свой предел).
+     */
+    private List<Coordinate> visibilityPath(Coordinate start, Coordinate startPrevious,
+                                            Coordinate target, Coordinate point,
+                                            ObstacleIndex obstacleIndex, double straight,
+                                            int maxNodesBudget) {
         double expand = Math.max(25.0, 0.2 * straight);
         Envelope area = new Envelope(start, target);
         area.expandBy(expand);
@@ -4154,7 +4216,7 @@ public class GridForestPlanner {
         Set<Long> seen = new HashSet<>();
         seen.add(visibilityKey(start));
         seen.add(visibilityKey(target));
-        int maxNodes = Math.max(8, appProperties.getForestExitVisibilityMaxNodes());
+        int maxNodes = Math.max(8, maxNodesBudget);
         for (Geometry obstacle : obstacles) {
             for (Coordinate vertex : obstacle.getCoordinates()) {
                 if (!seen.add(visibilityKey(vertex))) {
