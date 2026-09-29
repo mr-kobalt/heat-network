@@ -87,6 +87,8 @@ make run
 | `make verify` | Полная проверка Maven |
 | `make run` | Локальный запуск сервиса |
 | `make fe-install` / `fe-dev` / `fe-build` / `fe-test` | Визуализатор (опционально) |
+| `make fe-basemap` / `fe-basemap-style` / `fe-assets` | Офлайн-подложка карты (PMTiles, глифы, спрайты, стили) |
+| `make licenses` | Отчёт о лицензиях зависимостей (`target/licenses/`) |
 | `make db-up` / `db-down` / `db-logs` | Контейнер БД |
 | `make up` / `fe-up` / `stop` / `down` / `ps` | Docker-стек (app+db, опц. frontend) |
 | `make compose-config` | Проверка `docker-compose.yml` |
@@ -116,6 +118,11 @@ make down          # остановить и удалить стек
 
 Визуализатор: http://localhost:8081, сервис: http://localhost:8080.
 
+Офлайн-подложка карты готовится скриптами: `make fe-basemap`
+(полный экстракт Москвы и области, `BBOX`/`MAXZOOM`/`PROTOMAPS_DATE`) или
+`make fe-basemap-placeholder` (быстрый z≤6), стили — `make fe-basemap-style`.
+Подробнее — [frontend/public/basemap/README.md](frontend/public/basemap/README.md).
+
 Визуализатор открывает GeoJSON результата напрямую (без backend) и запускает
 расчёт через API, в том числе дополнительный режим глубины
 `POST /api/v1/datasets/{id}/runs?mode=depth` (ADR-0073). При расчёте через
@@ -131,7 +138,7 @@ make down          # остановить и удалить стек
 - [Правила расчёта](docs/02-domain/calculation-rules.md), [модель данных](docs/02-domain/data-model.md).
 - [Архитектура](docs/03-architecture/overview.md), [алгоритм](docs/03-architecture/algorithm.md), [ADR](docs/03-architecture/adr/README.md).
 - [Дорожная карта](docs/04-delivery/roadmap.md), [backlog](docs/04-delivery/backlog.md).
-- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [структура презентации](docs/06-submission/presentation-outline.md).
+- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [структура презентации](docs/06-submission/presentation-outline.md), [скриншоты](docs/06-submission/screenshots/README.md), [лицензии](docs/06-submission/licenses.md) / [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
 
 ## Стек
 
@@ -151,6 +158,7 @@ source/                         # ТЗ, ТП v2, разъяснения, дат�
 scripts/                        # генераторы наборов и утилиты
 Makefile                        # единый интерфейс команд
 mvnw / .mvn/                    # Maven Wrapper
+THIRD_PARTY_NOTICES.md          # лицензии сторонних компонентов
 devenv.nix                      # среда разработки (опционально)
 Dockerfile / docker-compose.yml # контейнеризация
 .github/workflows/ci.yml        # CI: backend + frontend + compose
@@ -182,3 +190,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-29 | Визуализатор: выбор режима `2D/Глубина` (ADR-0073), запоминание в localStorage | команда |
 | 2026-09-29 | M5: Makefile (единый интерфейс), Maven Wrapper, CI, devenv-обёртки; актуализирован README; регламенты конкурса и пакет сдачи | команда |
 | 2026-09-29 | API: описания OpenAPI/Swagger (ADR-0075), build-info в `/api/v1/info`, тест контракта | команда |
+| 2026-09-29 | M5: make-цели подложки (`fe-basemap*`, `fe-assets`) и `licenses`; скриншоты в `docs/06-submission/`; THIRD_PARTY_NOTICES | команда |

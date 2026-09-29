@@ -53,6 +53,22 @@ export function indexDocText(key: string): string | null {
   return eagerByKey.get(key) ?? null;
 }
 
+/** Изображения документации (скриншоты и т.п.) — Vite отдаёт их URL. */
+const assetModules = import.meta.glob(
+  '../../../docs/**/*.{png,jpg,jpeg,svg,webp,gif}',
+  { query: '?url', import: 'default', eager: true },
+) as Record<string, string>;
+
+const assetByKey = new Map<string, string>();
+for (const [globKey, url] of Object.entries(assetModules)) {
+  assetByKey.set(normalizeDocKey(globKey), url);
+}
+
+/** URL изображения из `docs/` по пути внутри `docs/` (или {@code null}). */
+export function resolveDocAsset(key: string): string | null {
+  return assetByKey.get(key) ?? null;
+}
+
 /** Заголовок документа — первая строка вида `# ...`. */
 export function firstHeading(markdown: string, fallback: string): string {
   const match = markdown.match(/^#\s+(.+)$/m);

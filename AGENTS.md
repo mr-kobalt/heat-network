@@ -144,3 +144,4 @@ pnpm --dir frontend basemap:prepare # локальная карта Москвы
 | 2026-09-29 | M5: единый `Makefile` + `./mvnw` + CI; devenv-скрипты делегируют в `make`; в devenv добавлены `poppler-utils`/`pandoc`/`python3`/`make`; README/команды обновлены | команда |
 | 2026-09-29 | ADR-0074: удалены мёртвые подсистемы (`mst`, `forest-decomposition`, `oks_future`/`oks_existing`), неиспользуемые методы/поля, лишние импорты; SnakeYAML 1.29 → 1.30 (фикс парсинга yml); комментарии ключевых методов | команда |
 | 2026-09-29 | ADR-0075: описания OpenAPI/Swagger (`@Tag`/`@Operation`/`@Schema`), единая модель ошибок, `build-info` в `/api/v1/info`, slow-тест контракта | команда |
+| 2026-09-29 | M5: make-цели `fe-basemap*`/`fe-assets`/`licenses`; скриншоты визуализатора и резолвер ассетов в документации; `docs/06-submission/licenses.md` и `THIRD_PARTY_NOTICES.md` | команда |

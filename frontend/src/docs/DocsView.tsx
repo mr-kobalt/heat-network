@@ -18,7 +18,7 @@ import {
 import { IconFileText, IconFolder, IconSearch } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { Mermaid, mermaidChart } from './Mermaid';
-import { INDEX_DOC, firstHeading, hasDoc, loadDoc } from './registry';
+import { INDEX_DOC, firstHeading, hasDoc, loadDoc, resolveDocAsset } from './registry';
 import { buildDocTree, resolveDocPath } from './nav';
 import type { DocTreeNode } from './nav';
 import { extractHeadings } from './toc';
@@ -365,6 +365,17 @@ export function DocsView({
                 rehypePlugins={[rehypeSlug]}
                 components={{
                   a: ({ href, children }) => renderLink(href, children),
+                  img: ({ src, alt }) => {
+                    const key = typeof src === 'string' ? resolveDocPath(current, src) : null;
+                    const url = key ? resolveDocAsset(key) : null;
+                    return (
+                      <img
+                        src={url ?? (typeof src === 'string' ? src : '')}
+                        alt={alt ?? ''}
+                        style={{ maxWidth: '100%', height: 'auto', borderRadius: 8 }}
+                      />
+                    );
+                  },
                   code: ({ className, children }) => {
                     const chart = mermaidChart(className, children);
                     if (chart !== null) {

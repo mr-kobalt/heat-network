@@ -55,6 +55,8 @@ flowchart LR
 - [Чек-лист сдачи](06-submission/checklist.md) — форма, сроки, критерии.
 - [Пояснительная записка](06-submission/explanatory-note.md) — для жюри.
 - [Структура презентации](06-submission/presentation-outline.md).
+- [Скриншоты визуализатора](06-submission/screenshots/README.md).
+- [Лицензии сторонних компонентов](06-submission/licenses.md).
 
 ## Исходные материалы (папка `source/`)
 
@@ -160,3 +162,4 @@ flowchart LR
 | 2026-09-29 | M5: раздел «Сдача» (`06-submission/`) и регламенты конкурса в карте; единый `Makefile`/`./mvnw`/CI; mermaid-диаграммы | команда |
 | 2026-09-29 | ADR-0074: удаление устаревших подсистем (`mst`, `forest-decomposition`, `oks_future`/`oks_existing`), мёртвого кода; SnakeYAML 1.29 → 1.30 | команда |
 | 2026-09-29 | ADR-0075: документация API (OpenAPI/Swagger) — аннотации, модель ошибок, build-info, тест контракта | команда |
+| 2026-09-29 | M5: скриншоты визуализатора, make-цели подложки (`fe-basemap*`) и `licenses`, лицензионный отчёт и `THIRD_PARTY_NOTICES` | команда |

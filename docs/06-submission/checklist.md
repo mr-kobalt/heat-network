@@ -64,6 +64,9 @@
 - [ ] Нет секретов и больших датасетов в истории коммитов.
 - [ ] Пакет сдачи: [чек-лист](checklist.md) · [пояснительная
       записка](explanatory-note.md) · [презентация](presentation-outline.md).
+- [ ] Скриншоты визуализатора приложены — [screenshots/](screenshots/README.md).
+- [ ] Лицензионная чистота подтверждена — [licenses.md](licenses.md),
+      [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
 ## 6. История изменений
 
