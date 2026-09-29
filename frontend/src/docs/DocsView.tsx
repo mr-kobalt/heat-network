@@ -17,6 +17,7 @@ import {
 } from '@mantine/core';
 import { IconFileText, IconFolder, IconSearch } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { Mermaid, mermaidChart } from './Mermaid';
 import { INDEX_DOC, firstHeading, hasDoc, loadDoc } from './registry';
 import { buildDocTree, resolveDocPath } from './nav';
 import type { DocTreeNode } from './nav';
@@ -364,6 +365,13 @@ export function DocsView({
                 rehypePlugins={[rehypeSlug]}
                 components={{
                   a: ({ href, children }) => renderLink(href, children),
+                  code: ({ className, children }) => {
+                    const chart = mermaidChart(className, children);
+                    if (chart !== null) {
+                      return <Mermaid chart={chart} />;
+                    }
+                    return <code className={className}>{children}</code>;
+                  },
                 }}
               >
                 {body}

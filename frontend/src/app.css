@@ -114,6 +114,39 @@
   overflow-x: auto;
 }
 
+/* ADR-0074: mermaid-диаграммы в документации (нейтрализуем обёртку <pre>). */
+.docs-content pre:has(> .mermaid),
+.docs-content pre:has(> .mermaid-loading),
+.docs-content pre:has(> .mermaid-error) {
+  background: transparent;
+  padding: 0;
+}
+
+.docs-content .mermaid {
+  display: flex;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid var(--mantine-color-gray-3);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.docs-content .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.docs-content .mermaid-loading,
+.docs-content .mermaid-error {
+  color: var(--mantine-color-gray-6);
+  font-size: 12.5px;
+  background: var(--mantine-color-gray-0);
+  border: 1px dashed var(--mantine-color-gray-4);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
 .docs-content pre code {
   background: transparent;
   color: inherit;
