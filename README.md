@@ -124,6 +124,7 @@ make run
 | `make fe-install` / `fe-dev` / `fe-build` / `fe-test` | Визуализатор (опционально) |
 | `make fe-basemap` / `fe-basemap-style` / `fe-assets` | Офлайн-подложка карты (PMTiles, глифы, спрайты, стили) |
 | `make licenses` | Отчёт о лицензиях зависимостей (`target/licenses/`) |
+| `make presentation` | Собрать презентацию (pptx) из `docs/06-submission/presentation.md` |
 | `make db-up` / `db-down` / `db-logs` | Контейнер БД |
 | `make up` / `fe-up` / `stop` / `down` / `ps` | Docker-стек (app+db, опц. frontend) |
 | `make compose-config` | Проверка `docker-compose.yml` |
@@ -214,7 +215,7 @@ make down          # остановить и удалить стек
 - [Правила расчёта](docs/02-domain/calculation-rules.md), [модель данных](docs/02-domain/data-model.md).
 - [Архитектура](docs/03-architecture/overview.md), [алгоритм](docs/03-architecture/algorithm.md), [ADR](docs/03-architecture/adr/README.md).
 - [Дорожная карта](docs/04-delivery/roadmap.md), [backlog](docs/04-delivery/backlog.md).
-- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [структура презентации](docs/06-submission/presentation-outline.md), [скриншоты](docs/06-submission/screenshots/README.md), [лицензии](docs/06-submission/licenses.md) / [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
+- Пакет сдачи: [чек-лист](docs/06-submission/checklist.md), [пояснительная записка](docs/06-submission/explanatory-note.md), [презентация](docs/06-submission/presentation.md) (`make presentation`), [скриншоты](docs/06-submission/screenshots/README.md), [лицензии](docs/06-submission/licenses.md) / [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
 
 ## Стек
 
@@ -268,3 +269,4 @@ Dockerfile / docker-compose.yml # контейнеризация
 | 2026-09-29 | API: описания OpenAPI/Swagger (ADR-0075), build-info в `/api/v1/info`, тест контракта | команда |
 | 2026-09-29 | M5: make-цели подложки (`fe-basemap*`, `fe-assets`) и `licenses`; скриншоты в `docs/06-submission/`; THIRD_PARTY_NOTICES | команда |
 | 2026-09-29 | README: тезисное описание алгоритма (mermaid + ссылки), пример через API (curl), скриншот визуализатора | команда |
+| 2026-09-29 | Презентация: источник `presentation.md` (расширенный технический дек), сборка `make presentation` (pandoc + тема организатора) | команда |

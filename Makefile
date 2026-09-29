@@ -17,6 +17,8 @@ SHELL := /usr/bin/env bash
 
 MVN       ?= ./mvnw
 PNPM      ?= pnpm
+PANDOC    ?= pandoc
+PYTHON    ?= python3
 FRONTEND  := frontend
 HEALTH    := http://localhost:8080/actuator/health
 
@@ -153,6 +155,21 @@ compose-config: ## Проверить валидность docker-compose
 
 .PHONY: deploy
 deploy: fe-up ## Деплой стека на сервере (app + db + визуализатор)
+
+##@ Презентация
+
+.PHONY: presentation
+presentation: ## Собрать презентацию (pptx) из docs/06-submission/presentation.md
+	@mkdir -p target/presentation
+	$(PANDOC) --print-default-data-file reference.pptx > target/presentation/reference-default.pptx
+	$(PYTHON) scripts/build-presentation-reference.py \
+		target/presentation/reference-default.pptx target/presentation/reference.pptx
+	$(PANDOC) docs/06-submission/presentation.md \
+		--from markdown --to pptx --slide-level=1 \
+		--resource-path=docs/06-submission \
+		--reference-doc=target/presentation/reference.pptx \
+		--output target/presentation/sudoers-lct2026.pptx
+	@echo "→ target/presentation/sudoers-lct2026.pptx"
 
 ##@ Лицензии
 
